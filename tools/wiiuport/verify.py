@@ -213,8 +213,12 @@ GATES = (
     gate_python_format,
     gate_python_tests,
     gate_cxx_format,
-    gate_cxx_policy,
+    # Tests first: configuring them writes the compile database that lets the
+    # ownership gate parse each translation unit with the flags the compiler
+    # actually used. Reversed, the gate falls back to its baseline flags and a
+    # warm developer machine passes on a database CI does not have yet.
     gate_cxx_tests,
+    gate_cxx_policy,
     gate_structure,
 )
 
