@@ -47,4 +47,4 @@ def test_a_missing_formatter_refuses_instead_of_crashing(
     monkeypatch.setattr(shutil, "which", lambda _name: None)
     passed, detail = check_formatting([FIXTURES / "formatted.cpp"], FIXTURES)
     assert not passed
-    assert "not on PATH" in detail and "dnf install" in detail
+    assert "clang-format" in detail and "sudo dnf install clang-tools-extra" in detail

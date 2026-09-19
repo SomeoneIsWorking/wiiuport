@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   gates:
-    name: gates (ruff, pytest, clang-format, structure)
+    name: gates (ruff, pytest, clang-format, c++ policy and tests, structure)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Superseding a 20-second gate run is free, so the newest push wins.
@@ -33,10 +33,15 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install clang-format
+      # clang is needed twice over: it compiles the first-party tests, and
+      # the ownership gate parses with the builtin headers it reports. Without
+      # it that gate refuses rather than passing, which is the intended
+      # behaviour but not a useful CI result.
+      - name: Install the toolchain the C++ gates need
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y clang-format
+          sudo apt-get install --no-install-recommends -y \
+            clang clang-format cmake ninja-build
 
       - name: Run every gate
         run: uv run --frozen --group dev python tools/verify.py

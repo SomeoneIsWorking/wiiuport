@@ -6,13 +6,13 @@ a gate that silently examined an empty set cannot look like a gate that passed.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from .cxxpolicy import CxxPolicyUnavailable, check_cxx_policy
 from .cxxtests import CxxTestsUnavailable, build_and_run
+from .hostdeps import MissingHostPackages, Requirement, check
 from .paths import Layout
 from .structure import FIRST_PARTY_CXX_ROOTS, check_source_sizes
 
@@ -109,11 +109,11 @@ def check_formatting(sources: list[Path], cwd: Path) -> tuple[bool, str]:
     bare subprocess call raised FileNotFoundError, which is a crash, not a
     check telling you what to install.
     """
-    if shutil.which("clang-format") is None:
-        return False, (
-            "clang-format is not on PATH, so formatting was never checked. "
-            "Install it: sudo dnf install clang-tools-extra"
-        )
+    formatter = Requirement("clang-format", ("clang-tools-extra",), executables=("clang-format",))
+    try:
+        check((formatter,))
+    except MissingHostPackages as missing:
+        return False, f"formatting was never checked.\n{missing}"
     result = subprocess.run(
         ["clang-format", "--dry-run", "--Werror", *[str(s) for s in sources]],
         cwd=cwd,
