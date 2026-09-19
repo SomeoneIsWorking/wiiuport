@@ -91,6 +91,11 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
     ),
     Requirement("GTK 3", ("gtk3-devel",), files=("/usr/include/gtk-3.0/gtk/gtk.h",)),
     Requirement("glm", ("glm-devel",), files=("/usr/include/glm/glm.hpp",)),
+    # cairo is the fourth of Cemu's empty Linux overlay ports (with gtk3, glm and
+    # libpng), so vcpkg deliberately takes it from the distribution. It arrives as a
+    # GTK 3 dependency on both Fedora and Debian, which is exactly why an undeclared
+    # requirement like this stays invisible until something stops pulling it in.
+    Requirement("cairo", ("cairo-devel",), files=("/usr/include/cairo/cairo.h",)),
     Requirement("libsecret", ("libsecret-devel",), files=("/usr/include/libsecret-1/libsecret/secret.h",)),
     Requirement("libgcrypt", ("libgcrypt-devel",), executables=("libgcrypt-config",)),
     Requirement("libusb", ("libusb1-devel",), files=("/usr/include/libusb-1.0/libusb.h",)),
