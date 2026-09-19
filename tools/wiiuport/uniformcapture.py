@@ -24,11 +24,17 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-RECORD_MAGIC = 0x554E4946
-"""'UNIF'. Checked on every record so a desynchronised read refuses rather than
-returning plausible nonsense."""
+RECORD_MAGIC = 0x32494E55
+"""'UNI2'. Checked on every record so a desynchronised read refuses rather than
+returning plausible nonsense. The magic changed with the addition of uniform
+block source addresses, so a capture from the older runtime is refused by name
+instead of being misread against the current layout."""
 
-_HEADER = struct.Struct("<7I2Q")
+_HEADER = struct.Struct("<8I2Q")
+_SOURCE = struct.Struct("<2I")
+MAX_PLAUSIBLE_SOURCES = 64
+"""A record claiming more sources than the runtime's own per-draw cap means the
+stream has desynchronised, and reading on would allocate against garbage."""
 
 
 class CaptureUnreadable(RuntimeError):
@@ -47,6 +53,15 @@ class DrawRecord:
     count_uniform_register: int
     loc_remapped: int
     payload: bytes
+    sources: tuple[tuple[int, int], ...] = ()
+    """(uniform block id, guest physical address) for each block this draw
+    sourced. This is the engine's own storage for the object, and the only
+    identity available that survives a tick: draw order does not, because
+    objects enter and leave between frames."""
+
+    @property
+    def source_addresses(self) -> tuple[int, ...]:
+        return tuple(address for _, address in self.sources)
 
     @property
     def shader(self) -> tuple[int, int, int]:
@@ -86,13 +101,36 @@ def read_records(path: Path) -> Iterator[DrawRecord]:
                 f"{path} ends mid-header after {index} complete records; it is truncated."
             )
         fields = _HEADER.unpack_from(data, offset)
-        magic, frame, stage, size, loc_reg, count_reg, loc_remapped, base_hash, aux_hash = fields
+        (
+            magic,
+            frame,
+            stage,
+            size,
+            loc_reg,
+            count_reg,
+            loc_remapped,
+            source_count,
+            base_hash,
+            aux_hash,
+        ) = fields
         if magic != RECORD_MAGIC:
             raise CaptureUnreadable(
                 f"{path} record {index} has magic {magic:#x}, expected {RECORD_MAGIC:#x}; "
                 "the stream is desynchronised and later records cannot be trusted."
             )
         offset += _HEADER.size
+        if source_count > MAX_PLAUSIBLE_SOURCES:
+            raise CaptureUnreadable(
+                f"{path} record {index} claims {source_count} uniform block sources, beyond "
+                f"the {MAX_PLAUSIBLE_SOURCES} a draw can have; the stream is desynchronised."
+            )
+        source_bytes = source_count * _SOURCE.size
+        if offset + source_bytes > len(data):
+            raise CaptureUnreadable(f"{path} record {index} ends mid-source-list; it is truncated.")
+        sources = tuple(
+            _SOURCE.unpack_from(data, offset + i * _SOURCE.size) for i in range(source_count)
+        )
+        offset += source_bytes
         if offset + size > len(data):
             raise CaptureUnreadable(
                 f"{path} record {index} claims {size} payload bytes but only "
@@ -107,6 +145,7 @@ def read_records(path: Path) -> Iterator[DrawRecord]:
             count_uniform_register=_as_signed(count_reg),
             loc_remapped=_as_signed(loc_remapped),
             payload=data[offset : offset + size],
+            sources=sources,
         )
         offset += size
         index += 1
