@@ -19,6 +19,7 @@ class Layout:
     """Resolved locations inside one wiiuport checkout."""
 
     root: Path
+    build_type: str = "RelWithDebInfo"
 
     @property
     def cemu_source(self) -> Path:
@@ -34,7 +35,19 @@ class Layout:
 
     @property
     def cemu_binary(self) -> Path:
-        return self.cemu_build / "bin" / "Cemu_relwithdebinfo"
+        """Where the runtime executable actually lands.
+
+        Upstream's CMake puts it in the source tree's ``bin/`` rather than the
+        build tree, and that is deliberate on its part: the application
+        resolves its data directory as the executable's parent, and ``bin/``
+        holds the tracked ``resources/`` and ``gameProfiles/default/`` it reads
+        at startup. Relocating it would mean staging that data too, so the fork
+        is left alone here and the path is followed instead. Object files,
+        generated build files and the vcpkg tree all still live under
+        ``build/``, and upstream's own .gitignore covers ``bin/Cemu_*`` so a
+        built binary can never be committed to the submodule.
+        """
+        return self.cemu_source / "bin" / f"Cemu_{self.build_type.lower()}"
 
     @property
     def scratch(self) -> Path:
