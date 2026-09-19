@@ -51,6 +51,11 @@ struct SearchReport {
     size_t rejectedVaryingWithinFrame{0};
     size_t rejectedNeverChanging{0};
     size_t rejectedRotation{0};
+    // Counted over every candidate, not the listed subset, so a caller that
+    // caps the list still reads an honest total. These two together are what
+    // distinguishes a view from an object's transform, so the count of
+    // candidates meeting both is the number worth gating on.
+    size_t sharedAndMoving{0};
 };
 
 // Finds the title's view transform by watching what its values do, never from

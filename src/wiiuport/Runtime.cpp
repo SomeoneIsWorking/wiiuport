@@ -1,5 +1,7 @@
 #include "wiiuport/Runtime.h"
 
+#include "input/VPADInputHooks.h"
+
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 
 #include <lucent/config.h>
@@ -37,6 +39,7 @@ void Runtime::installHooks() {
         return;
     }
     LatteFrameHooks::SetObserver(&m_recorder);
+    VPADInputHooks::SetSource(&m_input);
     m_hooksInstalled = true;
     // Off unless a port is configured. The channel is how an agent asks a
     // running product what it is doing; a player never needs it.

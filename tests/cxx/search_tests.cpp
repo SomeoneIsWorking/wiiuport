@@ -62,6 +62,8 @@ void aMovingSharedTransformIsFound() {
     check::equal(report.candidates[0].shadersSharing, uint32_t{2}, "by both shaders");
     check::near(report.candidates[0].meanTranslationStep, 3.0f, 1e-4f,
                 "and moved the measured distance");
+    check::equal(report.sharedAndMoving, size_t{2},
+                 "both count toward the total a gate reads, not the listed subset");
 }
 
 void aConstantIsNotACamera() {

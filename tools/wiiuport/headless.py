@@ -57,6 +57,13 @@ def log_flags(*types: LogType) -> int:
     return mask
 
 
+GAMEPAD_PROFILE = """<?xml version="1.0" encoding="UTF-8"?>
+<emulated_controller>
+	<type>Wii U GamePad</type>
+</emulated_controller>
+"""
+"""An emulated gamepad with no device behind it. See _write_gamepad_profile."""
+
 SETTINGS_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <content>
     <logflag>{logflag}</logflag>
@@ -158,8 +165,24 @@ class HeadlessSession:
         (self.config_home / "Cemu" / "settings.xml").write_text(
             SETTINGS_TEMPLATE.format(logflag=self.logflag)
         )
+        self._write_gamepad_profile()
         if keys_source is not None:
             self._link_keys(keys_source)
+
+    def _write_gamepad_profile(self) -> None:
+        """Give player one a gamepad, because the title only reads one that exists.
+
+        With no profile the VPAD HLE finds no emulated controller, returns
+        empty samples and never calls into the controller at all -- so the
+        runtime's injection point is never reached and a press cannot arrive.
+        Measured: a driven run reported 12 presses queued and 0 gamepad reads.
+
+        The profile attaches no physical device deliberately. It exists so the
+        emulated gamepad exists; everything it reports comes from the runtime.
+        """
+        profiles = self.config_home / "Cemu" / "controllerProfiles"
+        profiles.mkdir(parents=True, exist_ok=True)
+        (profiles / "controller0.xml").write_text(GAMEPAD_PROFILE)
 
     def _link_keys(self, keys_source: Path) -> None:
         """Link, never copy, the operator's title keys into the session.

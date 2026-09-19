@@ -174,6 +174,11 @@ SearchReport TransformSearch::search() const {
                 transform});
         }
     }
+    for (const auto& candidate : report.candidates) {
+        if (candidate.isShared() && candidate.meanTranslationStep > 0.0f) {
+            report.sharedAndMoving += 1;
+        }
+    }
     std::sort(report.candidates.begin(), report.candidates.end(),
               [](const TransformCandidate& a, const TransformCandidate& b) {
                   if (a.shadersSharing != b.shadersSharing) {

@@ -5,7 +5,9 @@
 
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
+#include <string_view>
 
 namespace wiiuport::control {
 namespace {
@@ -13,7 +15,27 @@ namespace {
 lucent::http::Response notFound() {
     return lucent::http::Response::text(
         404, "Not Found",
-        "unknown route. This channel serves GET /counters, GET /transforms and POST /replay.\n");
+        "unknown route. This channel serves GET /counters, GET /transforms, POST /replay "
+        "and POST /input.\n");
+}
+
+// One `key=value` pair at a time out of a query string. Returns false at the
+// end; an unparseable pair stops the walk rather than being skipped, because
+// a silently ignored parameter is a press the caller believes it sent.
+bool nextParameter(std::string_view& rest, std::string_view& key, std::string_view& value) {
+    if (rest.empty()) {
+        return false;
+    }
+    auto amp = rest.find('&');
+    auto pair = rest.substr(0, amp);
+    rest = amp == std::string_view::npos ? std::string_view{} : rest.substr(amp + 1);
+    auto equals = pair.find('=');
+    if (equals == std::string_view::npos) {
+        return false;
+    }
+    key = pair.substr(0, equals);
+    value = pair.substr(equals + 1);
+    return true;
 }
 
 // Enough digits that two transforms which differ are never printed the same.
@@ -53,8 +75,8 @@ std::string transformJson(const interp::TransformCandidate& candidate) {
 
 ControlChannel::ControlChannel(const frame::RecordingObserver& recorder,
                                frame::FrameReplayer& replayer,
-                               const interp::TransformSearch& search)
-    : m_recorder(recorder), m_replayer(replayer), m_search(search) {
+                               const interp::TransformSearch& search, input::InputDriver& input)
+    : m_recorder(recorder), m_replayer(replayer), m_search(search), m_input(input) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -73,6 +95,9 @@ std::string ControlChannel::countersJson() const {
     body += ",\"replayListsSubmitted\":" + std::to_string(m_replayer.listsSubmitted());
     body += ",\"replayListsRefused\":" + std::to_string(m_replayer.listsRefused());
     body += ",\"replayArmed\":" + std::string(m_replayer.isArmed() ? "true" : "false");
+    body += ",\"inputPollsSeen\":" + std::to_string(m_input.pollsSeen());
+    body += ",\"inputPollsAnswered\":" + std::to_string(m_input.pollsAnswered());
+    body += ",\"inputPressesQueued\":" + std::to_string(m_input.pressesQueued());
     body += "}\n";
     return body;
 }
@@ -87,6 +112,7 @@ std::string ControlChannel::transformsJson(size_t limit) const {
     body += ",\"rejectedNeverChanging\":" + std::to_string(report.rejectedNeverChanging);
     body += ",\"rejectedRotation\":" + std::to_string(report.rejectedRotation);
     body += ",\"candidatesFound\":" + std::to_string(report.candidates.size());
+    body += ",\"sharedAndMoving\":" + std::to_string(report.sharedAndMoving);
     body += ",\"candidates\":[";
     for (size_t i = 0; i < report.candidates.size() && i < limit; ++i) {
         if (i != 0) {
@@ -96,6 +122,87 @@ std::string ControlChannel::transformsJson(size_t limit) const {
     }
     body += "]}\n";
     return body;
+}
+
+std::string ControlChannel::applyInput(const std::string& query, bool& accepted) {
+    accepted = false;
+    std::string_view rest(query);
+    std::string_view key;
+    std::string_view value;
+    uint32_t reads = kDefaultPressReads;
+    uint32_t mask = 0;
+    auto unknown = std::string();
+    auto releasing = false;
+    auto haveLeftStick = false;
+    auto haveRightStick = false;
+    float leftX = 0.0f;
+    float leftY = 0.0f;
+    float rightX = 0.0f;
+    float rightY = 0.0f;
+    while (nextParameter(rest, key, value)) {
+        if (key == "reads") {
+            reads = static_cast<uint32_t>(std::strtoul(std::string(value).c_str(), nullptr, 10));
+            continue;
+        }
+        if (key == "release") {
+            releasing = true;
+            continue;
+        }
+        if (key == "press") {
+            auto* button = input::InputDriver::buttonNamed(std::string(value));
+            if (button == nullptr) {
+                unknown = std::string(value);
+                break;
+            }
+            mask |= button->mask;
+            continue;
+        }
+        if (key == "leftx" || key == "lefty" || key == "rightx" || key == "righty") {
+            auto number = std::strtof(std::string(value).c_str(), nullptr);
+            if (key == "leftx") {
+                leftX = number;
+                haveLeftStick = true;
+            } else if (key == "lefty") {
+                leftY = number;
+                haveLeftStick = true;
+            } else if (key == "rightx") {
+                rightX = number;
+                haveRightStick = true;
+            } else {
+                rightY = number;
+                haveRightStick = true;
+            }
+            continue;
+        }
+        unknown = std::string(key);
+        break;
+    }
+    if (!unknown.empty()) {
+        return "{\"accepted\":false,\"reason\":\"unknown parameter or button: " + unknown + "\"}\n";
+    }
+    if (releasing) {
+        m_input.release();
+        accepted = true;
+    }
+    if (haveLeftStick) {
+        m_input.setLeftStick(leftX, leftY);
+        accepted = true;
+    }
+    if (haveRightStick) {
+        m_input.setRightStick(rightX, rightY);
+        accepted = true;
+    }
+    if (mask != 0) {
+        m_input.press(mask, reads);
+        accepted = true;
+    }
+    if (!accepted) {
+        return "{\"accepted\":false,\"reason\":\"nothing to do: name a button with press=, a "
+               "stick with leftx=/lefty=/rightx=/righty=, or release=1\"}\n";
+    }
+    return "{\"accepted\":true,\"holdMask\":" + std::to_string(mask) +
+           ",\"reads\":" + std::to_string(reads) +
+           ",\"pollsAnswered\":" + std::to_string(m_input.pollsAnswered()) + "}\n";
 }
 
 bool ControlChannel::start(uint16_t port) {
@@ -116,6 +223,12 @@ bool ControlChannel::start(uint16_t port) {
                     200, "OK",
                     "{\"armed\":true,\"replaysRun\":" + std::to_string(m_replayer.replaysRun()) +
                         "}\n");
+            }
+            if (request.method == "POST" && request.path() == "/input") {
+                auto accepted = false;
+                auto body = applyInput(std::string(request.query()), accepted);
+                return lucent::http::Response::json(accepted ? 200 : 400,
+                                                    accepted ? "OK" : "Bad Request", body);
             }
             if (request.method != "GET") {
                 return notFound();
