@@ -38,10 +38,11 @@ the command line every first-party header fails to parse, which this gate
 correctly reports as a refusal rather than a pass.
 """
 
-INCLUDE_ROOTS: tuple[str, ...] = ("src", "external/cemu/src")
+INCLUDE_ROOTS: tuple[str, ...] = ("src", "external/cemu/src", "external/lucent/include")
 """What the library compiles against, matching the include directories
-``src/wiiuport/CMakeLists.txt`` exposes: its own tree, and the fork's, whose
-hook interface it implements rather than copies."""
+``src/wiiuport/CMakeLists.txt`` exposes: its own tree, the fork's, whose hook
+interface it implements rather than copies, and lucent's. Used only for a file
+the compile database cannot name, which is every header."""
 
 _FUNCTION_SCOPES = frozenset(
     {
