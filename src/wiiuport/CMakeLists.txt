@@ -36,6 +36,7 @@ add_library(wiiuport STATIC
   control/ControlChannel.h
   Runtime.cpp
   Runtime.h
+  frame/FrameCapture.cpp
   frame/FrameRecording.cpp
   frame/FrameRecording.h
   frame/FrameReplayer.cpp
