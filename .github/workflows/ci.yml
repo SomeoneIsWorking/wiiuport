@@ -1,0 +1,94 @@
+# Linux is the only claimed host; see docs/project-goals.md GOAL-PLATFORM for why
+# there are deliberately no Windows or macOS jobs.
+#
+# Build policy is not written here. Both jobs call the same Python owners a
+# maintainer calls, so there is one definition of how this project is built and
+# verified.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: gates (ruff, pytest, clang-format, structure)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: false
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: true
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y clang-format
+
+      - name: Run every gate
+        run: uv run --frozen --group dev python tools/verify.py
+
+  runtime:
+    name: build the pinned runtime (clang)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      VCPKG_FORCE_SYSTEM_BINARIES: "1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: true
+
+      # Cemu's documented Linux dependencies. libpng-static has no Debian
+      # equivalent because Debian's libpng16-dev ships the static archive in the
+      # same package; on Fedora it is a separate subpackage, which is why the
+      # host check probes for the archive rather than a package name.
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            cmake ninja-build clang libgtk-3-dev libglm-dev libgcrypt20-dev \
+            libsecret-1-dev libsystemd-dev libpulse-dev libbluetooth-dev \
+            libusb-1.0-0-dev freeglut3-dev nasm libtool zlib1g-dev \
+            libpng-dev wayland-protocols pkg-config
+
+      # An accelerator only. The job must remain correct with an empty cache,
+      # so nothing here is allowed to be a build input the cold path lacks.
+      - name: Cache vcpkg archives
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('external/cemu/vcpkg.json', 'external/cemu/vcpkg-configuration.json') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Report host requirements
+        run: uv run --frozen python tools/build_runtime.py --check-deps-only
+
+      - name: Build
+        run: uv run --frozen python tools/build_runtime.py
+
+      # The build tool already refuses a missing binary, but CI states the
+      # outcome in its own right so a green job cannot mean "nothing was built".
+      - name: Confirm the runtime binary exists
+        run: |
+          binary=external/cemu/bin/Cemu_relwithdebinfo
+          test -x "$binary" || { echo "no runtime binary at $binary"; exit 1; }
+          ls -l "$binary"
