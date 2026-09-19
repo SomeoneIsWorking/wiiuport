@@ -43,3 +43,12 @@ def test_real_requirements_probe_files_or_executables_not_package_names() -> Non
     refuse a host that is actually ready, so every requirement must probe."""
     for requirement in CEMU_REQUIREMENTS:
         assert requirement.files or requirement.executables, requirement.name
+
+
+def test_libpng_requirement_probes_the_static_archive_not_just_the_header() -> None:
+    """Fedora's libpng CMake config declares PNG::png_static pointing at an
+    archive from a different subpackage, and find_package(PNG) fails without
+    it. A header-only probe would pass on a host that cannot configure."""
+    libpng = next(r for r in CEMU_REQUIREMENTS if "libpng" in r.name)
+    assert "/usr/lib64/libpng16.a" in libpng.files
+    assert "libpng-static" in libpng.dnf_packages

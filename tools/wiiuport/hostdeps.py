@@ -44,6 +44,18 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement("perl", ("perl-core",), executables=("perl",)),
     Requirement("pkg-config", ("pkgconf-pkg-config",), executables=("pkg-config",)),
     Requirement("zlib headers", ("zlib-devel",), files=("/usr/include/zlib.h",)),
+    # Cemu makes libpng an empty vcpkg package on Linux
+    # (dependencies/vcpkg_overlay_ports_linux/libpng) so the distro's libpng is
+    # used. Fedora's libpng-devel then ships a CMake config declaring
+    # PNG::png_static -> /usr/lib64/libpng16.a, but that archive comes from the
+    # separate libpng-static subpackage. Without it find_package(PNG) fails
+    # outright, so the static archive -- not the header -- is what must be
+    # probed.
+    Requirement(
+        "libpng, including the static archive its CMake config declares",
+        ("libpng-devel", "libpng-static"),
+        files=("/usr/include/png.h", "/usr/lib64/libpng16.a"),
+    ),
     Requirement("GTK 3", ("gtk3-devel",), files=("/usr/include/gtk-3.0/gtk/gtk.h",)),
     Requirement("glm", ("glm-devel",), files=("/usr/include/glm/glm.hpp",)),
     Requirement("libsecret", ("libsecret-devel",), files=("/usr/include/libsecret-1/libsecret/secret.h",)),
