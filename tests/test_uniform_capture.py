@@ -16,8 +16,12 @@ import pytest
 from wiiuport.uniformcapture import (
     RECORD_MAGIC,
     CaptureUnreadable,
+    ShaderAnalysis,
+    SlotVerdict,
     analyse,
+    rank_for_review,
     read_records,
+    without_frame_constant_slots,
 )
 
 _HEADER = struct.Struct("<7I2Q")
@@ -105,3 +109,36 @@ def test_negative_layout_offsets_survive_the_unsigned_field(tmp_path: Path) -> N
     record = next(read_records(_capture(tmp_path, [_record(0, [1.0])])))
     assert record.loc_remapped == -1
     assert record.count_uniform_register == 4
+
+
+def _analysis(frame_constant: int, per_draw: int, draws: int) -> ShaderAnalysis:
+    slots = [
+        SlotVerdict(offset=i, draws=draws, distinct_within_frames=1, distinct_across_frames=2)
+        for i in range(frame_constant)
+    ]
+    slots += [
+        SlotVerdict(offset=100 + i, draws=draws, distinct_within_frames=3, distinct_across_frames=3)
+        for i in range(per_draw)
+    ]
+    return ShaderAnalysis(shader=(0, draws, 0), draws=draws, frames=4, slots=tuple(slots))
+
+
+def test_shaders_with_frame_constant_slots_rank_first() -> None:
+    """The capture exists to find frame-constant slots, so a shader holding
+    many of them outranks a busier shader holding none."""
+    busy_but_dull = _analysis(frame_constant=0, per_draw=8, draws=9000)
+    quiet_but_interesting = _analysis(frame_constant=3, per_draw=0, draws=4)
+    ranked = rank_for_review([busy_but_dull, quiet_but_interesting])
+    assert ranked[0] is quiet_but_interesting
+
+
+def test_ties_are_broken_by_draw_count() -> None:
+    fewer = _analysis(frame_constant=1, per_draw=0, draws=5)
+    more = _analysis(frame_constant=1, per_draw=0, draws=500)
+    assert rank_for_review([fewer, more])[0] is more
+
+
+def test_the_dull_set_is_exactly_those_without_frame_constant_slots() -> None:
+    dull = _analysis(frame_constant=0, per_draw=2, draws=7)
+    keen = _analysis(frame_constant=2, per_draw=2, draws=7)
+    assert without_frame_constant_slots([dull, keen]) == [dull]

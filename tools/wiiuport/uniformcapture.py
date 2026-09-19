@@ -187,3 +187,21 @@ def analyse(records: list[DrawRecord]) -> list[ShaderAnalysis]:
 
     analyses.sort(key=lambda a: a.draws, reverse=True)
     return analyses
+
+
+def rank_for_review(results: list[ShaderAnalysis]) -> list[ShaderAnalysis]:
+    """Order shaders so the camera-shaped ones are read first.
+
+    A capture from real gameplay holds hundreds of shaders and any report has
+    to elide most of them. Eliding by capture order would hide exactly the
+    interesting case, since a frame-constant slot is the one thing the whole
+    capture exists to find; the boring case is the shader that has none.
+    """
+    return sorted(
+        results,
+        key=lambda r: (-len(r.of("frame-constant")), -r.draws, r.shader),
+    )
+
+
+def without_frame_constant_slots(results: list[ShaderAnalysis]) -> list[ShaderAnalysis]:
+    return [r for r in results if not r.of("frame-constant")]
