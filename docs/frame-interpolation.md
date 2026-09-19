@@ -38,6 +38,46 @@ about packet layout. Substituting at the assembly point instead is strictly bett
 Recording the display lists is still needed — but only to *re-issue the draws*, not to
 carry the substituted values.
 
+### The exact site, read from the fork
+
+`VulkanRendererCore.cpp` assembles uniforms in **two** functions, not one:
+
+| function | line | used for |
+|---|---|---|
+| `VulkanRenderer::uniformData_updateUniformVars` | 375 | the full path |
+| `VulkanRenderer::uniformData_updateUniformVarsIncremental` | 452 | the fast draw sequence |
+
+Naming only the first would have repeated the display-list mistake at a different
+layer: a title that mostly takes the fast path would have most of its draws pass
+through unsubstituted. Both end on the same statement (lines 449 and 496):
+
+```cpp
+dynamicOffsetInfo.uniformVarBufferOffset[shaderStageIndex] =
+    uniformData_uploadUniformDataBufferGetOffset({(uint8*)uniformBuf, shader->uniform.uniformRangeSize});
+```
+
+The hook is therefore one private helper taking `(shaderStageIndex, shader, uniformBuf)`,
+called from both sites immediately before that upload. It is **not** placed inside
+`uniformData_uploadUniformDataBufferGetOffset`, for two reasons: that function has no
+`shader`, so it cannot know where anything lives in the buffer; and it has a third
+caller at `VulkanRenderer.cpp:3264` which uploads Cemu's own output-shader uniforms,
+which are not guest state and must never be blended.
+
+### Where the values sit inside the assembled buffer
+
+`shader->uniform` carries the layout, and the two modes land in the same buffer:
+
+| field | meaning |
+|---|---|
+| `loc_uniformRegister`, `count_uniformRegister` | the ALU-constant block, `count * 16` bytes |
+| `loc_remapped` | the remapped uniform-buffer block |
+| `uniformRangeSize` | total assembled size, and the span that gets uploaded |
+
+One detail that is easy to get wrong: these `loc_` values are **byte** offsets, and the
+function indexes floats with `uniformBuf + (index / 4)`. A substitution that treated
+them as float indices would write at four times the intended offset and corrupt
+unrelated state rather than fail visibly.
+
 ## Recording
 
 Between two swaps, record every `IT_INDIRECT_BUFFER` the frame references as
