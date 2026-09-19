@@ -31,6 +31,8 @@ tracked patch files, and the submodule pin is the source of truth.
 | Configuration and environment reads | `src/wiiuport/config/` | The single owner. No other module calls `getenv`. |
 | Logging | `lucent` | The only output boundary. No `printf`/`std::cerr` in first-party modules. |
 | Build orchestration, provisioning, verification | `tools/` (Python) | One locked environment via `uv run --frozen`. |
+| Native development packages a build needs | `tools/wiiuport/hostdeps.py` | The one list, and the refusal that names them. Never duplicated into a script or a setup doc; `docs/dev-container.md` points at it. |
+| Where those packages are installed | `docs/dev-container.md` | A Fedora toolbox sharing the same home, so installs need no host privileges. Not a build boundary: the build is the same inside and out. |
 
 ## Where the guest's render state enters
 
