@@ -15,15 +15,15 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   gates:
     name: gates (ruff, pytest, clang-format, structure)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # Superseding a 20-second gate run is free, so the newest push wins.
+    concurrency:
+      group: gates-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -45,6 +45,12 @@ jobs:
     name: build the pinned runtime (clang)
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    # A cold vcpkg build takes hours. Cancelling it on every push means it can
+    # only ever report "cancelled", which is indistinguishable from never having
+    # run -- so pushes queue behind it instead of killing it.
+    concurrency:
+      group: runtime-${{ github.ref }}
+      cancel-in-progress: false
     env:
       VCPKG_FORCE_SYSTEM_BINARIES: "1"
     steps:
