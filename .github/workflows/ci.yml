@@ -51,8 +51,6 @@ jobs:
     concurrency:
       group: runtime-${{ github.ref }}
       cancel-in-progress: false
-    env:
-      VCPKG_FORCE_SYSTEM_BINARIES: "1"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:

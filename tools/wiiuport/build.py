@@ -67,8 +67,16 @@ def _cmake_cache_value(build_dir: Path, key: str) -> str | None:
 
 
 def _vcpkg_environment() -> dict[str, str]:
+    """vcpkg's own environment, deliberately without VCPKG_FORCE_SYSTEM_BINARIES.
+
+    That variable was set here unconditionally and with no recorded reason.
+    Upstream Cemu's own Linux CI does not set it, and it stops vcpkg
+    provisioning its own cmake and ninja, which is a candidate cause of the
+    "unable to find a build program corresponding to Ninja" configure failure.
+    It belongs on hosts that genuinely need it -- arm64 and musl -- selected by
+    that need rather than applied to every host.
+    """
     env = dict(os.environ)
-    env["VCPKG_FORCE_SYSTEM_BINARIES"] = "1"
     env.setdefault("VCPKG_MAX_CONCURRENCY", str(os.cpu_count() or 1))
     return env
 
@@ -115,7 +123,8 @@ def verify_toolchain(config: BuildConfig) -> None:
     if actual is None:
         raise BuildError(
             f"{config.build_dir} has no CMAKE_CXX_COMPILER_ID; the tree is not "
-            "configured, so no build from it can be trusted as evidence"
+            "configured, so no build from it can be trusted as evidence."
+            f"{_cache_evidence(config.build_dir)}"
         )
     expected = config.toolchain.expected_cmake_id
     if actual != expected:
@@ -123,6 +132,33 @@ def verify_toolchain(config: BuildConfig) -> None:
             f"{config.build_dir} is configured with CMAKE_CXX_COMPILER_ID="
             f"{actual!r}, expected {expected!r}"
         )
+
+
+def _cache_evidence(build_dir: Path) -> str:
+    """Say what the cache actually holds.
+
+    "No compiler id" has two very different causes -- cmake never wrote a cache
+    at all, or it wrote one and stopped before compiler detection -- and the
+    bare refusal could not tell them apart.
+    """
+    cache = build_dir / "CMakeCache.txt"
+    if not cache.is_file():
+        return f" There is no {cache}: cmake wrote no cache at all."
+    entries = [
+        line
+        for line in cache.read_text(encoding="utf-8", errors="replace").splitlines()
+        if "=" in line and not line.startswith(("#", "//"))
+    ]
+    interesting = [
+        entry
+        for entry in entries
+        if entry.startswith(("CMAKE_GENERATOR", "CMAKE_MAKE_PROGRAM", "CMAKE_CXX_COMPILER"))
+    ]
+    shown = "\n  ".join(interesting) if interesting else "(none of them are set)"
+    return (
+        f" {cache} holds {len(entries)} entries, so cmake wrote a cache and then"
+        f" stopped before detecting a compiler. Generator and compiler entries:\n  {shown}"
+    )
 
 
 def compile_all(config: BuildConfig, log: Path | None = None) -> Path:
