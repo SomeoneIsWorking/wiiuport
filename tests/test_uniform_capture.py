@@ -25,13 +25,33 @@ from wiiuport.uniformcapture import (
     without_frame_constant_slots,
 )
 
-_HEADER = struct.Struct("<7I2Q")
+_HEADER = struct.Struct("<8I2Q")
+_SOURCE = struct.Struct("<2I")
 
 
-def _record(frame: int, values: list[float], *, stage: int = 0, base: int = 0xAA) -> bytes:
+def _record(
+    frame: int,
+    values: list[float],
+    *,
+    stage: int = 0,
+    base: int = 0xAA,
+    sources: tuple[tuple[int, int], ...] = (),
+) -> bytes:
     payload = struct.pack(f"<{len(values)}f", *values)
     return (
-        _HEADER.pack(RECORD_MAGIC, frame, stage, len(payload), 0, 4, -1 & 0xFFFFFFFF, base, 0xBB)
+        _HEADER.pack(
+            RECORD_MAGIC,
+            frame,
+            stage,
+            len(payload),
+            0,
+            4,
+            -1 & 0xFFFFFFFF,
+            len(sources),
+            base,
+            0xBB,
+        )
+        + b"".join(_SOURCE.pack(*source) for source in sources)
         + payload
     )
 
@@ -156,3 +176,36 @@ def test_a_previous_capture_is_removed_before_a_run(tmp_path: Path) -> None:
 
 def test_clearing_a_capture_that_is_not_there_is_not_an_error(tmp_path: Path) -> None:
     assert clear_previous_capture(tmp_path / "absent.bin") == []
+
+
+def test_uniform_block_sources_are_read_back(tmp_path: Path) -> None:
+    """The address is what identifies an actor across ticks, so a record that
+    carries one must not lose it on the way through the reader."""
+    path = _capture(tmp_path, [_record(0, [1.0, 2.0], sources=((3, 0x1C4A0000), (4, 0x1C4B0000)))])
+    record = next(iter(read_records(path)))
+    assert record.sources == ((3, 0x1C4A0000), (4, 0x1C4B0000))
+    assert record.source_addresses == (0x1C4A0000, 0x1C4B0000)
+
+
+def test_a_draw_with_no_uniform_block_source_reads_as_empty(tmp_path: Path) -> None:
+    record = next(iter(read_records(_capture(tmp_path, [_record(0, [1.0])]))))
+    assert record.sources == ()
+
+
+def test_an_impossible_source_count_is_refused(tmp_path: Path) -> None:
+    """A desynchronised stream would otherwise be read as a record with
+    millions of sources, allocating against garbage."""
+    path = tmp_path / "uniform-capture.bin"
+    path.write_bytes(_HEADER.pack(RECORD_MAGIC, 0, 0, 4, 0, 4, 0, 10_000, 0xAA, 0xBB) + b"\x00" * 4)
+    with pytest.raises(CaptureUnreadable, match="uniform block sources"):
+        list(read_records(path))
+
+
+def test_a_capture_from_the_older_runtime_is_refused_by_magic(tmp_path: Path) -> None:
+    """The layout changed. Reading an old file against the new header would
+    silently shift every field rather than fail."""
+    path = tmp_path / "uniform-capture.bin"
+    old_header = struct.Struct("<7I2Q")
+    path.write_bytes(old_header.pack(0x554E4946, 0, 0, 4, 0, 4, 0, 0xAA, 0xBB) + b"\x00" * 4)
+    with pytest.raises(CaptureUnreadable, match="magic"):
+        list(read_records(path))
