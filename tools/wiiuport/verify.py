@@ -10,6 +10,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .cxxpolicy import CxxPolicyUnavailable, check_cxx_policy
 from .paths import Layout
 from .structure import FIRST_PARTY_CXX_ROOTS, check_source_sizes
 
@@ -95,7 +96,31 @@ def gate_structure(layout: Layout) -> GateResult:
     )
 
 
-GATES = (gate_python_lint, gate_python_tests, gate_cxx_format, gate_structure)
+def gate_cxx_policy(layout: Layout) -> GateResult:
+    """The three ownership rules clang-tidy cannot express, on the real AST.
+
+    A parse failure fails the gate rather than reporting an empty result: a
+    file that could not be read had none of its declarations inspected.
+    """
+    try:
+        report = check_cxx_policy(layout)
+    except CxxPolicyUnavailable as unavailable:
+        return GateResult("c++ ownership policy", False, 0, str(unavailable))
+    detail = report.summary
+    if report.findings:
+        detail = "\n".join([detail, *(str(finding) for finding in report.findings)])
+    return GateResult(
+        "c++ ownership policy", not report.findings, len(report.scanned), detail
+    )
+
+
+GATES = (
+    gate_python_lint,
+    gate_python_tests,
+    gate_cxx_format,
+    gate_cxx_policy,
+    gate_structure,
+)
 
 
 def run_all(layout: Layout) -> list[GateResult]:

@@ -34,14 +34,18 @@ tracked patch files, and the submodule pin is the source of truth.
 
 ## Where the guest's render state enters
 
-Two paths, both observable inside a recorded display list:
+Two paths. Both are live in a real title -- Wind Waker HD uses `GX2SetVertexUniformReg`
+70,752 times and `GX2SetVertexUniformBlock` 20,529 times in a two-minute run -- so
+anything that handles only one of them substitutes a fraction of the submitted state:
 
-- **Uniform registers** — `IT_SET_ALU_CONST` carries its values inline in the display
-  list. Substituting these means patching dwords in the recorded copy; no shadow storage
-  and no guest-memory writeback is needed.
-- **Uniform blocks** — bound by resource registers that point at guest memory. These
-  need a shadow buffer holding the blended values, with the binding redirected for the
-  replay only.
+- **Uniform registers** — ALU constant registers, set by `IT_SET_ALU_CONST` with the
+  values carried inline in the display list.
+- **Uniform blocks** — resource registers pointing at guest memory.
 
-Which path a given title uses is a title question and is answered in that title's
+Substitution therefore happens at `VulkanRenderer::uniformData_updateUniformVars`,
+where both paths have already converged on one assembled buffer. That site is chosen
+because it covers both modes in one place and never writes guest memory; the mechanism
+and its null-interpolation gate are in `docs/frame-interpolation.md`.
+
+Which slots carry a camera or an actor is a title question, answered in that title's
 project, not here.
