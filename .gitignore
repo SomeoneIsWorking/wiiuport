@@ -1,0 +1,4 @@
+build/
+scratch/
+.venv/
+__pycache__/

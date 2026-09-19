@@ -1,0 +1,4 @@
+[submodule "external/cemu"]
+	path = external/cemu
+	url = https://github.com/SomeoneIsWorking/Cemu.git
+	branch = main
