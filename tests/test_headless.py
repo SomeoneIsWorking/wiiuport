@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from wiiuport.headless import HeadlessSession, _own_process_group
 from wiiuport.paths import Layout
 
