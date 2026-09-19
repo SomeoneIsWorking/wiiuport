@@ -101,6 +101,11 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement("libusb", ("libusb1-devel",), files=("/usr/include/libusb-1.0/libusb.h",)),
     Requirement("bluez", ("bluez-libs-devel",), files=("/usr/include/bluetooth/bluetooth.h",)),
     Requirement("systemd", ("systemd-devel",), files=("/usr/include/systemd/sd-bus.h",)),
+    # udev is probed separately from systemd although Fedora ships both in
+    # systemd-devel, because a vcpkg port configures with udev support and fails on
+    # "checking for libudev.h... no". Probing sd-bus.h passed here while the header
+    # the build actually consumes went unchecked -- the same shape of gap as libpng.
+    Requirement("udev", ("systemd-devel",), files=("/usr/include/libudev.h",)),
     Requirement("freeglut", ("freeglut-devel",), files=("/usr/include/GL/freeglut.h",)),
     Requirement("wayland-protocols", ("wayland-protocols-devel",),
                 files=("/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml",)),
