@@ -28,14 +28,35 @@ import signal
 import subprocess
 import time
 from dataclasses import dataclass, field
+from enum import IntEnum
 from pathlib import Path
 from typing import Self
 
 from .paths import Layout
 
+
+class LogType(IntEnum):
+    """The runtime's log-type bit positions, as `LogType` in the fork.
+
+    Only the ones this harness switches on are listed; the runtime owns the
+    full set. `logflag` is a bitmask over these positions, so GX2 (1) is 2.
+    """
+
+    GX2 = 1
+    UNIFORM_CAPTURE = 27
+
+
+def log_flags(*types: LogType) -> int:
+    """The `logflag` value that enables exactly these types, and nothing else."""
+    mask = 0
+    for log_type in types:
+        mask |= 1 << int(log_type)
+    return mask
+
+
 SETTINGS_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <content>
-    <logflag>0</logflag>
+    <logflag>{logflag}</logflag>
     <check_update>false</check_update>
     <use_discord_presence>false</use_discord_presence>
     <gp_download>false</gp_download>
@@ -86,6 +107,10 @@ class HeadlessSession:
     layout: Layout
     display: int = 99
     activity: str = "headless"
+    logflag: int = 0
+    """Which runtime log types to enable, from `log_flags`. Zero keeps a run
+    quiet; a capture run switches on exactly what it intends to read."""
+
     _xvfb: subprocess.Popen[bytes] | None = field(default=None, init=False, repr=False)
 
     @property
@@ -120,7 +145,9 @@ class HeadlessSession:
             directory.mkdir(parents=True, exist_ok=True)
         (self.config_home / "Cemu").mkdir(exist_ok=True)
         (self.data_home / "Cemu").mkdir(exist_ok=True)
-        (self.config_home / "Cemu" / "settings.xml").write_text(SETTINGS_TEMPLATE)
+        (self.config_home / "Cemu" / "settings.xml").write_text(
+            SETTINGS_TEMPLATE.format(logflag=self.logflag)
+        )
         if keys_source is not None:
             self._link_keys(keys_source)
 
