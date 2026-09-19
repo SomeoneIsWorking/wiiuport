@@ -1,0 +1,13 @@
+# Default diagnostics are preserved; this list only adds to them. It must never
+# start with -* and no check here is disabled to land a change.
+---
+Checks: >
+  clang-analyzer-*,
+  bugprone-*,
+  performance-*,
+  readability-braces-around-statements
+WarningsAsErrors: '*'
+HeaderFilterRegex: '^.*/src/wiiuport/.*'
+FormatStyle: file
+CheckOptions:
+  readability-braces-around-statements.ShortStatementLines: '0'
