@@ -19,7 +19,8 @@ presents at 30 Hz. Every item below states its difference from that baseline.
 | ST-BUILD | Pinned fork configures and builds from a clean tree with Clang + Ninja | partial | Configure with `clang 22.1.8` + `ninja 1.13.2` started and is resolving vcpkg ports; no completed build yet. Fedora 44 satisfies Cemu's documented `zlib-devel`/`perl-core` via `zlib-ng-compat-{devel,static}` and the base `perl` split packages. |
 | ST-LIB | Runtime exposed to a consuming title through a narrow C++ interface | missing | No interface exists. Cemu is currently only an application entry point. |
 | ST-RECORD | A frame's guest draw stream can be recorded for replay | missing | Cemu's `LatteCommandProcessor` consumes PM4 packets in place and retains no per-frame stream. |
-| ST-REPLAY | A recorded frame replays with substituted transform state | missing | Depends on ST-RECORD. |
+| ST-REPLAY | A recorded frame replays with substituted transform state | missing | Depends on ST-RECORD. Substitution happens at the Vulkan renderer's uniform-assembly site (`uniformData_updateUniformVars`), which covers both Latte uniform modes in one place. |
+| ST-REPLAY-GL | Interpolation under the OpenGL renderer | missing | Deliberately out of scope: the assembly site used for substitution is the Vulkan renderer's. OpenGL presents at the guest rate. |
 | ST-NULLDIFF | Null-interpolation discriminator: replay at t=1 is byte-identical to the original frame | missing | The gate that proves replay is faithful before any blending is trusted. Depends on ST-REPLAY. |
 | ST-SHADOW | Substituted transform storage never writes back to guest memory | missing | Depends on ST-REPLAY. |
 | ST-COUNTERS | Runtime reports frames recorded/replayed, bailouts by reason, substituted slots, all with denominators | missing | Required before any interpolation claim. |

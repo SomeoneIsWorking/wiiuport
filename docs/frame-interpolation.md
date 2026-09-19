@@ -15,11 +15,28 @@ Two consequences decide the whole design:
 
 1. **A frame's draw stream is re-runnable.** It is data in memory, not a consumed
    stream, so the same frame can be issued a second time with different inputs.
-2. **Uniform-register values travel inline.** `IT_SET_ALU_CONST` carries its values in
-   the display list itself. Substituting those means patching dwords in *our copy* of
-   the recorded buffer. Nothing is written back into guest memory. Uniform *blocks*
-   instead point at guest memory and need a shadow buffer with the binding redirected
-   for the replay only; which path a title uses is that title's question.
+2. **All uniform data for a draw is assembled in one place.** Whichever way the guest
+   supplied it, `VulkanRenderer::uniformData_updateUniformVars` gathers it into a single
+   buffer immediately before upload. That covers both of Latte's uniform modes:
+   `FULL_CFILE`, where values come from the ALU constant registers that
+   `IT_SET_ALU_CONST` wrote (inline in the display list), and `REMAPPED`, where they are
+   loaded from uniform buffers in guest memory. Substitution happens there, on the
+   assembled copy, after the guest's values have been read and before the GPU sees them.
+
+## Where substitution happens, and why not in the display list
+
+An earlier reading of the fork suggested patching the recorded display-list bytes
+directly, because `IT_SET_ALU_CONST` carries its values inline. That is workable for one
+of the two uniform modes and wrong for the other, and it would make the runtime care
+about packet layout. Substituting at the assembly point instead is strictly better:
+
+- it is one site rather than one per uniform mode;
+- it never writes to guest memory, because it edits a buffer the runtime owns;
+- it sees uniform-register and uniform-buffer values in the same form, so a consumer
+  describes a transform once rather than once per path.
+
+Recording the display lists is still needed — but only to *re-issue the draws*, not to
+carry the substituted values.
 
 ## Recording
 
@@ -28,14 +45,19 @@ Between two swaps, record every `IT_INDIRECT_BUFFER` the frame references as
 optimisation to remove later: the guest reuses and overwrites that storage as soon as
 the frame is submitted, so a reference alone would replay whatever the next frame wrote.
 
+Alongside it, record the assembled uniform buffer of every draw, keyed by the draw's
+position in the frame. Those recordings are what a consumer's blend reads: tick N-1's
+assembled values and tick N's, for the same draw.
+
 ## Presenting
 
 At the swap for tick N, the runtime holds tick N's recorded stream and tick N-1's
 extracted transform state. Order per tick:
 
 1. Copy the finished image of tick N aside.
-2. Replay tick N's recorded stream with transform state substituted by the consumer's
-   blend of ticks N-1 and N. Present the result — this is the in-between frame.
+2. Replay tick N's recorded stream. Each draw re-enters the uniform assembly site,
+   where the consumer's blend of ticks N-1 and N is substituted into the assembled
+   buffer. Present the result — this is the in-between frame.
 3. Present the copy of tick N.
 
 This costs one extra scene render per tick and adds one presented frame of latency.
@@ -72,3 +94,10 @@ frames to decide what geometry exists, or blend state whose provenance across ti
 not established. An object whose state cannot be matched to the same object in the
 previous tick is replayed un-blended and counted, never blended against a different
 object's state.
+
+## Renderer scope
+
+The assembly site above is the Vulkan renderer's. The runtime's interpolation is
+therefore Vulkan-only, which is the backend the first consumer targets. The OpenGL
+renderer keeps its ordinary behaviour and presents at the guest's rate; that is an
+explicit limitation, not an oversight, and it is recorded as such in project state.
