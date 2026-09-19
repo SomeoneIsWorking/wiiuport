@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from wiiuport.hostdeps import (
     CEMU_REQUIREMENTS,
     MissingHostPackages,

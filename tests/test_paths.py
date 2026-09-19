@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from wiiuport.paths import Layout, ProjectLayoutError, find_layout
 
 

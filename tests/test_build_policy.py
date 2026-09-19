@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from wiiuport.build import GENERATOR, BuildConfig, BuildError, configure, verify_toolchain
 from wiiuport.paths import Layout
 
