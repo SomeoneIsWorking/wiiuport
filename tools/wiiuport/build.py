@@ -15,6 +15,9 @@ from pathlib import Path
 
 from .paths import Layout
 
+FAILURE_EXCERPT_LINES = 40
+"""How much of a failed command's log to inline in the refusal."""
+
 GENERATOR = "Ninja"
 """Ninja, not Unix Makefiles: Cemu's corpus is large enough that a Makefile
 generator rebuilds every object after a reconfigure, while Ninja compares the
@@ -151,5 +154,20 @@ def _run(command: list[str], *, log: Path | None, what: str) -> None:
     if result.returncode != 0:
         raise BuildError(
             f"{what} failed with exit code {result.returncode}: "
-            f"{' '.join(command)}.{output_hint}"
+            f"{' '.join(command)}.{output_hint}{_failure_excerpt(log)}"
         )
+
+
+def _failure_excerpt(log: Path | None) -> str:
+    """The tail of the log, inline in the refusal.
+
+    A path alone is useless wherever the tree does not outlive the run, which
+    is every hosted job: CI reported only that configure exited 1 and pointed
+    at a file the runner had already discarded.
+    """
+    if log is None or not log.is_file():
+        return ""
+    lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+    tail = lines[-FAILURE_EXCERPT_LINES:]
+    shown = f"last {len(tail)} of {len(lines)} lines"
+    return "\n--- " + shown + " ---\n" + "\n".join(tail)

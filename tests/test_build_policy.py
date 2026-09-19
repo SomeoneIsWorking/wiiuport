@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from wiiuport import build
 from wiiuport.build import GENERATOR, BuildConfig, BuildError, configure, verify_toolchain
 from wiiuport.paths import Layout
 
@@ -48,3 +49,21 @@ def test_a_tree_configured_with_another_compiler_is_refused(tmp_path: Path) -> N
 
 def test_a_clang_tree_is_accepted(tmp_path: Path) -> None:
     verify_toolchain(_tree(tmp_path, "CMAKE_CXX_COMPILER_ID:INTERNAL=Clang\n"))
+
+
+def test_a_failed_command_inlines_its_log_tail(tmp_path: Path) -> None:
+    """A refusal that only names a path prints nothing wherever the tree does
+    not outlive the run, which is every hosted job."""
+    log = tmp_path / "configure.log"
+    with pytest.raises(BuildError) as refusal:
+        build._run(["false"], log=log, what="configure")
+    message = str(refusal.value)
+    assert str(log) in message
+    assert "--- last " in message
+
+
+def test_a_failed_command_without_a_log_still_refuses(tmp_path: Path) -> None:
+    with pytest.raises(BuildError) as refusal:
+        build._run(["false"], log=None, what="configure")
+    assert "configure failed" in str(refusal.value)
+    assert "--- last " not in str(refusal.value)
