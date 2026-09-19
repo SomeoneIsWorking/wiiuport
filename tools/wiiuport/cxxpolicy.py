@@ -92,7 +92,11 @@ def _check_cursor(cursor: Cursor, relative: str) -> list[Finding]:
     findings: list[Finding] = []
 
     at_global_scope = semantic is not None and semantic.kind == CursorKind.TRANSLATION_UNIT
-    if at_global_scope and not _inside_c_linkage(cursor) and cursor.spelling not in _ABI_EXEMPT_NAMES:
+    if (
+        at_global_scope
+        and not _inside_c_linkage(cursor)
+        and cursor.spelling not in _ABI_EXEMPT_NAMES
+    ):
         findings.append(
             Finding(
                 relative,

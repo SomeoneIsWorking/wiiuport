@@ -101,9 +101,12 @@ def configure(config: BuildConfig, log: Path | None = None) -> None:
     build_dir.mkdir(parents=True, exist_ok=True)
     command = [
         "cmake",
-        "-S", str(source),
-        "-B", str(build_dir),
-        "-G", GENERATOR,
+        "-S",
+        str(source),
+        "-B",
+        str(build_dir),
+        "-G",
+        GENERATOR,
         f"-DCMAKE_BUILD_TYPE={config.build_type}",
         f"-DCMAKE_C_COMPILER={config.toolchain.c_compiler}",
         f"-DCMAKE_CXX_COMPILER={config.toolchain.cxx_compiler}",
@@ -174,8 +177,7 @@ def _cache_evidence(build_dir: Path) -> str:
     shown = "\n  ".join(interesting) if interesting else "(none of them are set)"
     detected = sorted(build_dir.glob("CMakeFiles/*/CMakeCXXCompiler.cmake"))
     where = (
-        "no CMakeFiles/*/CMakeCXXCompiler.cmake exists, so compiler detection "
-        "never completed"
+        "no CMakeFiles/*/CMakeCXXCompiler.cmake exists, so compiler detection never completed"
         if not detected
         else f"{detected[-1]} exists but records no compiler id"
     )
@@ -207,8 +209,11 @@ def _run(command: list[str], *, log: Path | None, what: str) -> None:
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("w", encoding="utf-8") as handle:
             result = subprocess.run(
-                command, env=_vcpkg_environment(), check=False,
-                stdout=handle, stderr=subprocess.STDOUT,
+                command,
+                env=_vcpkg_environment(),
+                check=False,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
             )
         output_hint = f" Full output: {log}"
     if result.returncode != 0:

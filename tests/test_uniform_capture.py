@@ -25,7 +25,10 @@ _HEADER = struct.Struct("<7I2Q")
 
 def _record(frame: int, values: list[float], *, stage: int = 0, base: int = 0xAA) -> bytes:
     payload = struct.pack(f"<{len(values)}f", *values)
-    return _HEADER.pack(RECORD_MAGIC, frame, stage, len(payload), 0, 4, -1 & 0xFFFFFFFF, base, 0xBB) + payload
+    return (
+        _HEADER.pack(RECORD_MAGIC, frame, stage, len(payload), 0, 4, -1 & 0xFFFFFFFF, base, 0xBB)
+        + payload
+    )
 
 
 def _capture(tmp_path: Path, records: list[bytes]) -> Path:

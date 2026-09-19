@@ -184,7 +184,8 @@ class HeadlessSession:
             )
         self._xvfb = subprocess.Popen(
             ["Xvfb", f":{self.display}", "-screen", "0", "1920x1080x24", "-nolisten", "tcp"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
         deadline = time.monotonic() + 10.0
@@ -198,9 +199,7 @@ class HeadlessSession:
                 return
             time.sleep(0.1)
         self.stop_display()
-        raise HeadlessError(
-            f"Xvfb did not provide display :{self.display} within 10s"
-        )
+        raise HeadlessError(f"Xvfb did not provide display :{self.display} within 10s")
 
     def stop_display(self) -> None:
         """Terminate the display by the PID captured at launch, never by name."""
@@ -215,8 +214,11 @@ class HeadlessSession:
         started = time.monotonic()
         with log_path.open("wb") as log:
             process = subprocess.Popen(
-                command, env=self.environment(), stdout=log,
-                stderr=subprocess.STDOUT, start_new_session=True,
+                command,
+                env=self.environment(),
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
             )
             try:
                 exit_code: int | None = process.wait(timeout=timeout_seconds)
@@ -225,9 +227,11 @@ class HeadlessSession:
                 _terminate(process)
                 exit_code, timed_out = None, True
         return RunResult(
-            exit_code=exit_code, timed_out=timed_out,
+            exit_code=exit_code,
+            timed_out=timed_out,
             seconds=time.monotonic() - started,
-            log_path=log_path, session_dir=self.session_dir,
+            log_path=log_path,
+            session_dir=self.session_dir,
         )
 
     def __enter__(self) -> Self:

@@ -54,7 +54,9 @@ class DrawRecord:
         return (self.stage, self.base_hash, self.aux_hash)
 
     def floats(self) -> tuple[float, ...]:
-        return struct.unpack(f"<{len(self.payload) // 4}f", self.payload[: len(self.payload) // 4 * 4])
+        return struct.unpack(
+            f"<{len(self.payload) // 4}f", self.payload[: len(self.payload) // 4 * 4]
+        )
 
 
 def _as_signed(value: int) -> int:
