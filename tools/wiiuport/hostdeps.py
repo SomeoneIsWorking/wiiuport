@@ -11,25 +11,57 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+LIBRARY_DIRECTORIES: tuple[str, ...] = (
+    "/usr/lib64",
+    "/usr/lib",
+    "/usr/lib/x86_64-linux-gnu",
+    "/usr/lib/aarch64-linux-gnu",
+    "/usr/local/lib64",
+    "/usr/local/lib",
+)
+"""Where a distribution may put libraries. Fedora uses ``/usr/lib64`` while
+Debian and Ubuntu use a triplet directory, so a requirement that named one
+absolute path would be a check that only works on the machine it was written
+on."""
+
 
 @dataclass(frozen=True)
 class Requirement:
     """One host capability, and how to prove it is present without a package query.
 
-    Probing for files and executables rather than package names keeps the check
-    honest across distributions that split or rename packages. ``dnf_packages``
-    is only used to build the refusal message.
+    Probing for real files and executables rather than package names keeps the
+    check honest across distributions that split or rename packages.
+    ``dnf_packages`` is only used to build the refusal message.
+
+    ``libraries`` names library files to find in any standard library
+    directory, rather than at one absolute path, so the same requirement holds
+    on Fedora and on Debian-derived hosts.
     """
 
     name: str
     dnf_packages: tuple[str, ...]
     files: tuple[str, ...] = ()
     executables: tuple[str, ...] = ()
+    libraries: tuple[str, ...] = ()
 
     def satisfied(self) -> bool:
-        if any(not Path(f).exists() for f in self.files):
-            return False
-        return all(shutil.which(e) is not None for e in self.executables)
+        return not self.missing_parts()
+
+    def missing_parts(self) -> list[str]:
+        """Exactly what is absent, so a refusal can say more than the name."""
+        absent = [f for f in self.files if not Path(f).exists()]
+        absent += [e for e in self.executables if shutil.which(e) is None]
+        absent += [lib for lib in self.libraries if find_library(lib) is None]
+        return absent
+
+
+def find_library(name: str) -> Path | None:
+    """Locate a library file in any standard library directory."""
+    for directory in LIBRARY_DIRECTORIES:
+        candidate = Path(directory) / name
+        if candidate.exists():
+            return candidate
+    return None
 
 
 # Derived from the pinned fork's BUILD.md Fedora list, expressed as capabilities.
@@ -54,7 +86,8 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement(
         "libpng, including the static archive its CMake config declares",
         ("libpng-devel", "libpng-static"),
-        files=("/usr/include/png.h", "/usr/lib64/libpng16.a"),
+        files=("/usr/include/png.h",),
+        libraries=("libpng16.a",),
     ),
     Requirement("GTK 3", ("gtk3-devel",), files=("/usr/include/gtk-3.0/gtk/gtk.h",)),
     Requirement("glm", ("glm-devel",), files=("/usr/include/glm/glm.hpp",)),
@@ -86,7 +119,10 @@ def check(requirements: tuple[Requirement, ...] = CEMU_REQUIREMENTS) -> None:
     packages = sorted({p for r in missing for p in r.dnf_packages})
     lines = [
         f"{len(missing)} of {len(requirements)} host requirements are not satisfied:",
-        *(f"  - {r.name}" for r in missing),
+        *(
+            f"  - {r.name}\n      absent: {', '.join(r.missing_parts())}"
+            for r in missing
+        ),
         "",
         "Install them and re-run. On Fedora:",
         "  sudo dnf install " + " ".join(packages),

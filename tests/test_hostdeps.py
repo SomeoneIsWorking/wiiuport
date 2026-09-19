@@ -50,5 +50,32 @@ def test_libpng_requirement_probes_the_static_archive_not_just_the_header() -> N
     archive from a different subpackage, and find_package(PNG) fails without
     it. A header-only probe would pass on a host that cannot configure."""
     libpng = next(r for r in CEMU_REQUIREMENTS if "libpng" in r.name)
-    assert "/usr/lib64/libpng16.a" in libpng.files
+    assert "libpng16.a" in libpng.libraries
     assert "libpng-static" in libpng.dnf_packages
+
+
+def test_no_requirement_hardcodes_a_distribution_specific_library_path() -> None:
+    """Fedora uses /usr/lib64 and Debian a triplet directory. A requirement
+    that named one absolute library path would be a check that only works on
+    the machine it was written on -- which is how the first version of the
+    libpng requirement passed locally and failed in CI."""
+    for requirement in CEMU_REQUIREMENTS:
+        for path in requirement.files:
+            assert not path.endswith((".a", ".so")), (
+                f"{requirement.name} names a library by absolute path; "
+                "use libraries= so it is found in any standard library directory"
+            )
+
+
+def test_a_refusal_says_which_part_is_absent_not_only_the_name() -> None:
+    with pytest.raises(MissingHostPackages) as raised:
+        check((ABSENT,))
+    assert "/nonexistent/imaginary.h" in str(raised.value)
+
+
+def test_libraries_are_found_in_any_standard_directory() -> None:
+    from wiiuport.hostdeps import LIBRARY_DIRECTORIES, find_library
+
+    assert "/usr/lib64" in LIBRARY_DIRECTORIES
+    assert "/usr/lib/x86_64-linux-gnu" in LIBRARY_DIRECTORIES
+    assert find_library("definitely-not-a-real-library.a") is None
