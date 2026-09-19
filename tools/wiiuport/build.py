@@ -119,11 +119,11 @@ def verify_toolchain(config: BuildConfig) -> None:
     The policy is that agent evidence builds use Clang. Asserting that from the
     command line is not enough; a stale cache can silently disagree.
     """
-    actual = _cmake_cache_value(config.build_dir, "CMAKE_CXX_COMPILER_ID")
+    actual = _configured_compiler_id(config.build_dir)
     if actual is None:
         raise BuildError(
-            f"{config.build_dir} has no CMAKE_CXX_COMPILER_ID; the tree is not "
-            "configured, so no build from it can be trusted as evidence."
+            f"{config.build_dir} does not record a C++ compiler id, so no build "
+            "from it can be trusted as evidence."
             f"{_cache_evidence(config.build_dir)}"
         )
     expected = config.toolchain.expected_cmake_id
@@ -132,6 +132,23 @@ def verify_toolchain(config: BuildConfig) -> None:
             f"{config.build_dir} is configured with CMAKE_CXX_COMPILER_ID="
             f"{actual!r}, expected {expected!r}"
         )
+
+
+def _configured_compiler_id(build_dir: Path) -> str | None:
+    """The compiler family CMake actually detected, read from where it is written.
+
+    ``CMAKE_CXX_COMPILER_ID`` is deliberately not in ``CMakeCache.txt``: CMake
+    sets it during compiler detection and writes it to
+    ``CMakeFiles/<version>/CMakeCXXCompiler.cmake``. Reading the cache for it
+    returns None from a perfectly good tree, which is what this check did until
+    a configure finally got far enough to prove otherwise.
+    """
+    for detected in sorted(build_dir.glob("CMakeFiles/*/CMakeCXXCompiler.cmake")):
+        text = detected.read_text(encoding="utf-8", errors="replace")
+        match = re.search(r'set\(CMAKE_CXX_COMPILER_ID\s+"([^"]*)"\)', text)
+        if match is not None:
+            return match.group(1)
+    return None
 
 
 def _cache_evidence(build_dir: Path) -> str:
@@ -155,9 +172,16 @@ def _cache_evidence(build_dir: Path) -> str:
         if entry.startswith(("CMAKE_GENERATOR", "CMAKE_MAKE_PROGRAM", "CMAKE_CXX_COMPILER"))
     ]
     shown = "\n  ".join(interesting) if interesting else "(none of them are set)"
+    detected = sorted(build_dir.glob("CMakeFiles/*/CMakeCXXCompiler.cmake"))
+    where = (
+        "no CMakeFiles/*/CMakeCXXCompiler.cmake exists, so compiler detection "
+        "never completed"
+        if not detected
+        else f"{detected[-1]} exists but records no compiler id"
+    )
     return (
-        f" {cache} holds {len(entries)} entries, so cmake wrote a cache and then"
-        f" stopped before detecting a compiler. Generator and compiler entries:\n  {shown}"
+        f" {cache} holds {len(entries)} entries and {where}."
+        f" Generator and compiler cache entries:\n  {shown}"
     )
 
 
