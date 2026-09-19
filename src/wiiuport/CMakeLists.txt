@@ -15,7 +15,27 @@ if(NOT EXISTS "${WIIUPORT_FORK_INCLUDE_DIR}/Cafe/HW/Latte/Core/LatteFrameHooks.h
     "--depth 1 external/cemu")
 endif()
 
+# lucent is the logger and the HTTP control channel. It is consumed at a
+# pinned revision, never copied in. Added here rather than by the root project
+# so the fork's build gets it too, and guarded so a parent that already has it
+# is not clobbered.
+set(WIIUPORT_LUCENT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/lucent"
+    CACHE PATH "The lucent checkout this library links")
+if(NOT TARGET lucent::lucent)
+  if(NOT EXISTS "${WIIUPORT_LUCENT_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+      "lucent is not at ${WIIUPORT_LUCENT_DIR}. It owns this library's logging "
+      "and control channel and is not vendored. Check out the submodule: "
+      "git submodule update --init --depth 1 external/lucent")
+  endif()
+  add_subdirectory("${WIIUPORT_LUCENT_DIR}" lucent EXCLUDE_FROM_ALL)
+endif()
+
 add_library(wiiuport STATIC
+  control/ControlChannel.cpp
+  control/ControlChannel.h
+  Runtime.cpp
+  Runtime.h
   frame/FrameRecording.cpp
   frame/FrameRecording.h
   frame/RecordingObserver.cpp
@@ -28,5 +48,6 @@ target_include_directories(wiiuport PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/.."
   "${WIIUPORT_FORK_INCLUDE_DIR}"
 )
+target_link_libraries(wiiuport PUBLIC lucent::lucent)
 target_compile_features(wiiuport PUBLIC cxx_std_20)
 add_library(wiiuport::wiiuport ALIAS wiiuport)

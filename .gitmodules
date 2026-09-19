@@ -2,3 +2,6 @@
 	path = external/cemu
 	url = https://github.com/SomeoneIsWorking/Cemu.git
 	branch = main
+[submodule "external/lucent"]
+	path = external/lucent
+	url = https://github.com/SomeoneIsWorking/lucent.git

@@ -11,16 +11,15 @@ repository: it is the user's own copy of a copyrighted title.
 from __future__ import annotations
 
 import argparse
-import os
 import shutil
 import sys
 from pathlib import Path
 
 from wiiuport.headless import HeadlessSession, LogType, log_flags
 from wiiuport.paths import find_layout
+from wiiuport.title import ENV_GAME, TitleUnavailable, resolve_game
 from wiiuport.uniformcapture import clear_previous_capture
 
-ENV_GAME = "WIIUPORT_GAME"
 CAPTURE_NAME = "uniform-capture.bin"
 ENV_START_FRAME = "CEMU_UNIFORM_CAPTURE_START_FRAME"
 ENV_FRAMES = "CEMU_UNIFORM_CAPTURE_FRAMES"
@@ -40,16 +39,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--frames", type=int, default=4, help="how many frames to record")
     args = parser.parse_args(argv)
 
-    game = args.game or (Path(os.environ[ENV_GAME]) if ENV_GAME in os.environ else None)
-    if game is None:
-        print(
-            f"refused: no disc image given. Pass --game or set {ENV_GAME}. This tool does "
-            "not guess a path, and the image is never stored in this repository.",
-            file=sys.stderr,
-        )
-        return 2
-    if not game.is_file():
-        print(f"refused: {game} is not a file", file=sys.stderr)
+    try:
+        game = resolve_game(args.game)
+    except TitleUnavailable as unavailable:
+        print(f"refused: {unavailable}", file=sys.stderr)
         return 2
 
     layout = find_layout()
