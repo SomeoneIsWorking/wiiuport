@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .cxxpolicy import CxxPolicyUnavailable, check_cxx_policy
+from .cxxtests import CxxTestsUnavailable, build_and_run
 from .paths import Layout
 from .structure import FIRST_PARTY_CXX_ROOTS, check_source_sizes
 
@@ -164,12 +165,27 @@ def gate_cxx_policy(layout: Layout) -> GateResult:
     return GateResult("c++ ownership policy", not report.findings, len(report.scanned), detail)
 
 
+def gate_cxx_tests(layout: Layout) -> GateResult:
+    """Build and run the first-party C++ tests.
+
+    The denominator is the number of checks the harness executed, so a harness
+    that built, exited zero and asserted nothing fails here instead of adding a
+    green line that means nothing.
+    """
+    try:
+        report = build_and_run(layout)
+    except CxxTestsUnavailable as unavailable:
+        return GateResult("c++ tests", False, 0, str(unavailable))
+    return GateResult("c++ tests", report.passed, report.checks, report.output)
+
+
 GATES = (
     gate_python_lint,
     gate_python_format,
     gate_python_tests,
     gate_cxx_format,
     gate_cxx_policy,
+    gate_cxx_tests,
     gate_structure,
 )
 

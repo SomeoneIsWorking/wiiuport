@@ -30,6 +30,11 @@ class Layout:
         return self.root / "build"
 
     @property
+    def wiiuport_build(self) -> Path:
+        """The first-party library and test build tree."""
+        return self.build / "wiiuport"
+
+    @property
     def cemu_build(self) -> Path:
         return self.build / "cemu"
 

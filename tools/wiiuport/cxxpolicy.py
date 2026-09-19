@@ -18,7 +18,10 @@ Rule 3 tests the variable's own type, not its pointee, so ``const T*`` and
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 from clang.cindex import Cursor, CursorKind, Index, StorageClass, TranslationUnit
@@ -27,7 +30,17 @@ from .paths import Layout
 from .structure import FIRST_PARTY_CXX_ROOTS
 
 BASELINE_ARGUMENTS: tuple[str, ...] = ("-std=c++20", "-xc++")
-"""Flags for a file the compile database does not name, such as a header."""
+"""Flags for a file the compile database does not name, such as a header.
+
+A header is never a translation unit, so no database can name one, and its own
+includes are written against the library's include root. Without that root on
+the command line every first-party header fails to parse, which this gate
+correctly reports as a refusal rather than a pass.
+"""
+
+FIRST_PARTY_INCLUDE_ROOT = "src"
+"""Where ``#include <wiiuport/...>`` resolves from, matching what
+``src/wiiuport/CMakeLists.txt`` exposes to everything that links the library."""
 
 _FUNCTION_SCOPES = frozenset(
     {
@@ -148,11 +161,39 @@ def _walk(cursor: Cursor, source: Path, relative: str) -> list[Finding]:
     return findings
 
 
-def _compile_arguments(source: Path, database: dict[str, list[str]]) -> list[str]:
+@cache
+def _resource_directory() -> str:
+    """Where the compiler keeps the builtin headers every parse needs.
+
+    The libclang this gate loads is installed from PyPI and ships no headers of
+    its own, so without this it cannot find ``stddef.h`` and every translation
+    unit that reaches libc fails to parse. Asking the compiler that produced the
+    compile database keeps one answer rather than a guessed path per clang
+    release.
+    """
+    if shutil.which("clang++") is None:
+        raise CxxPolicyUnavailable(
+            "clang++ is not on PATH, so the builtin header directory needed to "
+            "parse first-party C++ is unknown and nothing was inspected. "
+            "Install it: sudo dnf install clang"
+        )
+    found = subprocess.run(
+        ["clang++", "-print-resource-dir"], capture_output=True, text=True, check=False
+    )
+    if found.returncode != 0 or not found.stdout.strip():
+        raise CxxPolicyUnavailable(
+            "clang++ did not report a resource directory, so no translation unit "
+            f"could be parsed: {(found.stdout + found.stderr).strip()}"
+        )
+    return found.stdout.strip()
+
+
+def _compile_arguments(source: Path, database: dict[str, list[str]], root: Path) -> list[str]:
+    resource = [f"-resource-dir={_resource_directory()}"]
     arguments = database.get(str(source))
     if arguments is not None:
-        return arguments
-    return list(BASELINE_ARGUMENTS)
+        return [*arguments, *resource]
+    return [*BASELINE_ARGUMENTS, f"-I{root / FIRST_PARTY_INCLUDE_ROOT}", *resource]
 
 
 def _load_compile_database(path: Path) -> dict[str, list[str]]:
@@ -190,7 +231,7 @@ def analyse(sources: list[Path], root: Path, database: dict[str, list[str]]) -> 
         relative = resolved.relative_to(root).as_posix()
         unit = index.parse(
             str(resolved),
-            args=_compile_arguments(resolved, database),
+            args=_compile_arguments(resolved, database, root),
             options=TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD,
         )
         fatal = [str(d) for d in unit.diagnostics if d.severity >= 4]
@@ -224,7 +265,7 @@ def check_cxx_policy(layout: Layout) -> PolicyReport:
     root = layout.root.resolve()
     sources = first_party_sources(root)
     database: dict[str, list[str]] = {}
-    compile_commands = layout.build / "compile_commands.json"
+    compile_commands = layout.wiiuport_build / "compile_commands.json"
     if sources and compile_commands.is_file():
         database = _load_compile_database(compile_commands)
     return analyse(sources, root, database)

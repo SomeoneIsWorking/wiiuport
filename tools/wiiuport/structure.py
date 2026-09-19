@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .paths import Layout
 
-FIRST_PARTY_CXX_ROOTS: tuple[str, ...] = ("src",)
+FIRST_PARTY_CXX_ROOTS: tuple[str, ...] = ("src", "tests/cxx")
 """Upstream Cemu lives under external/ and is out of scope for every gate here."""
 
 DEFAULT_LINE_CAP = 1200
