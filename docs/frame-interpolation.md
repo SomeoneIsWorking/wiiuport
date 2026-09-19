@@ -91,25 +91,37 @@ assembled values and tick N's, for the same draw.
 
 ## Presenting
 
-A title that runs at 30 Hz normally does so by setting `GX2SetSwapInterval(2)`, and
-`LatteTiming_signalVsync` then flips only on every second vsync. The cadence is already
-60 Hz; every second flip simply repeats the previous image. The first consumer was
-measured doing exactly this (see `docs/issues/ISSUE-003-wwhd-swap-interval.md`).
+This section previously claimed that a 30 Hz title already presents at 60 Hz with every
+second flip repeating the previous image, so interpolation could fill the repeat slot
+without adding a present. That is wrong, and reading the fork rather than reasoning
+about vsync is what caught it.
 
-Interpolation fills the repeat slot rather than adding presents:
+What `swapInterval` actually does, in `LatteTiming_signalVsync`
+(`src/Cafe/HW/Latte/Core/LatteTiming.cpp:77`), is gate the **guest's** flip accounting:
+a counter reaches the interval and `flipExecuteCount` advances, which is how the title
+is held to 30 Hz. It performs no presentation.
 
-1. On the vsync that carries a new guest frame, present it as today.
-2. On the repeat vsync, replay the recorded stream instead of showing the duplicate.
-   Each draw re-enters the uniform assembly site, where the consumer's blend of ticks
-   N-1 and N is substituted into the assembled buffer. Present that.
+Host presentation happens elsewhere and exactly once per guest scan-buffer swap:
+`LatteCP_itHLESwapScanBuffer` → `LatteRenderTarget_itHLESwapScanBuffer`
+(`src/Cafe/HW/Latte/Core/LatteRenderTarget.cpp:679`) → `g_renderer->SwapBuffers(true, true)`.
+So at `swapInterval=2` the title produces 30 frames a second and Cemu presents 30 times
+a second. There is no duplicate present, and nothing to reuse.
 
-The cost is one extra scene render per tick. The latency cost is the half-tick the blend
-inherently needs, because a frame between N-1 and N cannot be drawn until N exists — not
-an additional present on top of it.
+**Interpolation therefore has to add a present.** Between consecutive guest swaps the
+runtime replays the recorded stream with the consumer's blend of ticks N-1 and N
+substituted at the uniform assembly site, and presents that as an additional frame:
 
-For a title that flips at 60 Hz already, or at 30 Hz with an interval of 1, there is no
-repeat slot to fill and the runtime must add a present instead. That case is not
-implemented and is refused rather than approximated.
+1. Guest swap N arrives; present it as today.
+2. Before guest swap N+1, replay the recorded stream for N with blended transforms and
+   present the result.
+
+The cost is one extra scene render **and** one extra present per tick, not just the
+render. The latency cost is the half-tick the blend inherently needs, because a frame
+between N-1 and N cannot be drawn until N exists.
+
+Adding a present means the runtime owns its own pacing between guest swaps, which the
+repeat-slot model would have got for free from the existing vsync cadence. That pacing
+is a real piece of work and is not hidden inside "substitute and replay".
 
 The obvious later optimisation — replaying only the passes that depend on the
 substituted transforms and reusing the rest — is an optimisation, not the design. It is
