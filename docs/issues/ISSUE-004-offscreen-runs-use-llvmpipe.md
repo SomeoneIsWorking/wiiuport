@@ -1,7 +1,7 @@
 # ISSUE-004 — Offscreen runs fall back to llvmpipe, so they cannot carry GPU evidence
 
-**State:** open. **Affects:** ST-HEADLESS-GAME, and every future performance or frame
-claim.
+**State:** open, cause unknown. **Affects:** ST-HEADLESS-GAME, and every future
+performance or frame claim.
 
 ## What was measured
 
@@ -21,18 +21,30 @@ MESA: info: vulkan: No DRI3 support detected - required for presentation
 
 The machine has an AMD Radeon RX 6700 XT on RADV.
 
-The cause is exact, and was confirmed in the source rather than inferred from the
-message. `VulkanRenderer::IsDeviceSuitable(surface, device)` begins with
-`FindQueueFamilies(surface, device).IsComplete()`, and `FindQueueFamilies` only accepts
-a queue family for which `vkGetPhysicalDeviceSurfaceSupportKHR` returns true. Xvfb
-provides no DRI3, so RADV reports no present support for that surface, fails
-`IsDeviceSuitable`, and the enumeration falls through to the software rasteriser.
+## The cause that was recorded here, and why it is wrong
 
-RADV is not missing from the offscreen environment — a `vulkaninfo` run on the same
-display lists `AMD Radeon RX 6700 XT (RADV NAVI22)` at API 1.4.354. It is present and
-usable for rendering; it is only unusable for *presenting* to that surface. So this is a
-surface problem, not a driver or device-visibility problem, and a fix that only forced
-the device id would still fail at swapchain creation.
+This issue previously asserted that Xvfb provides no DRI3, so RADV reports no present
+support, fails `VulkanRenderer::IsDeviceSuitable`, and the enumeration falls through to
+the software rasteriser. That reading of the source is accurate as far as it goes, but
+as an explanation of the measurement it is **falsified**:
+
+```
+$ Xvfb :91 -screen 0 1280x720x24 &
+$ DISPLAY=:91 vkcube --c 30
+Selected GPU 0: AMD Radeon RX 6700 XT (RADV NAVI22), type: DiscreteGpu
+```
+
+An ordinary Vulkan client presenting to an X11 surface on this same Xvfb gets RADV and
+runs to completion. Whatever pushed Cemu onto llvmpipe, it is not "Xvfb cannot present
+on RADV". The `No DRI3` line was read as the cause when it was only the loudest message
+nearby.
+
+The remaining candidates are untested, and will stay untested until the runtime builds:
+the harness's isolated environment differs from a plain shell and could change ICD
+enumeration; Cemu's configuration carries a `graphic_device_uuid` that the harness's
+settings template leaves unset, so device choice falls to whatever Cemu defaults to; and
+Cemu builds its surface from a GTK window rather than its own, which vkcube does not
+exercise.
 
 ## Why it matters
 
@@ -45,17 +57,27 @@ rendering device is the real one.
 
 ## What resolves it
 
-An offscreen presentation path that keeps RADV. The candidates, in order of preference:
+No installation is required, which is the other thing the old entry got wrong: it asked
+for `weston` or `cage`. `gamescope` is already on this machine and runs headless on the
+real GPU:
 
-1. A headless Wayland compositor with DRI3 (`weston --backend=headless`, or `cage`),
-   which Xvfb cannot provide. Neither is installed; this needs
-   `sudo dnf install weston` (or `cage`).
-2. A real headless mode in the fork: skip the surface requirement in device selection
-   and capture rendered images instead of presenting. This is more work than (1) but is
-   the better long-term answer, because it also serves frame capture and hosted CI,
-   neither of which should depend on a compositor being installed. Note that selecting
-   the device id alone does **not** work: creation would still fail at the swapchain.
+```
+$ ENABLE_GAMESCOPE_WSI=0 gamescope --backend headless -W 1280 -H 720 -- vkcube --c 60
+[gamescope] vulkan: selecting physical device 'AMD Radeon RX 6700 XT (RADV NAVI22)'
+Selected GPU 0: AMD Radeon RX 6700 XT (RADV NAVI22), type: DiscreteGpu
+[gamescope] launch: Primary child shut down!
+```
 
-Until one of these is in place, every gate and every claim that depends on the renderer
-must state that it has not been measured on the real device, rather than quietly
-inheriting a software-rendered result.
+So there are three things to try against the built runtime, cheapest first:
+
+1. Pin `graphic_device_uuid` in the harness's settings template to the real device.
+2. Run the harness under `gamescope --backend headless` instead of bare Xvfb.
+3. A real headless mode in the fork: drop the surface requirement from device selection
+   and capture rendered images instead of presenting. This is the better long-term
+   answer because it also serves frame capture and hosted CI, neither of which should
+   depend on a compositor being installed.
+
+Which of these is needed depends on the cause, which is not yet known. Until one is in
+place and verified, every gate and every claim that depends on the renderer must state
+that it has not been measured on the real device, rather than quietly inheriting a
+software-rendered result.
