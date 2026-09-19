@@ -48,10 +48,36 @@ def gate_python_lint(layout: Layout) -> GateResult:
     )
     result = subprocess.run(
         ["uv", "run", "--frozen", "--group", "dev", "ruff", "check", "tools", "tests"],
-        cwd=layout.root, capture_output=True, text=True, check=False,
+        cwd=layout.root,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     return GateResult(
-        "python lint (ruff)", result.returncode == 0, len(files),
+        "python lint (ruff)",
+        result.returncode == 0,
+        len(files),
+        (result.stdout + result.stderr).strip(),
+    )
+
+
+def gate_python_format(layout: Layout) -> GateResult:
+    """Non-mutating, so drift fails by file instead of being silently repaired
+    by whoever runs the verifier next."""
+    files = sorted((layout.root / "tools").rglob("*.py")) + sorted(
+        (layout.root / "tests").rglob("*.py")
+    )
+    result = subprocess.run(
+        ["uv", "run", "--frozen", "--group", "dev", "ruff", "format", "--check", "tools", "tests"],
+        cwd=layout.root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return GateResult(
+        "python format (ruff)",
+        result.returncode == 0,
+        len(files),
         (result.stdout + result.stderr).strip(),
     )
 
@@ -59,13 +85,18 @@ def gate_python_lint(layout: Layout) -> GateResult:
 def gate_python_tests(layout: Layout) -> GateResult:
     result = subprocess.run(
         ["uv", "run", "--frozen", "--group", "dev", "python", "-m", "pytest", "-q"],
-        cwd=layout.root, capture_output=True, text=True, check=False,
+        cwd=layout.root,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     output = (result.stdout + result.stderr).strip()
     collected = output.count("passed") and output.splitlines()[-1] or output
     return GateResult(
-        "python tests (pytest)", result.returncode == 0,
-        len(sorted((layout.root / "tests").rglob("test_*.py"))), collected,
+        "python tests (pytest)",
+        result.returncode == 0,
+        len(sorted((layout.root / "tests").rglob("test_*.py"))),
+        collected,
     )
 
 
@@ -84,7 +115,10 @@ def check_formatting(sources: list[Path], cwd: Path) -> tuple[bool, str]:
         )
     result = subprocess.run(
         ["clang-format", "--dry-run", "--Werror", *[str(s) for s in sources]],
-        cwd=cwd, capture_output=True, text=True, check=False,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     return result.returncode == 0, (result.stdout + result.stderr).strip()
 
@@ -94,7 +128,9 @@ def gate_cxx_format(layout: Layout) -> GateResult:
     sources = first_party_cxx_sources(layout)
     if not sources:
         return GateResult(
-            "c++ format (clang-format)", True, 0,
+            "c++ format (clang-format)",
+            True,
+            0,
             "no first-party C++ exists yet; upstream Cemu under external/ is "
             "vendored and is deliberately not reformatted",
         )
@@ -105,7 +141,8 @@ def gate_cxx_format(layout: Layout) -> GateResult:
 def gate_structure(layout: Layout) -> GateResult:
     findings = check_source_sizes(layout)
     return GateResult(
-        "structure (source size limits)", not findings,
+        "structure (source size limits)",
+        not findings,
         len(first_party_cxx_sources(layout)) + len(sorted((layout.root / "tools").rglob("*.py"))),
         "\n".join(findings),
     )
@@ -124,13 +161,12 @@ def gate_cxx_policy(layout: Layout) -> GateResult:
     detail = report.summary
     if report.findings:
         detail = "\n".join([detail, *(str(finding) for finding in report.findings)])
-    return GateResult(
-        "c++ ownership policy", not report.findings, len(report.scanned), detail
-    )
+    return GateResult("c++ ownership policy", not report.findings, len(report.scanned), detail)
 
 
 GATES = (
     gate_python_lint,
+    gate_python_format,
     gate_python_tests,
     gate_cxx_format,
     gate_cxx_policy,

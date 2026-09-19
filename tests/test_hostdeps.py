@@ -11,9 +11,7 @@ from wiiuport.hostdeps import (
     report,
 )
 
-ABSENT = Requirement(
-    "imaginary library", ("imaginary-devel",), files=("/nonexistent/imaginary.h",)
-)
+ABSENT = Requirement("imaginary library", ("imaginary-devel",), files=("/nonexistent/imaginary.h",))
 PRESENT = Requirement("python interpreter", ("python3",), executables=("python3",))
 
 

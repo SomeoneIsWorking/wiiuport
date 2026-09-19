@@ -96,7 +96,9 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
     # GTK 3 dependency on both Fedora and Debian, which is exactly why an undeclared
     # requirement like this stays invisible until something stops pulling it in.
     Requirement("cairo", ("cairo-devel",), files=("/usr/include/cairo/cairo.h",)),
-    Requirement("libsecret", ("libsecret-devel",), files=("/usr/include/libsecret-1/libsecret/secret.h",)),
+    Requirement(
+        "libsecret", ("libsecret-devel",), files=("/usr/include/libsecret-1/libsecret/secret.h",)
+    ),
     Requirement("libgcrypt", ("libgcrypt-devel",), executables=("libgcrypt-config",)),
     Requirement("libusb", ("libusb1-devel",), files=("/usr/include/libusb-1.0/libusb.h",)),
     Requirement("bluez", ("bluez-libs-devel",), files=("/usr/include/bluetooth/bluetooth.h",)),
@@ -107,8 +109,11 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
     # the build actually consumes went unchecked -- the same shape of gap as libpng.
     Requirement("udev", ("systemd-devel",), files=("/usr/include/libudev.h",)),
     Requirement("freeglut", ("freeglut-devel",), files=("/usr/include/GL/freeglut.h",)),
-    Requirement("wayland-protocols", ("wayland-protocols-devel",),
-                files=("/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml",)),
+    Requirement(
+        "wayland-protocols",
+        ("wayland-protocols-devel",),
+        files=("/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml",),
+    ),
 )
 
 
@@ -129,10 +134,7 @@ def check(requirements: tuple[Requirement, ...] = CEMU_REQUIREMENTS) -> None:
     packages = sorted({p for r in missing for p in r.dnf_packages})
     lines = [
         f"{len(missing)} of {len(requirements)} host requirements are not satisfied:",
-        *(
-            f"  - {r.name}\n      absent: {', '.join(r.missing_parts())}"
-            for r in missing
-        ),
+        *(f"  - {r.name}\n      absent: {', '.join(r.missing_parts())}" for r in missing),
         "",
         "Install them and re-run. On Fedora:",
         "  sudo dnf install " + " ".join(packages),

@@ -18,8 +18,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-type", default="RelWithDebInfo")
     parser.add_argument("--configure-only", action="store_true")
-    parser.add_argument("--check-deps-only", action="store_true",
-                        help="Report host requirements and exit without building.")
+    parser.add_argument(
+        "--check-deps-only",
+        action="store_true",
+        help="Report host requirements and exit without building.",
+    )
     args = parser.parse_args(argv)
 
     try:
