@@ -13,7 +13,14 @@ import sys
 from pathlib import Path
 
 from wiiuport.paths import find_layout
-from wiiuport.uniformcapture import CaptureUnreadable, ShaderAnalysis, analyse, read_records
+from wiiuport.uniformcapture import (
+    CaptureUnreadable,
+    ShaderAnalysis,
+    analyse,
+    rank_for_review,
+    read_records,
+    without_frame_constant_slots,
+)
 
 
 def _print_shader(result: ShaderAnalysis, limit: int) -> None:
@@ -53,11 +60,27 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     results = analyse(records)
-    print(f"{len(records)} draws across {len(results)} shaders in {path}")
-    for result in results[: args.shaders]:
+    ranked = rank_for_review(results)
+    dull = without_frame_constant_slots(ranked)
+    interesting = [r for r in ranked if r.of("frame-constant")]
+    print(
+        f"{len(records)} draws across {len(results)} shaders in {path}: "
+        f"{len(interesting)} with frame-constant slots, {len(dull)} without"
+    )
+    if not interesting:
+        print(
+            "no shader holds a slot that is constant within a frame and changes between "
+            "frames, so no camera is visible in this capture. Either the window did not "
+            "reach a drawn scene, or the view did not move across the frames captured."
+        )
+    # Every shader with a frame-constant slot is shown; only the dull tail is
+    # capped, because the cap exists to keep the report readable and not to
+    # decide what is in it.
+    shown = interesting + dull[: args.shaders]
+    for result in shown:
         _print_shader(result, args.slots)
-    if len(results) > args.shaders:
-        print(f"({len(results) - args.shaders} further shaders not shown)")
+    if len(shown) < len(ranked):
+        print(f"({len(ranked) - len(shown)} further shaders without frame-constant slots)")
     return 0
 
 
