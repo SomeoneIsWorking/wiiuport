@@ -12,6 +12,7 @@ tick rate.
 - Epic intent: [`docs/project-goals.md`](docs/project-goals.md)
 - What actually works today: [`docs/project-state.md`](docs/project-state.md)
 - Who owns what: [`docs/codemap.md`](docs/codemap.md)
+- How interpolation works: [`docs/frame-interpolation.md`](docs/frame-interpolation.md)
 
 The upstream fork is pinned as the `external/cemu` submodule. This repository contains
 no game files, keys, or anything derived from them, and never will.
