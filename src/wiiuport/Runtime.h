@@ -4,6 +4,7 @@
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/frame/SearchFeed.h"
+#include "wiiuport/input/InputDriver.h"
 #include "wiiuport/interp/TransformSearch.h"
 
 namespace wiiuport {
@@ -48,13 +49,18 @@ class Runtime {
         return m_search;
     }
 
+    input::InputDriver& input() {
+        return m_input;
+    }
+
   private:
     frame::RecordingObserver m_recorder;
     frame::FrameReplayer m_replayer;
     frame::ReplayScheduler m_scheduler{m_replayer};
     interp::TransformSearch m_search;
     frame::SearchFeed m_searchFeed{m_search};
-    control::ControlChannel m_control{m_recorder, m_replayer, m_search};
+    input::InputDriver m_input;
+    control::ControlChannel m_control{m_recorder, m_replayer, m_search, m_input};
     bool m_hooksInstalled{false};
 };
 

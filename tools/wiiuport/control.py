@@ -37,6 +37,9 @@ class Counters:
     replaysRun: int
     replayListsSubmitted: int
     replayListsRefused: int
+    inputPollsSeen: int
+    inputPollsAnswered: int
+    inputPressesQueued: int
 
     @property
     def recorded_anything(self) -> bool:
@@ -99,12 +102,14 @@ class TransformReport:
     rejectedNeverChanging: int
     rejectedRotation: int
     candidatesFound: int
+    sharedAndMoving: int
     candidates: tuple[TransformCandidate, ...]
 
     def render(self) -> str:
         totals = (
-            f"{self.candidatesFound} candidates from {self.spansExamined} spans examined "
-            f"across {self.shadersTracked} shaders over {self.framesObserved} frames"
+            f"{self.candidatesFound} candidates ({self.sharedAndMoving} shared and moving) "
+            f"from {self.spansExamined} spans examined across {self.shadersTracked} shaders "
+            f"over {self.framesObserved} frames"
         )
         rejected = (
             f"  rejected: {self.rejectedVaryingWithinFrame} varying within a frame, "
@@ -123,7 +128,7 @@ class TransformReport:
                 "never reached a drawn scene, or this title does not pass its view as a 3x4 "
                 "in the assembled uniform buffer."
             )
-        elif not any(c.is_shared for c in self.candidates):
+        elif self.sharedAndMoving == 0:
             lines.append(
                 "  every candidate appears in one shader only, so none is shown to be a "
                 "view rather than that object's own transform"
@@ -195,5 +200,6 @@ def read_transforms(port: int = DEFAULT_PORT, timeout: float = 5.0) -> Transform
         rejectedNeverChanging=int(payload["rejectedNeverChanging"]),
         rejectedRotation=int(payload["rejectedRotation"]),
         candidatesFound=int(payload["candidatesFound"]),
+        sharedAndMoving=int(payload["sharedAndMoving"]),
         candidates=tuple(candidates),
     )

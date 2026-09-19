@@ -24,6 +24,7 @@ tracked patch files, and the submodule pin is the source of truth.
 | Fork interposition hooks | `external/cemu`, minimal and per-cause | The fork exposes callbacks at the frame boundary and at `LatteCP_itIndirectBuffer`; it does not implement recording, blending, or policy. |
 | Process-lifetime ownership of first-party state | `src/wiiuport/Runtime.h` | One object, installed once. The hook registry holds a raw pointer, so what it points at outlives every frame. |
 | Frame capture of the guest draw stream | `src/wiiuport/frame/` | Records the `IT_INDIRECT_BUFFER` display lists a frame references, by copy, because the guest reuses the storage. |
+| Driving the gamepad | `src/wiiuport/input/InputDriver.h` | Supplies presses and stick positions to the emulated gamepad through the fork's one input boundary. Declines the player when nothing is queued, so an unused build behaves as upstream. |
 | Finding the view transform | `src/wiiuport/interp/TransformSearch.h` | Classifies uniform slots by behaviour across frames and draws. Pure: a test drives it frame by frame with no emulator. |
 | Feeding the search | `src/wiiuport/frame/SearchFeed.h` | Folds each published frame in. Carries no policy, so the search stays testable and the recorder stays ignorant of its readers. |
 | Frame replay | `src/wiiuport/frame/FrameReplayer.h` | Re-feeds recorded buffers through `LatteFrameHooks::SubmitDisplayList`. Submission is injected, so the replayer is tested without an emulator. Armed one frame at a time; never fires on its own. |
