@@ -34,6 +34,9 @@ class Counters:
     lastFrameDisplayLists: int
     lastFrameUniformAssemblies: int
     lastFrameBytes: int
+    replaysRun: int
+    replayListsSubmitted: int
+    replayListsRefused: int
 
     @property
     def recorded_anything(self) -> bool:
@@ -45,7 +48,9 @@ class Counters:
             f"{self.framesRefusedIncomplete}), display lists {self.displayListsSeen}, "
             f"uniform assemblies {self.uniformAssembliesSeen}; last frame held "
             f"{self.lastFrameDisplayLists} lists and "
-            f"{self.lastFrameUniformAssemblies} assemblies in {self.lastFrameBytes} bytes"
+            f"{self.lastFrameUniformAssemblies} assemblies in {self.lastFrameBytes} bytes; "
+            f"replays {self.replaysRun} submitting {self.replayListsSubmitted} lists "
+            f"({self.replayListsRefused} refused)"
         )
 
 
@@ -64,7 +69,7 @@ def read_counters(port: int = DEFAULT_PORT, timeout: float = 2.0) -> Counters:
         raise ControlUnavailable(f"{url} answered something that is not JSON: {malformed}") from (
             malformed
         )
-    missing = {field for field in Counters.__annotations__} - set(payload)
+    missing = set(Counters.__annotations__) - set(payload)
     if missing:
         raise ControlUnavailable(
             f"{url} answered without {sorted(missing)}, so the runtime and this client "

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "wiiuport/frame/FrameReplayer.h"
 #include "wiiuport/frame/RecordingObserver.h"
 
 #include <cstdint>
@@ -20,7 +21,7 @@ namespace wiiuport::control {
 // state of its own: every answer is read from the recorder it was given.
 class ControlChannel {
   public:
-    explicit ControlChannel(const frame::RecordingObserver& recorder);
+    ControlChannel(const frame::RecordingObserver& recorder, frame::FrameReplayer& replayer);
     ~ControlChannel();
 
     ControlChannel(const ControlChannel&) = delete;
@@ -38,6 +39,7 @@ class ControlChannel {
 
   private:
     const frame::RecordingObserver& m_recorder;
+    frame::FrameReplayer& m_replayer;
     std::unique_ptr<lucent::http::Server> m_server;
 };
 

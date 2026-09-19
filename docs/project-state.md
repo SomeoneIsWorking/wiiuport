@@ -3,10 +3,10 @@
 Factual capability inventory. Epic intent is in `docs/project-goals.md`.
 Every item is `verified`, `partial`, `blocked`, or `missing`.
 
-**Current focus.** ST-REPLAY — recording is measured on the real title through the control
-channel, so the next step is re-feeding a recorded frame's lists through the command
-processor with substituted transforms, and proving it at t=1 against the original frame
-(ST-NULLDIFF).
+**Current focus.** ST-NULLDIFF — a recorded frame now submits and the run survives it, so
+the next step is proving the replayed image is the frame it recorded before any transform
+is substituted. That needs a framebuffer readback over the control channel; nothing yet
+compares what replay drew.
 
 ## Comparison baseline
 
@@ -22,7 +22,7 @@ presents at 30 Hz. Every item below states its difference from that baseline.
 | ST-BUILD | Pinned fork configures and builds from a clean tree with Clang + Ninja | verified | Verified on hosted Linux from a cold checkout (run 35436011965: Clang, Ninja, full vcpkg and Cemu corpus in 32 minutes) and now locally on Fedora, producing a 299 MB `external/cemu/bin/Cemu_relwithdebinfo` with `CMAKE_CXX_COMPILER_ID=Clang` read from the configured cache. The local build needed `libpng-static`, which Fedora splits out of `libpng-devel`; `tools/hostdeps.py` names it and the host now has it. |
 | ST-LIB | Runtime exposed to a consuming title through a narrow C++ interface | missing | No interface exists. Cemu is currently only an application entry point. |
 | ST-RECORD | A frame's guest draw stream can be recorded for replay | partial | `FrameRecording` holds a frame's display lists and assembled uniform buffers by copy; `RecordingObserver` fills it from the fork's hooks. Measured on the real title through the runtime's own control channel (`GET /counters`, 12 of 12 polls answered): frames advancing to 1,642 with 487,340 display lists and 4,471,932 uniform assemblies, 0 refused incomplete, a steady ~262 lists and ~1,290 assemblies in ~306 KB per frame. The copy is required rather than cautious: 175 of 175 distinct display-list addresses recur across frames, and a test proves a recording survives overwriting its source. Exact gap: nothing replays a recording yet, and only the last complete frame is retained. |
-| ST-REPLAY | A recorded frame replays with substituted transform state | missing | Depends on ST-RECORD. Substitution happens at the Vulkan renderer's uniform-assembly site (`uniformData_updateUniformVars`), which covers both Latte uniform modes in one place. |
+| ST-REPLAY | A recorded frame replays with substituted transform state | partial | `LatteFrameHooks::SubmitDisplayList` feeds a recorded buffer back through `LatteCP_processCommandBuffer` on its own `DrawPassContext`, so a replay cannot leave half a draw pass in the stream the guest is mid-way through. `FrameReplayer` is armed one frame at a time over `POST /replay`. Measured on the real title: 1 replay, 288 lists submitted, 0 refused, and the runtime kept answering for 6 further polls with frames advancing 1,133 to 2,035. Exact gap: this proves the submission is accepted and survived, not that it drew the frame faithfully -- no image was compared, and no transform is substituted yet. ST-NULLDIFF is the gate for faithfulness and is still missing. |
 | ST-REPLAY-GL | Interpolation under the OpenGL renderer | missing | Deliberately out of scope: the assembly site used for substitution is the Vulkan renderer's. OpenGL presents at the guest rate. |
 | ST-NULLDIFF | Null-interpolation discriminator: replay at t=1 is byte-identical to the original frame | missing | The gate that proves replay is faithful before any blending is trusted. Depends on ST-REPLAY. |
 | ST-SHADOW | Substituted transform storage never writes back to guest memory | missing | Depends on ST-REPLAY. |

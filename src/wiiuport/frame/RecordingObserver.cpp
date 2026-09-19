@@ -34,6 +34,11 @@ void RecordingObserver::OnFrameEnd() {
         m_framesRefusedIncomplete++;
     }
     m_inFlight.clear();
+    // After publishing, never before: a listener must not be handed a frame
+    // that is still being filled.
+    if (m_listener != nullptr) {
+        m_listener->onFrameRecorded(m_completed);
+    }
 }
 
 } // namespace wiiuport::frame

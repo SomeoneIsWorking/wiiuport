@@ -7,6 +7,15 @@
 
 namespace wiiuport::frame {
 
+// Notified once a frame is complete and published, which is the only moment
+// anything may act on a whole frame. Kept as a narrow interface so the
+// recorder does not acquire an opinion about what happens next.
+class FrameEndListener {
+  public:
+    virtual ~FrameEndListener() = default;
+    virtual void onFrameRecorded(const FrameRecording& recording) = 0;
+};
+
 // Fills a FrameRecording from the fork's hooks, and nothing else.
 //
 // Kept separate from FrameRecording so the recording stays testable without
@@ -20,6 +29,12 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void OnDisplayList(const LatteFrameHooks::DisplayList& list) override;
     void OnUniformAssembly(const LatteFrameHooks::UniformAssembly& assembly) override;
     void OnFrameEnd() override;
+
+    // Null by default, so a build that installs no listener behaves as a
+    // pure recorder.
+    void setFrameEndListener(FrameEndListener* listener) {
+        m_listener = listener;
+    }
 
     // The last frame that ended. Empty until one has. Held separately from the
     // frame being filled so a replay never reads a half-recorded frame.
@@ -46,6 +61,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     }
 
   private:
+    FrameEndListener* m_listener{nullptr};
     FrameRecording m_inFlight;
     FrameRecording m_completed;
     uint64_t m_framesObserved{0};
