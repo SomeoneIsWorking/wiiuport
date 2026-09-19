@@ -71,8 +71,24 @@ repeatable runs that compare real captured frames against stated expectations.
 
 ## GOAL-PLATFORM — Hosted CI for every claimed host
 
-**Outcome.** Linux, Windows, and macOS jobs that configure, build, lint, and test the
-runtime library and its synthetic interpolation fixtures on the matching host.
+**Outcome.** A hosted job per claimed host that configures, builds, lints, and tests the
+runtime and its synthetic interpolation fixtures on that host.
+
+**The claimed host is Linux, and only Linux.** The first consumer ships a Linux
+product, the interpolation work substitutes into the Vulkan backend, and the offscreen
+evidence path is built on Linux graphics. Windows and macOS are therefore not claimed
+and deliberately have no job: a job that ran only the Python gates on those runners
+would report green for a platform nothing has ever been built or run on, which is worse
+than an honest absence. They become goals when something actually targets them, and
+they get a real build job in the same change.
+
+**Success conditions.**
+- The Linux job builds the pinned fork through the same Python owners a maintainer
+  uses, rather than duplicating build policy in workflow YAML.
+- A cold job is correct: caches only make it faster, never make it pass.
+- Third-party actions are pinned to full commit SHAs, permissions are least-privilege,
+  and every job has an explicit timeout.
 
 **Constraints.** Real-title conformance stays local: no game files, keys, or derived
-title data in CI, secrets, commits, or packages.
+title data in CI, secrets, commits, or packages. A green CI run proves the runtime
+builds and the gates hold; it never proves anything about this or any title.
