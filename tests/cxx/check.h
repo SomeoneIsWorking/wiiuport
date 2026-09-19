@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <sstream>
 #include <string>
 
 // A deliberately small harness rather than a test framework dependency.
@@ -34,6 +35,20 @@ inline void near(float actual, float expected, float tolerance, const std::strin
         return;
     }
     isTrue(true, what);
+}
+
+// Prints both operands, because "FAIL the address is kept" without the two
+// values sends the reader back to the debugger to learn what it already knew.
+template <typename T, typename U>
+inline void equal(const T& actual, const U& expected, const std::string& what) {
+    g_checks++;
+    if (actual == expected) {
+        return;
+    }
+    g_failures++;
+    std::ostringstream message;
+    message << "  FAIL " << what << ": " << actual << " != " << expected << "\n";
+    std::fputs(message.str().c_str(), stdout);
 }
 
 } // namespace check
