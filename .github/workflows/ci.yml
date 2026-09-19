@@ -96,3 +96,19 @@ jobs:
           binary=external/cemu/bin/Cemu_relwithdebinfo
           test -x "$binary" || { echo "no runtime binary at $binary"; exit 1; }
           ls -l "$binary"
+
+      # The binary only, never bin/resources or bin/gameProfiles: those are
+      # tracked in the fork and already present in any checkout. It carries no
+      # game files -- there are none in CI, and there never will be.
+      #
+      # This exists so reverse-engineering work can proceed on a host whose own
+      # build is blocked. It is not a substitute for ST-BUILD: a binary built on
+      # another distribution is evidence about the title, not about this
+      # machine's toolchain.
+      - name: Publish the runtime binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cemu-relwithdebinfo-linux-x64
+          path: external/cemu/bin/Cemu_relwithdebinfo
+          if-no-files-found: error
+          retention-days: 7
