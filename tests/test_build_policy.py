@@ -67,3 +67,42 @@ def test_a_failed_command_without_a_log_still_refuses(tmp_path: Path) -> None:
         build._run(["false"], log=None, what="configure")
     assert "configure failed" in str(refusal.value)
     assert "--- last " not in str(refusal.value)
+
+
+def test_a_missing_cache_and_a_stalled_cache_refuse_differently(tmp_path: Path) -> None:
+    """The two causes of "no compiler id" must not read identically: cmake
+    never wrote a cache, or it wrote one and stopped before compiler detection."""
+    missing = build._cache_evidence(tmp_path)
+    assert "no cache at all" in missing
+
+    cache = tmp_path / "CMakeCache.txt"
+    cache.write_text(
+        "# comment\n//doc\nCMAKE_GENERATOR:INTERNAL=Ninja\nSOMETHING:BOOL=ON\n",
+        encoding="utf-8",
+    )
+    stalled = build._cache_evidence(tmp_path)
+    assert "2 entries" in stalled
+    assert "CMAKE_GENERATOR:INTERNAL=Ninja" in stalled
+    assert "no cache at all" not in stalled
+
+
+def test_a_cache_without_generator_entries_says_so(tmp_path: Path) -> None:
+    (tmp_path / "CMakeCache.txt").write_text("SOMETHING:BOOL=ON\n", encoding="utf-8")
+    assert "(none of them are set)" in build._cache_evidence(tmp_path)
+
+
+def test_the_vcpkg_environment_does_not_add_force_system_binaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Applying it to every host was unexplained policy; upstream does not.
+
+    The assertion is that the build tool does not introduce it, not that the
+    ambient environment lacks it -- a caller who exports it deliberately is
+    still obeyed, and a bare "not in" check would pass or fail by accident
+    depending on the shell the tests were started from.
+    """
+    monkeypatch.delenv("VCPKG_FORCE_SYSTEM_BINARIES", raising=False)
+    assert "VCPKG_FORCE_SYSTEM_BINARIES" not in build._vcpkg_environment()
+
+    monkeypatch.setenv("VCPKG_FORCE_SYSTEM_BINARIES", "1")
+    assert build._vcpkg_environment()["VCPKG_FORCE_SYSTEM_BINARIES"] == "1"
