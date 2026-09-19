@@ -1,6 +1,7 @@
 #include "check.h"
 #include "suites.h"
 #include "wiiuport/frame/FrameRecording.h"
+#include "wiiuport/frame/RecordingObserver.h"
 
 #include <array>
 #include <cstring>
@@ -8,6 +9,7 @@
 
 using wiiuport::frame::FrameRecording;
 using wiiuport::frame::RecordedUniformAssembly;
+using wiiuport::frame::RecordingObserver;
 
 namespace {
 
@@ -80,6 +82,92 @@ void clearingReturnsTheRecordingToEmpty() {
     check::isTrue(recording.addDisplayList(3, data.data(), 16), "so recording can begin again");
 }
 
+// The observer is driven through the fork's own hook types rather than a
+// stand-in for them, so a change to that interface breaks this build instead
+// of leaving a test that agrees with a version nobody ships any more.
+LatteFrameHooks::DisplayList listOf(uint32_t address, const void* data, uint32_t size) {
+    LatteFrameHooks::DisplayList list{};
+    list.physicalAddress = address;
+    list.data = data;
+    list.sizeInBytes = size;
+    return list;
+}
+
+void aFrameIsOnlyPublishedWhenItEnds() {
+    std::array<uint32_t, 4> guest{1, 2, 3, 4};
+    RecordingObserver observer;
+    observer.OnDisplayList(listOf(0x30000000, guest.data(), 16));
+
+    check::equal(observer.lastCompleteFrame().displayLists().size(), size_t{0},
+                 "a frame still being recorded is not readable as a complete one");
+    check::equal(observer.framesObserved(), uint64_t{0}, "and no frame has ended yet");
+
+    observer.OnFrameEnd();
+    check::equal(observer.framesObserved(), uint64_t{1}, "the frame ended");
+    check::equal(observer.lastCompleteFrame().displayLists().size(), size_t{1},
+                 "and is now readable");
+}
+
+void theNextFrameDoesNotAccumulateOntoTheLast() {
+    std::array<uint32_t, 4> guest{1, 2, 3, 4};
+    RecordingObserver observer;
+    observer.OnDisplayList(listOf(1, guest.data(), 16));
+    observer.OnFrameEnd();
+    observer.OnDisplayList(listOf(2, guest.data(), 16));
+    observer.OnDisplayList(listOf(3, guest.data(), 16));
+    observer.OnFrameEnd();
+
+    check::equal(observer.lastCompleteFrame().displayLists().size(), size_t{2},
+                 "the second frame holds its own two lists, not four");
+    check::equal(observer.lastCompleteFrame().displayLists()[0].physicalAddress, uint32_t{2},
+                 "and starts at the second frame's first list");
+    check::equal(observer.displayListsSeen(), uint64_t{3}, "while the total seen still counts all");
+}
+
+void aUniformAssemblyCrossesTheHookIntact() {
+    std::array<float, 12> values{1, 0, 0, 10, 0, 1, 0, 20, 0, 0, 1, 30};
+    std::array<uint32_t, 2> sources{4, 0xf4000000};
+    LatteFrameHooks::UniformAssembly assembly{};
+    assembly.shaderBaseHash = 0xb7252004aba21c10ull;
+    assembly.stageIndex = 0;
+    assembly.data = values.data();
+    assembly.sizeInBytes = static_cast<uint32_t>(values.size() * sizeof(float));
+    assembly.blockAddresses = sources.data();
+    assembly.blockAddressCount = static_cast<uint32_t>(sources.size());
+
+    RecordingObserver observer;
+    observer.OnUniformAssembly(assembly);
+    observer.OnFrameEnd();
+    values[3] = 999.0f;
+
+    const auto& recorded = observer.lastCompleteFrame().uniformAssemblies();
+    check::equal(recorded.size(), size_t{1}, "one assembly was recorded");
+    check::equal(recorded[0].data.size(), size_t{12}, "all twelve floats came across");
+    check::equal(recorded[0].data[3], 10.0f, "by copy, so the guest's later write is not seen");
+    check::equal(recorded[0].blockSources.size(), size_t{2}, "both source words came across");
+    check::equal(recorded[0].shaderBaseHash, 0xb7252004aba21c10ull,
+                 "with the shader it belongs to");
+}
+
+void anOversizedSourceListIsCappedNotTrusted() {
+    std::array<uint32_t, 64> sources{};
+    std::array<float, 4> values{};
+    LatteFrameHooks::UniformAssembly assembly{};
+    assembly.data = values.data();
+    assembly.sizeInBytes = static_cast<uint32_t>(values.size() * sizeof(float));
+    assembly.blockAddresses = sources.data();
+    // A count the interface says cannot happen. If it does, reading it would
+    // run off the caller's buffer.
+    assembly.blockAddressCount = 64;
+
+    RecordingObserver observer;
+    observer.OnUniformAssembly(assembly);
+    observer.OnFrameEnd();
+    check::equal(observer.lastCompleteFrame().uniformAssemblies()[0].blockSources.size(),
+                 size_t{LatteFrameHooks::kMaxUniformBlockSources},
+                 "the read stops at the interface's own cap");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -90,6 +178,10 @@ void runFrameTests() {
     goingOverBudgetRefusesRatherThanTruncating();
     aUniformAssemblyIsHeldByValue();
     clearingReturnsTheRecordingToEmpty();
+    aFrameIsOnlyPublishedWhenItEnds();
+    theNextFrameDoesNotAccumulateOntoTheLast();
+    aUniformAssemblyCrossesTheHookIntact();
+    anOversizedSourceListIsCappedNotTrusted();
 }
 
 } // namespace wiiuport::tests

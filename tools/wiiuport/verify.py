@@ -44,11 +44,28 @@ def first_party_cxx_sources(layout: Layout) -> list[Path]:
 
 
 def gate_python_lint(layout: Layout) -> GateResult:
+    """Uncached, because a cached pass is not a check.
+
+    Measured: adding ``src/`` changed which packages ruff treats as
+    first-party, its cache did not invalidate, and this gate reported a clean
+    tree that CI then rejected on two files nobody had touched.
+    """
     files = sorted((layout.root / "tools").rglob("*.py")) + sorted(
         (layout.root / "tests").rglob("*.py")
     )
     result = subprocess.run(
-        ["uv", "run", "--frozen", "--group", "dev", "ruff", "check", "tools", "tests"],
+        [
+            "uv",
+            "run",
+            "--frozen",
+            "--group",
+            "dev",
+            "ruff",
+            "check",
+            "--no-cache",
+            "tools",
+            "tests",
+        ],
         cwd=layout.root,
         capture_output=True,
         text=True,
@@ -69,7 +86,19 @@ def gate_python_format(layout: Layout) -> GateResult:
         (layout.root / "tests").rglob("*.py")
     )
     result = subprocess.run(
-        ["uv", "run", "--frozen", "--group", "dev", "ruff", "format", "--check", "tools", "tests"],
+        [
+            "uv",
+            "run",
+            "--frozen",
+            "--group",
+            "dev",
+            "ruff",
+            "format",
+            "--check",
+            "--no-cache",
+            "tools",
+            "tests",
+        ],
         cwd=layout.root,
         capture_output=True,
         text=True,
