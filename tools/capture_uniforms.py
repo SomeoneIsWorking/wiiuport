@@ -21,6 +21,8 @@ from wiiuport.paths import find_layout
 
 ENV_GAME = "WIIUPORT_GAME"
 CAPTURE_NAME = "uniform-capture.bin"
+ENV_START_FRAME = "CEMU_UNIFORM_CAPTURE_START_FRAME"
+ENV_FRAMES = "CEMU_UNIFORM_CAPTURE_FRAMES"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28,6 +30,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--game", type=Path, help=f"disc image; defaults to ${ENV_GAME}")
     parser.add_argument("--keys", type=Path, default=Path.home() / ".local/share/Cemu/keys.txt")
     parser.add_argument("--seconds", type=int, default=120, help="how long to let it run")
+    parser.add_argument(
+        "--start-frame",
+        type=int,
+        default=0,
+        help="frames to let pass before recording; the first ones are the boot logo",
+    )
+    parser.add_argument("--frames", type=int, default=4, help="how many frames to record")
     args = parser.parse_args(argv)
 
     game = args.game or (Path(os.environ[ENV_GAME]) if ENV_GAME in os.environ else None)
@@ -52,13 +61,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     session = HeadlessSession(
-        layout=layout, activity="uniform-capture", logflag=log_flags(LogType.UNIFORM_CAPTURE)
+        layout=layout,
+        activity="uniform-capture",
+        logflag=log_flags(LogType.UNIFORM_CAPTURE),
+        runtime_env={
+            ENV_START_FRAME: str(args.start_frame),
+            ENV_FRAMES: str(args.frames),
+        },
     )
     with session:
         session.prepare(keys_source=args.keys)
         result = session.run([str(binary), "--game", str(game)], timeout_seconds=args.seconds)
 
-    print(f"run: exit={result.exit_code} reached_binary={result.reached_the_binary}")
+    print(
+        f"run: exit={result.exit_code} reached_binary={result.reached_the_binary} "
+        f"start_frame={args.start_frame} frames={args.frames}"
+    )
     log = session.data_home / "Cemu" / "log.txt"
     if log.is_file():
         for line in log.read_text(errors="replace").splitlines():
@@ -69,7 +87,9 @@ def main(argv: list[str] | None = None) -> int:
     if not produced.is_file():
         print(
             f"refused: the run left no {CAPTURE_NAME}. Capture was requested, so this is a "
-            "failure of the instrument, not an empty result.",
+            f"failure of the instrument, not an empty result. If the lines above stop at a "
+            f"frame below {args.start_frame}, the run ended before the window opened and "
+            f"needs longer than {args.seconds}s or a lower --start-frame.",
             file=sys.stderr,
         )
         return 1

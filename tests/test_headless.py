@@ -99,3 +99,21 @@ def test_a_default_session_enables_no_logging(tmp_path: Path) -> None:
     session.prepare()
     settings = (session.config_home / "Cemu" / "settings.xml").read_text()
     assert "<logflag>0</logflag>" in settings
+
+
+def test_runtime_overrides_reach_the_child_environment(tmp_path: Path) -> None:
+    session = HeadlessSession(layout=Layout(root=tmp_path), runtime_env={"CAPTURE_START": "3000"})
+    assert session.environment()["CAPTURE_START"] == "3000"
+
+
+def test_runtime_overrides_cannot_break_the_isolation(tmp_path: Path) -> None:
+    """The negative that matters: a caller passing XDG_DATA_HOME would send a
+    run's output into the operator's own Cemu directory, so isolation is
+    applied after the overrides rather than before."""
+    session = HeadlessSession(
+        layout=Layout(root=tmp_path),
+        runtime_env={"XDG_DATA_HOME": "/somewhere/else", "DISPLAY": ":0"},
+    )
+    env = session.environment()
+    assert env["XDG_DATA_HOME"] == str(session.data_home)
+    assert env["DISPLAY"] == ":99"

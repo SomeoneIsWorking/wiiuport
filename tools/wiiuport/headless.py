@@ -111,6 +111,10 @@ class HeadlessSession:
     """Which runtime log types to enable, from `log_flags`. Zero keeps a run
     quiet; a capture run switches on exactly what it intends to read."""
 
+    runtime_env: dict[str, str] = field(default_factory=dict)
+    """Runtime-specific overrides layered over the isolated environment. They
+    cannot displace the isolation itself, which is applied last."""
+
     _xvfb: subprocess.Popen[bytes] | None = field(default=None, init=False, repr=False)
 
     @property
@@ -131,6 +135,9 @@ class HeadlessSession:
 
     def environment(self) -> dict[str, str]:
         env = dict(os.environ)
+        env.update(self.runtime_env)
+        # Applied after the caller's overrides: isolation is the one part of
+        # this environment a caller must not be able to reach around.
         env["DISPLAY"] = f":{self.display}"
         env.pop("WAYLAND_DISPLAY", None)
         env["XDG_CONFIG_HOME"] = str(self.config_home)
