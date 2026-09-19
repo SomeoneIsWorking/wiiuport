@@ -9,5 +9,6 @@ void runTransformTests();
 void runFrameTests();
 void runControlTests();
 void runReplayTests();
+void runSearchTests();
 
 } // namespace wiiuport::tests

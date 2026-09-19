@@ -3,6 +3,8 @@
 #include "wiiuport/control/ControlChannel.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/ReplayScheduler.h"
+#include "wiiuport/frame/SearchFeed.h"
+#include "wiiuport/interp/TransformSearch.h"
 
 namespace wiiuport {
 
@@ -42,11 +44,17 @@ class Runtime {
         return m_replayer;
     }
 
+    const interp::TransformSearch& transformSearch() const {
+        return m_search;
+    }
+
   private:
     frame::RecordingObserver m_recorder;
     frame::FrameReplayer m_replayer;
     frame::ReplayScheduler m_scheduler{m_replayer};
-    control::ControlChannel m_control{m_recorder, m_replayer};
+    interp::TransformSearch m_search;
+    frame::SearchFeed m_searchFeed{m_search};
+    control::ControlChannel m_control{m_recorder, m_replayer, m_search};
     bool m_hooksInstalled{false};
 };
 

@@ -2,7 +2,9 @@
 
 #include "wiiuport/frame/FrameReplayer.h"
 #include "wiiuport/frame/RecordingObserver.h"
+#include "wiiuport/interp/TransformSearch.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -21,7 +23,12 @@ namespace wiiuport::control {
 // state of its own: every answer is read from the recorder it was given.
 class ControlChannel {
   public:
-    ControlChannel(const frame::RecordingObserver& recorder, frame::FrameReplayer& replayer);
+    // How many candidates GET /transforms lists. The totals beside them
+    // are never capped, so a cut list still reports how many there were.
+    static constexpr size_t kDefaultTransformLimit = 20;
+
+    ControlChannel(const frame::RecordingObserver& recorder, frame::FrameReplayer& replayer,
+                   const interp::TransformSearch& search);
     ~ControlChannel();
 
     ControlChannel(const ControlChannel&) = delete;
@@ -33,13 +40,19 @@ class ControlChannel {
     bool running() const;
     uint16_t port() const;
 
-    // The body of GET /counters. Pure, so a test reads exactly what a client
-    // would without opening a socket.
+    // The bodies of the two GET routes. Pure, so a test reads exactly what a
+    // client would without opening a socket.
     std::string countersJson() const;
+
+    // What the transform search has found, with the denominators that say
+    // whether it looked. `limit` caps the candidate list only; the totals
+    // describe the whole search.
+    std::string transformsJson(size_t limit) const;
 
   private:
     const frame::RecordingObserver& m_recorder;
     frame::FrameReplayer& m_replayer;
+    const interp::TransformSearch& m_search;
     std::unique_ptr<lucent::http::Server> m_server;
 };
 

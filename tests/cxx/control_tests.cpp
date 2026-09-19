@@ -2,6 +2,7 @@
 #include "suites.h"
 #include "wiiuport/control/ControlChannel.h"
 #include "wiiuport/frame/FrameReplayer.h"
+#include "wiiuport/interp/TransformSearch.h"
 
 #include <array>
 #include <string>
@@ -27,7 +28,8 @@ void anIdleRuntimeReportsZerosRatherThanNothing() {
     // say, cannot tell those apart.
     RecordingObserver recorder;
     FrameReplayer replayer(&acceptEverySubmission);
-    ControlChannel channel(recorder, replayer);
+    wiiuport::interp::TransformSearch search;
+    ControlChannel channel(recorder, replayer, search);
     std::string body = channel.countersJson();
 
     check::isTrue(contains(body, "\"framesObserved\":0"), "frames observed is reported as zero");
@@ -44,7 +46,8 @@ void theCountersFollowTheRecorder() {
 
     RecordingObserver recorder;
     FrameReplayer replayer(&acceptEverySubmission);
-    ControlChannel channel(recorder, replayer);
+    wiiuport::interp::TransformSearch search;
+    ControlChannel channel(recorder, replayer, search);
     recorder.OnDisplayList(list);
     recorder.OnFrameEnd();
 
@@ -54,10 +57,45 @@ void theCountersFollowTheRecorder() {
     check::isTrue(contains(body, "\"lastFrameBytes\":16"), "with the bytes it held");
 }
 
+void aSearchThatFoundNothingStillSaysWhatItLookedAt() {
+    // A bare "candidates: []" cannot be told from a search that never ran.
+    // The denominators are the part that distinguishes them, so they are
+    // asserted here rather than the empty list.
+    RecordingObserver recorder;
+    FrameReplayer replayer(&acceptEverySubmission);
+    wiiuport::interp::TransformSearch search;
+    ControlChannel channel(recorder, replayer, search);
+    auto body = channel.transformsJson(ControlChannel::kDefaultTransformLimit);
+    check::isTrue(contains(body, "\"candidatesFound\":0"), "nothing was found");
+    check::isTrue(contains(body, "\"framesObserved\":0"), "because no frame was watched");
+    check::isTrue(contains(body, "\"spansExamined\":0"), "and nothing was examined");
+    check::isTrue(contains(body, "\"shadersTracked\":0"), "across no shaders");
+}
+
+void aFoundTransformIsReportedWithItsValues() {
+    RecordingObserver recorder;
+    FrameReplayer replayer(&acceptEverySubmission);
+    wiiuport::interp::TransformSearch search;
+    ControlChannel channel(recorder, replayer, search);
+    for (auto x : {1.0f, 4.0f}) {
+        wiiuport::frame::FrameRecording frame;
+        wiiuport::frame::RecordedUniformAssembly assembly;
+        assembly.shaderBaseHash = 0x1234;
+        assembly.data = {1.0f, 0.0f, 0.0f, x, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
+        frame.addUniformAssembly(assembly);
+        search.observe(frame);
+    }
+    auto body = channel.transformsJson(ControlChannel::kDefaultTransformLimit);
+    check::isTrue(contains(body, "\"candidatesFound\":1"), "the moving transform is reported");
+    check::isTrue(contains(body, "\"meanTranslationStep\":3"), "with how far it moved");
+    check::isTrue(contains(body, "\"values\":[1,0,0,4,"), "and the values themselves");
+}
+
 void anUnstartedChannelIsNotRunning() {
     RecordingObserver recorder;
     FrameReplayer replayer(&acceptEverySubmission);
-    ControlChannel channel(recorder, replayer);
+    wiiuport::interp::TransformSearch search;
+    ControlChannel channel(recorder, replayer, search);
     check::isTrue(!channel.running(), "a channel nobody started is off");
     check::equal(channel.port(), uint16_t{0}, "and reports no port rather than a plausible one");
 }
@@ -69,6 +107,8 @@ namespace wiiuport::tests {
 void runControlTests() {
     anIdleRuntimeReportsZerosRatherThanNothing();
     theCountersFollowTheRecorder();
+    aSearchThatFoundNothingStillSaysWhatItLookedAt();
+    aFoundTransformIsReportedWithItsValues();
     anUnstartedChannelIsNotRunning();
 }
 

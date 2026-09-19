@@ -3,6 +3,8 @@
 #include <lucent/http.h>
 #include <lucent/log.h>
 
+#include <array>
+#include <cstdio>
 #include <string>
 
 namespace wiiuport::control {
@@ -10,14 +12,49 @@ namespace {
 
 lucent::http::Response notFound() {
     return lucent::http::Response::text(
-        404, "Not Found", "unknown route. This channel serves GET /counters and POST /replay.\n");
+        404, "Not Found",
+        "unknown route. This channel serves GET /counters, GET /transforms and POST /replay.\n");
+}
+
+// Enough digits that two transforms which differ are never printed the same.
+std::string floatText(float value) {
+    std::array<char, 32> text{};
+    auto written = std::snprintf(text.data(), text.size(), "%.9g", static_cast<double>(value));
+    if (written <= 0) {
+        return "0";
+    }
+    return std::string(text.data(), static_cast<size_t>(written));
+}
+
+std::string transformJson(const interp::TransformCandidate& candidate) {
+    std::string body = "{";
+    body += "\"stageIndex\":" + std::to_string(candidate.shader.stageIndex);
+    body += ",\"baseHash\":" + std::to_string(candidate.shader.baseHash);
+    body += ",\"auxHash\":" + std::to_string(candidate.shader.auxHash);
+    body += ",\"floatOffset\":" + std::to_string(candidate.floatOffset);
+    body += ",\"framesSeen\":" + std::to_string(candidate.framesSeen);
+    body += ",\"shadersSharing\":" + std::to_string(candidate.shadersSharing);
+    body += ",\"rotationError\":" + floatText(candidate.rotationError);
+    body += ",\"meanTranslationStep\":" + floatText(candidate.meanTranslationStep);
+    body += ",\"values\":[";
+    auto first = true;
+    for (auto value : candidate.latest.values()) {
+        if (!first) {
+            body += ",";
+        }
+        first = false;
+        body += floatText(value);
+    }
+    body += "]}";
+    return body;
 }
 
 } // namespace
 
 ControlChannel::ControlChannel(const frame::RecordingObserver& recorder,
-                               frame::FrameReplayer& replayer)
-    : m_recorder(recorder), m_replayer(replayer) {
+                               frame::FrameReplayer& replayer,
+                               const interp::TransformSearch& search)
+    : m_recorder(recorder), m_replayer(replayer), m_search(search) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -37,6 +74,27 @@ std::string ControlChannel::countersJson() const {
     body += ",\"replayListsRefused\":" + std::to_string(m_replayer.listsRefused());
     body += ",\"replayArmed\":" + std::string(m_replayer.isArmed() ? "true" : "false");
     body += "}\n";
+    return body;
+}
+
+std::string ControlChannel::transformsJson(size_t limit) const {
+    auto report = m_search.search();
+    std::string body = "{";
+    body += "\"framesObserved\":" + std::to_string(report.framesObserved);
+    body += ",\"shadersTracked\":" + std::to_string(report.shadersTracked);
+    body += ",\"spansExamined\":" + std::to_string(report.spansExamined);
+    body += ",\"rejectedVaryingWithinFrame\":" + std::to_string(report.rejectedVaryingWithinFrame);
+    body += ",\"rejectedNeverChanging\":" + std::to_string(report.rejectedNeverChanging);
+    body += ",\"rejectedRotation\":" + std::to_string(report.rejectedRotation);
+    body += ",\"candidatesFound\":" + std::to_string(report.candidates.size());
+    body += ",\"candidates\":[";
+    for (size_t i = 0; i < report.candidates.size() && i < limit; ++i) {
+        if (i != 0) {
+            body += ",";
+        }
+        body += transformJson(report.candidates[i]);
+    }
+    body += "]}\n";
     return body;
 }
 
@@ -64,6 +122,10 @@ bool ControlChannel::start(uint16_t port) {
             }
             if (request.path() == "/counters") {
                 return lucent::http::Response::json(200, "OK", countersJson());
+            }
+            if (request.path() == "/transforms") {
+                return lucent::http::Response::json(200, "OK",
+                                                    transformsJson(kDefaultTransformLimit));
             }
             return notFound();
         });

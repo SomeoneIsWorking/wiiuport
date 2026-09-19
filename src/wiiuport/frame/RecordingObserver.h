@@ -4,6 +4,7 @@
 #include "wiiuport/frame/FrameRecording.h"
 
 #include <cstdint>
+#include <vector>
 
 namespace wiiuport::frame {
 
@@ -30,10 +31,14 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void OnUniformAssembly(const LatteFrameHooks::UniformAssembly& assembly) override;
     void OnFrameEnd() override;
 
-    // Null by default, so a build that installs no listener behaves as a
-    // pure recorder.
-    void setFrameEndListener(FrameEndListener* listener) {
-        m_listener = listener;
+    // Empty by default, so a build that installs no listener behaves as a
+    // pure recorder. More than one thing acts on a published frame -- replay
+    // and transform search at least -- and each is notified in the order it
+    // was added.
+    void addFrameEndListener(FrameEndListener* listener) {
+        if (listener != nullptr) {
+            m_listeners.push_back(listener);
+        }
     }
 
     // The last frame that ended. Empty until one has. Held separately from the
@@ -61,7 +66,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     }
 
   private:
-    FrameEndListener* m_listener{nullptr};
+    std::vector<FrameEndListener*> m_listeners;
     FrameRecording m_inFlight;
     FrameRecording m_completed;
     uint64_t m_framesObserved{0};
