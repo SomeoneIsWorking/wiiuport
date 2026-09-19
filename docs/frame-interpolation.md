@@ -51,18 +51,25 @@ assembled values and tick N's, for the same draw.
 
 ## Presenting
 
-At the swap for tick N, the runtime holds tick N's recorded stream and tick N-1's
-extracted transform state. Order per tick:
+A title that runs at 30 Hz normally does so by setting `GX2SetSwapInterval(2)`, and
+`LatteTiming_signalVsync` then flips only on every second vsync. The cadence is already
+60 Hz; every second flip simply repeats the previous image. The first consumer was
+measured doing exactly this (see `docs/issues/ISSUE-003-wwhd-swap-interval.md`).
 
-1. Copy the finished image of tick N aside.
-2. Replay tick N's recorded stream. Each draw re-enters the uniform assembly site,
-   where the consumer's blend of ticks N-1 and N is substituted into the assembled
-   buffer. Present the result — this is the in-between frame.
-3. Present the copy of tick N.
+Interpolation fills the repeat slot rather than adding presents:
 
-This costs one extra scene render per tick and adds one presented frame of latency.
-Both are real and are stated rather than hidden; a title that cannot afford the extra
-render does not get interpolation.
+1. On the vsync that carries a new guest frame, present it as today.
+2. On the repeat vsync, replay the recorded stream instead of showing the duplicate.
+   Each draw re-enters the uniform assembly site, where the consumer's blend of ticks
+   N-1 and N is substituted into the assembled buffer. Present that.
+
+The cost is one extra scene render per tick. The latency cost is the half-tick the blend
+inherently needs, because a frame between N-1 and N cannot be drawn until N exists — not
+an additional present on top of it.
+
+For a title that flips at 60 Hz already, or at 30 Hz with an interval of 1, there is no
+repeat slot to fill and the runtime must add a present instead. That case is not
+implemented and is refused rather than approximated.
 
 The obvious later optimisation — replaying only the passes that depend on the
 substituted transforms and reusing the rest — is an optimisation, not the design. It is
