@@ -30,6 +30,9 @@ tracked patch files, and the submodule pin is the source of truth.
 | Headless/offscreen/silent run mode | `src/wiiuport/host/` | Keeps maintainer runs off the desktop and off the real audio device. |
 | Configuration and environment reads | `src/wiiuport/config/` | The single owner. No other module calls `getenv`. |
 | Logging | `lucent` | The only output boundary. No `printf`/`std::cerr` in first-party modules. |
+| Blend maths for one 3x4 transform | `src/wiiuport/interp/Transform3x4.h` | Rotation slerped, translation lerped. Knows nothing about cameras, actors, or where the floats came from. |
+| First-party C++ tests | `tests/cxx/` | A harness that prints its own check count, so a suite that ran nothing fails. Suites are declared in `tests/cxx/suites.h`. |
+| Building and running those tests as a gate | `tools/wiiuport/cxxtests.py` | Configures with Clang, reads the compiler back out of the cache, and scores the run by the checks it reports rather than by exit status alone. |
 | Build orchestration, provisioning, verification | `tools/` (Python) | One locked environment via `uv run --frozen`. |
 | Native development packages a build needs | `tools/wiiuport/hostdeps.py` | The one list, and the refusal that names them. Never duplicated into a script or a setup doc; `docs/dev-container.md` points at it. |
 | Where those packages are installed | `docs/dev-container.md` | A Fedora toolbox sharing the same home, so installs need no host privileges. Not a build boundary: the build is the same inside and out. |
