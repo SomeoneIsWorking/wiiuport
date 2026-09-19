@@ -29,6 +29,13 @@ jobs:
         with:
           submodules: false
 
+      # The first-party library implements the fork's hook interface and
+      # includes its header rather than keeping a copy, so the gate needs that
+      # one tree. Shallow and non-recursive: none of Cemu's own dependencies
+      # are involved in compiling a header that includes only <cstdint>.
+      - name: Check out the fork's tree for its hook interface
+        run: git submodule update --init --depth 1 external/cemu
+
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true

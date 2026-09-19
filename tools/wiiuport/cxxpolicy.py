@@ -38,9 +38,10 @@ the command line every first-party header fails to parse, which this gate
 correctly reports as a refusal rather than a pass.
 """
 
-FIRST_PARTY_INCLUDE_ROOT = "src"
-"""Where ``#include <wiiuport/...>`` resolves from, matching what
-``src/wiiuport/CMakeLists.txt`` exposes to everything that links the library."""
+INCLUDE_ROOTS: tuple[str, ...] = ("src", "external/cemu/src")
+"""What the library compiles against, matching the include directories
+``src/wiiuport/CMakeLists.txt`` exposes: its own tree, and the fork's, whose
+hook interface it implements rather than copies."""
 
 _FUNCTION_SCOPES = frozenset(
     {
@@ -195,7 +196,8 @@ def _compile_arguments(source: Path, database: dict[str, list[str]], root: Path)
     arguments = database.get(str(source))
     if arguments is not None:
         return [*arguments, *resource]
-    return [*BASELINE_ARGUMENTS, f"-I{root / FIRST_PARTY_INCLUDE_ROOT}", *resource]
+    includes = [f"-I{root / include}" for include in INCLUDE_ROOTS]
+    return [*BASELINE_ARGUMENTS, *includes, *resource]
 
 
 def _load_compile_database(path: Path) -> dict[str, list[str]]:

@@ -9,9 +9,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from wiiuport import hostdeps
 from wiiuport.build import BuildConfig, BuildError, compile_all, configure
 from wiiuport.paths import ProjectLayoutError, find_layout
+
+from wiiuport import hostdeps
 
 
 def main(argv: list[str] | None = None) -> int:
