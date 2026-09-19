@@ -3,10 +3,10 @@
 Factual capability inventory. Epic intent is in `docs/project-goals.md`.
 Every item is `verified`, `partial`, `blocked`, or `missing`.
 
-**Current focus.** ST-CAMERA/ST-RECORD — with a hosted build green, the next discriminator is a
-local driven run that separates camera from actor transforms by value. The local build is the one
-remaining blocker and needs `libpng-static`; the hosted binary is not a substitute, because
-real-title conformance never runs in CI.
+**Current focus.** ST-RECORD/ST-REPLAY — the camera is identified by value and the draw
+stream is measured, so the next step is holding a frame's display lists by copy and re-feeding
+them through the command processor with substituted transforms. The local build now works, so
+real-title runs no longer wait on a CI artifact.
 
 ## Comparison baseline
 
@@ -21,7 +21,7 @@ presents at 30 Hz. Every item below states its difference from that baseline.
 | ST-FORK | Cemu fork exists and is pinned as a submodule at a reviewable revision | verified | `SomeoneIsWorking/Cemu` forked from `cemu-project/Cemu`; `external/cemu` submodule pinned at upstream `54ffbed`. |
 | ST-BUILD | Pinned fork configures and builds from a clean tree with Clang + Ninja | verified | Verified on hosted Linux from a cold checkout (run 35436011965: Clang, Ninja, full vcpkg and Cemu corpus in 32 minutes) and now locally on Fedora, producing a 299 MB `external/cemu/bin/Cemu_relwithdebinfo` with `CMAKE_CXX_COMPILER_ID=Clang` read from the configured cache. The local build needed `libpng-static`, which Fedora splits out of `libpng-devel`; `tools/hostdeps.py` names it and the host now has it. |
 | ST-LIB | Runtime exposed to a consuming title through a narrow C++ interface | missing | No interface exists. Cemu is currently only an application entry point. |
-| ST-RECORD | A frame's guest draw stream can be recorded for replay | missing | Cemu's `LatteCommandProcessor` consumes PM4 packets in place and retains no per-frame stream. |
+| ST-RECORD | A frame's guest draw stream can be recorded for replay | partial | The stream's shape is measured, which is what the recorder has to hold: at a real scene 298 indirect buffers and 77,536 bytes per frame, so a per-frame copy is cheap. Copying is required rather than assumed -- 175 of 175 distinct display list addresses recur across frames, so the guest recycles the storage and a recorded pointer would read the next frame's data. Cemu's `LatteCommandProcessor` still consumes PM4 packets in place and retains no stream; only the measurement exists. |
 | ST-REPLAY | A recorded frame replays with substituted transform state | missing | Depends on ST-RECORD. Substitution happens at the Vulkan renderer's uniform-assembly site (`uniformData_updateUniformVars`), which covers both Latte uniform modes in one place. |
 | ST-REPLAY-GL | Interpolation under the OpenGL renderer | missing | Deliberately out of scope: the assembly site used for substitution is the Vulkan renderer's. OpenGL presents at the guest rate. |
 | ST-NULLDIFF | Null-interpolation discriminator: replay at t=1 is byte-identical to the original frame | missing | The gate that proves replay is faithful before any blending is trusted. Depends on ST-REPLAY. |

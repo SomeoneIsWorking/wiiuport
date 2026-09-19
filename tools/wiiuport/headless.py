@@ -44,6 +44,7 @@ class LogType(IntEnum):
 
     GX2 = 1
     UNIFORM_CAPTURE = 27
+    DISPLAY_LIST_CAPTURE = 28
 
 
 def log_flags(*types: LogType) -> int:
