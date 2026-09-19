@@ -19,13 +19,17 @@ Runtime g_runtime;
 
 namespace {
 
+bool requestFrameCapture(LatteFrameHooks::CaptureCallback callback) {
+    return LatteFrameHooks::RequestFrameCapture(std::move(callback));
+}
+
 bool submitToCommandProcessor(const void* data, uint32_t sizeInBytes) {
     return LatteFrameHooks::SubmitDisplayList(data, sizeInBytes);
 }
 
 } // namespace
 
-Runtime::Runtime() : m_replayer(&submitToCommandProcessor) {
+Runtime::Runtime() : m_replayer(&submitToCommandProcessor), m_capture(&requestFrameCapture) {
     m_recorder.addFrameEndListener(&m_scheduler);
     m_recorder.addFrameEndListener(&m_searchFeed);
 }

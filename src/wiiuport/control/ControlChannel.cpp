@@ -15,8 +15,8 @@ namespace {
 lucent::http::Response notFound() {
     return lucent::http::Response::text(
         404, "Not Found",
-        "unknown route. This channel serves GET /counters, GET /transforms, POST /replay "
-        "and POST /input.\n");
+        "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
+        "POST /replay, POST /capture and POST /input.\n");
 }
 
 // One `key=value` pair at a time out of a query string. Returns false at the
@@ -75,8 +75,10 @@ std::string transformJson(const interp::TransformCandidate& candidate) {
 
 ControlChannel::ControlChannel(const frame::RecordingObserver& recorder,
                                frame::FrameReplayer& replayer,
-                               const interp::TransformSearch& search, input::InputDriver& input)
-    : m_recorder(recorder), m_replayer(replayer), m_search(search), m_input(input) {
+                               const interp::TransformSearch& search, input::InputDriver& input,
+                               frame::FrameCapture& capture)
+    : m_recorder(recorder), m_replayer(replayer), m_search(search), m_input(input),
+      m_capture(capture) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -98,6 +100,9 @@ std::string ControlChannel::countersJson() const {
     body += ",\"inputPollsSeen\":" + std::to_string(m_input.pollsSeen());
     body += ",\"inputPollsAnswered\":" + std::to_string(m_input.pollsAnswered());
     body += ",\"inputPressesQueued\":" + std::to_string(m_input.pressesQueued());
+    body += ",\"capturesRequested\":" + std::to_string(m_capture.capturesRequested());
+    body += ",\"capturesRefused\":" + std::to_string(m_capture.capturesRefused());
+    body += ",\"imagesReceived\":" + std::to_string(m_capture.imagesReceived());
     body += "}\n";
     return body;
 }
@@ -224,6 +229,14 @@ bool ControlChannel::start(uint16_t port) {
                     "{\"armed\":true,\"replaysRun\":" + std::to_string(m_replayer.replaysRun()) +
                         "}\n");
             }
+            if (request.method == "POST" && request.path() == "/capture") {
+                auto armed = m_capture.armOnce();
+                return lucent::http::Response::json(
+                    armed ? 200 : 503, armed ? "OK" : "Service Unavailable",
+                    std::string("{\"armed\":") + (armed ? "true" : "false") +
+                        ",\"imagesReceived\":" + std::to_string(m_capture.imagesReceived()) +
+                        "}\n");
+            }
             if (request.method == "POST" && request.path() == "/input") {
                 auto accepted = false;
                 auto body = applyInput(std::string(request.query()), accepted);
@@ -235,6 +248,19 @@ bool ControlChannel::start(uint16_t port) {
             }
             if (request.path() == "/counters") {
                 return lucent::http::Response::json(200, "OK", countersJson());
+            }
+            if (request.path() == "/capture") {
+                auto image = m_capture.lastImage();
+                if (image.empty()) {
+                    // An empty body would read as a black frame. Refusing
+                    // says which of the two actually happened.
+                    return lucent::http::Response::text(
+                        404, "Not Found",
+                        "no frame has been captured yet. Arm one with POST /capture and "
+                        "let the title present at least once.\n");
+                }
+                return lucent::http::Response::binary(200, "OK", "application/octet-stream",
+                                                      m_capture.lastImageFramed());
             }
             if (request.path() == "/transforms") {
                 return lucent::http::Response::json(200, "OK",

@@ -5,6 +5,7 @@ add_executable(wiiuport_tests
   replay_tests.cpp
   search_tests.cpp
   input_tests.cpp
+  capture_tests.cpp
   transform_tests.cpp
 )
 target_link_libraries(wiiuport_tests PRIVATE wiiuport::wiiuport)

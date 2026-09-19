@@ -47,3 +47,15 @@ def left_stick(x: float, y: float, port: int = DEFAULT_PORT) -> dict:
 
 def release(port: int = DEFAULT_PORT) -> dict:
     return send_input(port=port, release=1)
+
+
+def arm_replay(port: int = DEFAULT_PORT, timeout: float = 5.0) -> dict:
+    """Arm one replay. Not input, but the same one-shot verb over the same
+    channel, and kept beside it so a tool needs one import to drive a run."""
+    url = f"http://127.0.0.1:{port}/replay"
+    request = urllib.request.Request(url, method="POST", data=b"")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.URLError as unreachable:
+        raise ControlUnavailable(f"{url} did not answer ({unreachable.reason})") from unreachable

@@ -1,6 +1,7 @@
 #include "check.h"
 #include "suites.h"
 #include "wiiuport/control/ControlChannel.h"
+#include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FrameReplayer.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/interp/TransformSearch.h"
@@ -18,6 +19,10 @@ bool acceptEverySubmission(const void*, uint32_t) {
     return true;
 }
 
+bool refuseCapture(LatteFrameHooks::CaptureCallback) {
+    return false;
+}
+
 bool contains(const std::string& haystack, const std::string& needle) {
     return haystack.find(needle) != std::string::npos;
 }
@@ -31,7 +36,8 @@ void anIdleRuntimeReportsZerosRatherThanNothing() {
     FrameReplayer replayer(&acceptEverySubmission);
     wiiuport::interp::TransformSearch search;
     wiiuport::input::InputDriver input;
-    ControlChannel channel(recorder, replayer, search, input);
+    wiiuport::frame::FrameCapture capture(&refuseCapture);
+    ControlChannel channel(recorder, replayer, search, input, capture);
     std::string body = channel.countersJson();
 
     check::isTrue(contains(body, "\"framesObserved\":0"), "frames observed is reported as zero");
@@ -50,7 +56,8 @@ void theCountersFollowTheRecorder() {
     FrameReplayer replayer(&acceptEverySubmission);
     wiiuport::interp::TransformSearch search;
     wiiuport::input::InputDriver input;
-    ControlChannel channel(recorder, replayer, search, input);
+    wiiuport::frame::FrameCapture capture(&refuseCapture);
+    ControlChannel channel(recorder, replayer, search, input, capture);
     recorder.OnDisplayList(list);
     recorder.OnFrameEnd();
 
@@ -68,7 +75,8 @@ void aSearchThatFoundNothingStillSaysWhatItLookedAt() {
     FrameReplayer replayer(&acceptEverySubmission);
     wiiuport::interp::TransformSearch search;
     wiiuport::input::InputDriver input;
-    ControlChannel channel(recorder, replayer, search, input);
+    wiiuport::frame::FrameCapture capture(&refuseCapture);
+    ControlChannel channel(recorder, replayer, search, input, capture);
     auto body = channel.transformsJson(ControlChannel::kDefaultTransformLimit);
     check::isTrue(contains(body, "\"candidatesFound\":0"), "nothing was found");
     check::isTrue(contains(body, "\"framesObserved\":0"), "because no frame was watched");
@@ -81,7 +89,8 @@ void aFoundTransformIsReportedWithItsValues() {
     FrameReplayer replayer(&acceptEverySubmission);
     wiiuport::interp::TransformSearch search;
     wiiuport::input::InputDriver input;
-    ControlChannel channel(recorder, replayer, search, input);
+    wiiuport::frame::FrameCapture capture(&refuseCapture);
+    ControlChannel channel(recorder, replayer, search, input, capture);
     for (auto x : {1.0f, 4.0f}) {
         wiiuport::frame::FrameRecording frame;
         wiiuport::frame::RecordedUniformAssembly assembly;
@@ -101,7 +110,8 @@ void anUnstartedChannelIsNotRunning() {
     FrameReplayer replayer(&acceptEverySubmission);
     wiiuport::interp::TransformSearch search;
     wiiuport::input::InputDriver input;
-    ControlChannel channel(recorder, replayer, search, input);
+    wiiuport::frame::FrameCapture capture(&refuseCapture);
+    ControlChannel channel(recorder, replayer, search, input, capture);
     check::isTrue(!channel.running(), "a channel nobody started is off");
     check::equal(channel.port(), uint16_t{0}, "and reports no port rather than a plausible one");
 }

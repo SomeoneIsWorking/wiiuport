@@ -1,5 +1,6 @@
 #pragma once
 
+#include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FrameReplayer.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/input/InputDriver.h"
@@ -33,7 +34,8 @@ class ControlChannel {
     static constexpr uint32_t kDefaultPressReads = 8;
 
     ControlChannel(const frame::RecordingObserver& recorder, frame::FrameReplayer& replayer,
-                   const interp::TransformSearch& search, input::InputDriver& input);
+                   const interp::TransformSearch& search, input::InputDriver& input,
+                   frame::FrameCapture& capture);
     ~ControlChannel();
 
     ControlChannel(const ControlChannel&) = delete;
@@ -64,6 +66,7 @@ class ControlChannel {
     frame::FrameReplayer& m_replayer;
     const interp::TransformSearch& m_search;
     input::InputDriver& m_input;
+    frame::FrameCapture& m_capture;
     std::unique_ptr<lucent::http::Server> m_server;
 };
 
