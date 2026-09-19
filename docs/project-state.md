@@ -3,8 +3,10 @@
 Factual capability inventory. Epic intent is in `docs/project-goals.md`.
 Every item is `verified`, `partial`, `blocked`, or `missing`.
 
-**Current focus.** ST-BUILD — get the pinned Cemu fork building from source with Clang.
-Everything downstream of it is blocked until a runtime binary exists.
+**Current focus.** ST-CAMERA/ST-RECORD — with a hosted build green, the next discriminator is a
+local driven run that separates camera from actor transforms by value. The local build is the one
+remaining blocker and needs `libpng-static`; the hosted binary is not a substitute, because
+real-title conformance never runs in CI.
 
 ## Comparison baseline
 
@@ -17,7 +19,7 @@ presents at 30 Hz. Every item below states its difference from that baseline.
 | ID | Capability (delta from baseline) | State | Evidence / exact gap |
 |---|---|---|---|
 | ST-FORK | Cemu fork exists and is pinned as a submodule at a reviewable revision | verified | `SomeoneIsWorking/Cemu` forked from `cemu-project/Cemu`; `external/cemu` submodule pinned at upstream `54ffbed`. |
-| ST-BUILD | Pinned fork configures and builds from a clean tree with Clang + Ninja | partial | Configure with `clang 22.1.8` + `ninja 1.13.2` started and is resolving vcpkg ports; no completed build yet. Fedora 44 satisfies Cemu's documented `zlib-devel`/`perl-core` via `zlib-ng-compat-{devel,static}` and the base `perl` split packages. |
+| ST-BUILD | Pinned fork configures and builds from a clean tree with Clang + Ninja | partial | Verified on hosted Linux from a cold checkout: run 35436011965 configured with Clang and Ninja, compiled every vcpkg port and the full Cemu corpus in 32 minutes, and produced a 162 MB `external/cemu/bin/Cemu_relwithdebinfo`. Gap: the local Fedora build has never completed -- it refuses on the missing `libpng-static` archive, which Fedora splits out of `libpng-devel`. |
 | ST-LIB | Runtime exposed to a consuming title through a narrow C++ interface | missing | No interface exists. Cemu is currently only an application entry point. |
 | ST-RECORD | A frame's guest draw stream can be recorded for replay | missing | Cemu's `LatteCommandProcessor` consumes PM4 packets in place and retains no per-frame stream. |
 | ST-REPLAY | A recorded frame replays with substituted transform state | missing | Depends on ST-RECORD. Substitution happens at the Vulkan renderer's uniform-assembly site (`uniformData_updateUniformVars`), which covers both Latte uniform modes in one place. |
@@ -28,7 +30,7 @@ presents at 30 Hz. Every item below states its difference from that baseline.
 | ST-CONTROL | Opt-in control channel for input injection, frame stepping, counters, capture | missing | Must use `lucent::http::Server`; no local HTTP server may be written here. |
 | ST-HEADLESS-ENV | Offscreen, silent, isolated environment for maintainer runs | verified | `tools/wiiuport/headless.py`. Live run reported `DISPLAY=:97`, its own `XDG_CONFIG_HOME`, a working X server, and clean teardown; settings name no audio device. 7 tests cover isolation, the timeout path, the exit-code path, refused missing keys, and the self-kill guard. |
 | ST-HEADLESS-GAME | A maintainer run reaches gameplay in that environment | missing | Depends on ST-BUILD. The environment above has never been run against the runtime binary, which does not exist yet. |
-| ST-CI-LINUX | Hosted Linux CI: configure, build, lint, test with Clang | missing | |
+| ST-CI-LINUX | Hosted Linux CI: configure, build, lint, test with Clang | verified | `.github/workflows/ci.yml` run 35436011965: gates job (ruff, pytest, clang-format, C++ ownership policy, structure) and runtime job (cold vcpkg + Cemu build with Clang/Ninja) both green, ending with an explicit assertion that the binary exists rather than a silent pass. Getting here fixed four real defects: a missing `libudev-dev`, an unexplained `VCPKG_FORCE_SYSTEM_BINARIES` that stopped vcpkg provisioning ninja, a refusal that named a log path the runner discards, and a toolchain check that read `CMAKE_CXX_COMPILER_ID` from the cache, where CMake never writes it. |
 | ST-CI-WIN | Hosted Windows CI | not applicable | Windows is not a claimed host; see GOAL-PLATFORM. A job running only the Python gates would report green for a platform nothing has been built on. Becomes applicable when something targets Windows, with a real build job in the same change. |
 | ST-CI-MAC | Hosted macOS CI | not applicable | Same reason as ST-CI-WIN. |
 | ST-VERIFIER | Canonical Python verifier carrying format, tidy, structure, and test gates | partial | `tools/verify.py` runs ruff, pytest, a non-mutating `clang-format` check, the three syntax-aware ownership rules on the real libclang AST, and source-size limits; 5 of 5 gates pass over 40 tests. The ownership gate is proven on both classes: an accepted fixture reports nothing and a rejected one reports seven findings across all three rules (ISSUE-002). `.clang-tidy` is configured and confirmed (`--dump-config` keeps `clang-diagnostic-*`, `--list-checks` reports 251 active). Gap: `clang-tidy` is not yet executed, because it needs a compile database and therefore a completed runtime build. |
