@@ -27,6 +27,8 @@ import shutil
 import signal
 import subprocess
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
@@ -208,6 +210,30 @@ class HeadlessSession:
             return
         _terminate(self._xvfb)
         self._xvfb = None
+
+    @contextmanager
+    def launch(self, command: list[str]) -> Iterator[subprocess.Popen[bytes]]:
+        """Start the command and hand it back while it runs.
+
+        This is what lets a tool interrogate a running product instead of
+        launching it and reading its log afterwards. The process is always
+        terminated by the PID captured here on the way out, never by name:
+        other agents and the operator run the same binary.
+        """
+        log_path = self.session_dir / "run.log"
+        with log_path.open("wb") as log:
+            process = subprocess.Popen(
+                command,
+                env=self.environment(),
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            try:
+                yield process
+            finally:
+                if process.poll() is None:
+                    _terminate(process)
 
     def run(self, command: list[str], *, timeout_seconds: float) -> RunResult:
         """Run a bounded, offscreen command and always return what happened."""

@@ -53,6 +53,14 @@ class BuildConfig:
         return self.layout.cemu_build
 
     @property
+    def first_party_source(self) -> Path:
+        """The library the fork links. Passing it is what turns the frame hooks
+        from no-ops into the recording runtime; without it this builds
+        upstream's behaviour, which is a legitimate thing to want but not the
+        product."""
+        return self.layout.root / "src" / "wiiuport"
+
+    @property
     def binary(self) -> Path:
         return Layout(root=self.layout.root, build_type=self.build_type).cemu_binary
 
@@ -111,6 +119,7 @@ def configure(config: BuildConfig, log: Path | None = None) -> None:
         f"-DCMAKE_C_COMPILER={config.toolchain.c_compiler}",
         f"-DCMAKE_CXX_COMPILER={config.toolchain.cxx_compiler}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        f"-DWIIUPORT_SOURCE_DIR={config.first_party_source}",
     ]
     _run(command, log=log, what="configure")
     verify_toolchain(config)

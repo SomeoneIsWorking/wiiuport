@@ -22,14 +22,15 @@ tracked patch files, and the submodule pin is the source of truth.
 |---|---|---|
 | Wii U guest execution, Latte GPU, GX2/OS HLE, audio, input backends | `external/cemu` (fork) | Upstream code. First-party policy does not move into it beyond the interposition hooks below. |
 | Fork interposition hooks | `external/cemu`, minimal and per-cause | The fork exposes callbacks at the frame boundary and at `LatteCP_itIndirectBuffer`; it does not implement recording, blending, or policy. |
+| Process-lifetime ownership of first-party state | `src/wiiuport/Runtime.h` | One object, installed once. The hook registry holds a raw pointer, so what it points at outlives every frame. |
 | Frame capture of the guest draw stream | `src/wiiuport/frame/` | Records the `IT_INDIRECT_BUFFER` display lists a frame references, by copy, because the guest reuses the storage. |
 | Frame replay with substituted state | `src/wiiuport/frame/` | Re-feeds recorded buffers through the fork's existing command-buffer entry point. Substitutions are applied to the recorded copy, never to guest memory. |
 | Transform substitution interface | `src/wiiuport/interp/` | Title-neutral: a consumer registers which recorded dwords are transform state and supplies the blend. The runtime does not know what a camera is. |
 | Runtime counters and their denominators | `src/wiiuport/evidence/` | Frames recorded/replayed, bailouts by reason, substituted slots. Consumed by gates, not by prose. |
-| Control channel (input injection, frame stepping, counter and capture endpoints) | `src/wiiuport/control/` | Routes only. The server itself is `lucent::http::Server`; no socket, parsing, or dispatch code is written here. |
+| Control channel (counters now; input injection and frame stepping next) | `src/wiiuport/control/ControlChannel.h` | Routes only, over `lucent::http::Server`. Off unless `WIIUPORT_CONTROL_PORT` is set, loopback only. `GET /counters` answers with zeros rather than nothing, so an idle runtime is distinguishable from a broken one. This is how a tool asks a running product what it is doing; reading its log afterwards is not a substitute. |
 | Headless/offscreen/silent run mode | `src/wiiuport/host/` | Keeps maintainer runs off the desktop and off the real audio device. |
-| Configuration and environment reads | `src/wiiuport/config/` | The single owner. No other module calls `getenv`. |
-| Logging | `lucent` | The only output boundary. No `printf`/`std::cerr` in first-party modules. |
+| Logging | `lucent` (`external/lucent`, pinned) | The only output boundary. No `printf`/`std::cerr` in first-party modules. |
+| Environment reads | `lucent::config`, prefix `WIIUPORT_` | The single owner. No first-party module calls `getenv`. |
 | Blend maths for one 3x4 transform | `src/wiiuport/interp/Transform3x4.h` | Rotation slerped, translation lerped. Knows nothing about cameras, actors, or where the floats came from. |
 | First-party C++ tests | `tests/cxx/` | A harness that prints its own check count, so a suite that ran nothing fails. Suites are declared in `tests/cxx/suites.h`. |
 | Building and running those tests as a gate | `tools/wiiuport/cxxtests.py` | Configures with Clang, reads the compiler back out of the cache, and scores the run by the checks it reports rather than by exit status alone. |
@@ -67,8 +68,11 @@ clean checkout of it do.
 - `src/wiiuport/` builds as a static library and is added by the fork's CMake only when
   `WIIUPORT_SOURCE_DIR` is passed, which `tools/wiiuport/build.py` supplies. Absent it, the
   variable is unset and no subdirectory is added.
-- Registration happens once at startup from the library's own initialiser. The fork never
-  names a first-party type, and the library never edits fork state directly.
+- Registration happens once at startup, through `extern "C" void wiiuport_install_hooks()`
+  called from `main`. It is not a static initialiser: the library is static, and a linker
+  drops an object file nothing references, taking the initialiser with it. That failure
+  would be silent -- a build that records nothing and reports no error. The fork names one
+  C symbol and no first-party type, and the library never edits fork state directly.
 
 This is the reason recording, blending, and policy are listed above as `src/wiiuport/` and
 not as fork changes, even though the capture instruments currently live in the fork. Those are

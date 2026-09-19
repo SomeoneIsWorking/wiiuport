@@ -7,5 +7,6 @@ namespace wiiuport::tests {
 
 void runTransformTests();
 void runFrameTests();
+void runControlTests();
 
 } // namespace wiiuport::tests
