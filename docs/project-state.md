@@ -4,6 +4,7 @@ Factual capability inventory. Epic intent is in `docs/project-goals.md`.
 Every item is `verified`, `partial`, `blocked`, or `missing`.
 
 **Current focus.** ST-BUILD — get the pinned Cemu fork building from source with Clang.
+Everything downstream of it is blocked until a runtime binary exists.
 
 ## Comparison baseline
 
@@ -25,8 +26,9 @@ presents at 30 Hz. Every item below states its difference from that baseline.
 | ST-SHADOW | Substituted transform storage never writes back to guest memory | missing | Depends on ST-REPLAY. |
 | ST-COUNTERS | Runtime reports frames recorded/replayed, bailouts by reason, substituted slots, all with denominators | missing | Required before any interpolation claim. |
 | ST-CONTROL | Opt-in control channel for input injection, frame stepping, counters, capture | missing | Must use `lucent::http::Server`; no local HTTP server may be written here. |
-| ST-HEADLESS | Offscreen, silent, unpaced maintainer run that reaches gameplay | missing | Needed so agent runs never seize the desktop or the audio device. |
+| ST-HEADLESS-ENV | Offscreen, silent, isolated environment for maintainer runs | verified | `tools/wiiuport/headless.py`. Live run reported `DISPLAY=:97`, its own `XDG_CONFIG_HOME`, a working X server, and clean teardown; settings name no audio device. 7 tests cover isolation, the timeout path, the exit-code path, refused missing keys, and the self-kill guard. |
+| ST-HEADLESS-GAME | A maintainer run reaches gameplay in that environment | missing | Depends on ST-BUILD. The environment above has never been run against the runtime binary, which does not exist yet. |
 | ST-CI-LINUX | Hosted Linux CI: configure, build, lint, test with Clang | missing | |
 | ST-CI-WIN | Hosted Windows CI on a supported MSVC/clang-cl configuration | missing | |
 | ST-CI-MAC | Hosted macOS CI on AppleClang | missing | |
-| ST-VERIFIER | Canonical Python verifier carrying format, tidy, structure, and test gates | missing | Must include `clang-format` check, `clang-tidy` against the real compile database for first-party sources only, and source-size limits. Upstream Cemu sources are vendored and are not reformatted or tidied. |
+| ST-VERIFIER | Canonical Python verifier carrying format, tidy, structure, and test gates | partial | `tools/verify.py` runs ruff, pytest, a non-mutating `clang-format` check, and source-size limits; 4 of 4 gates pass. `.clang-tidy` is configured and confirmed (`--dump-config` keeps `clang-diagnostic-*`, `--list-checks` reports 251 active). Gaps: `clang-tidy` is not yet executed against a compile database, and the three syntax-aware rules it cannot express are unwritten (ISSUE-002). Both are due with the first first-party C++ file. |
