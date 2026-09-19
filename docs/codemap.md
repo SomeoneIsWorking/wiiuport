@@ -51,3 +51,24 @@ and its null-interpolation gate are in `docs/frame-interpolation.md`.
 
 Which slots carry a camera or an actor is a title question, answered in that title's
 project, not here.
+
+## How first-party C++ reaches the runtime
+
+The product is the fork's executable, so first-party code has to be linked into it without
+becoming part of it. The fork stays buildable on its own, which is what upstream CI and any
+clean checkout of it do.
+
+- The fork owns a **hook registry** with no-op defaults: the observation and substitution
+  points, and nothing else. A build with no first-party library linked behaves exactly as
+  upstream does.
+- `src/wiiuport/` builds as a static library and is added by the fork's CMake only when
+  `WIIUPORT_SOURCE_DIR` is passed, which `tools/wiiuport/build.py` supplies. Absent it, the
+  variable is unset and no subdirectory is added.
+- Registration happens once at startup from the library's own initialiser. The fork never
+  names a first-party type, and the library never edits fork state directly.
+
+This is the reason recording, blending, and policy are listed above as `src/wiiuport/` and
+not as fork changes, even though the capture instruments currently live in the fork. Those are
+reverse-engineering instruments that answer a question and are removed once answered; they are
+not the product mechanism and must not grow into it.
+
