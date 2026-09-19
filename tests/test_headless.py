@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 import pytest
-from wiiuport.headless import HeadlessSession, _own_process_group
+from wiiuport.headless import HeadlessSession, LogType, _own_process_group, log_flags
 from wiiuport.paths import Layout
 
 
@@ -74,3 +74,28 @@ def test_a_run_that_finishes_reports_its_code(session: HeadlessSession) -> None:
     result = session.run(["sh", "-c", "exit 3"], timeout_seconds=20.0)
     assert not result.timed_out
     assert result.exit_code == 3
+
+
+def test_log_flags_are_bit_positions_not_values() -> None:
+    """logflag is a mask over LogType positions, so GX2 (1) is 2 and the
+    capture type (27) is 1 << 27. Writing the position itself would silently
+    enable a different log type."""
+    assert log_flags(LogType.GX2) == 2
+    assert log_flags(LogType.UNIFORM_CAPTURE) == 1 << 27
+    assert log_flags(LogType.GX2, LogType.UNIFORM_CAPTURE) == 2 + (1 << 27)
+    assert log_flags() == 0
+
+
+def test_the_written_settings_carry_the_requested_log_flags(tmp_path: Path) -> None:
+    layout = Layout(root=tmp_path)
+    session = HeadlessSession(layout=layout, logflag=log_flags(LogType.UNIFORM_CAPTURE))
+    session.prepare()
+    settings = (session.config_home / "Cemu" / "settings.xml").read_text()
+    assert f"<logflag>{1 << 27}</logflag>" in settings
+
+
+def test_a_default_session_enables_no_logging(tmp_path: Path) -> None:
+    session = HeadlessSession(layout=Layout(root=tmp_path))
+    session.prepare()
+    settings = (session.config_home / "Cemu" / "settings.xml").read_text()
+    assert "<logflag>0</logflag>" in settings
