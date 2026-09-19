@@ -24,7 +24,8 @@ bool submitToCommandProcessor(const void* data, uint32_t sizeInBytes) {
 } // namespace
 
 Runtime::Runtime() : m_replayer(&submitToCommandProcessor) {
-    m_recorder.setFrameEndListener(&m_scheduler);
+    m_recorder.addFrameEndListener(&m_scheduler);
+    m_recorder.addFrameEndListener(&m_searchFeed);
 }
 
 Runtime& Runtime::instance() {
