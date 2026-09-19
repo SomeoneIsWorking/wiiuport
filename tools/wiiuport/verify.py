@@ -6,6 +6,7 @@ a gate that silently examined an empty set cannot look like a gate that passed.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -68,6 +69,26 @@ def gate_python_tests(layout: Layout) -> GateResult:
     )
 
 
+def check_formatting(sources: list[Path], cwd: Path) -> tuple[bool, str]:
+    """Run the non-mutating clang-format check over exactly these sources.
+
+    Separate from the gate so tests drive the shipping implementation rather
+    than a reimplementation of it. A missing formatter refuses by name: the
+    bare subprocess call raised FileNotFoundError, which is a crash, not a
+    check telling you what to install.
+    """
+    if shutil.which("clang-format") is None:
+        return False, (
+            "clang-format is not on PATH, so formatting was never checked. "
+            "Install it: sudo dnf install clang-tools-extra"
+        )
+    result = subprocess.run(
+        ["clang-format", "--dry-run", "--Werror", *[str(s) for s in sources]],
+        cwd=cwd, capture_output=True, text=True, check=False,
+    )
+    return result.returncode == 0, (result.stdout + result.stderr).strip()
+
+
 def gate_cxx_format(layout: Layout) -> GateResult:
     """Non-mutating clang-format check over first-party C++ only."""
     sources = first_party_cxx_sources(layout)
@@ -77,14 +98,8 @@ def gate_cxx_format(layout: Layout) -> GateResult:
             "no first-party C++ exists yet; upstream Cemu under external/ is "
             "vendored and is deliberately not reformatted",
         )
-    result = subprocess.run(
-        ["clang-format", "--dry-run", "--Werror", *[str(s) for s in sources]],
-        cwd=layout.root, capture_output=True, text=True, check=False,
-    )
-    return GateResult(
-        "c++ format (clang-format)", result.returncode == 0, len(sources),
-        (result.stdout + result.stderr).strip(),
-    )
+    passed, detail = check_formatting(sources, layout.root)
+    return GateResult("c++ format (clang-format)", passed, len(sources), detail)
 
 
 def gate_structure(layout: Layout) -> GateResult:
