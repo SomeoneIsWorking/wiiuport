@@ -15,6 +15,18 @@ Runtime g_runtime;
 
 } // namespace
 
+namespace {
+
+bool submitToCommandProcessor(const void* data, uint32_t sizeInBytes) {
+    return LatteFrameHooks::SubmitDisplayList(data, sizeInBytes);
+}
+
+} // namespace
+
+Runtime::Runtime() : m_replayer(&submitToCommandProcessor) {
+    m_recorder.setFrameEndListener(&m_scheduler);
+}
+
 Runtime& Runtime::instance() {
     return g_runtime;
 }

@@ -1,14 +1,20 @@
 #include "check.h"
 #include "suites.h"
 #include "wiiuport/control/ControlChannel.h"
+#include "wiiuport/frame/FrameReplayer.h"
 
 #include <array>
 #include <string>
 
 using wiiuport::control::ControlChannel;
+using wiiuport::frame::FrameReplayer;
 using wiiuport::frame::RecordingObserver;
 
 namespace {
+
+bool acceptEverySubmission(const void*, uint32_t) {
+    return true;
+}
 
 bool contains(const std::string& haystack, const std::string& needle) {
     return haystack.find(needle) != std::string::npos;
@@ -20,7 +26,8 @@ void anIdleRuntimeReportsZerosRatherThanNothing() {
     // An empty body, or a route that only answers once there is something to
     // say, cannot tell those apart.
     RecordingObserver recorder;
-    ControlChannel channel(recorder);
+    FrameReplayer replayer(&acceptEverySubmission);
+    ControlChannel channel(recorder, replayer);
     std::string body = channel.countersJson();
 
     check::isTrue(contains(body, "\"framesObserved\":0"), "frames observed is reported as zero");
@@ -36,7 +43,8 @@ void theCountersFollowTheRecorder() {
     list.sizeInBytes = 16;
 
     RecordingObserver recorder;
-    ControlChannel channel(recorder);
+    FrameReplayer replayer(&acceptEverySubmission);
+    ControlChannel channel(recorder, replayer);
     recorder.OnDisplayList(list);
     recorder.OnFrameEnd();
 
@@ -48,7 +56,8 @@ void theCountersFollowTheRecorder() {
 
 void anUnstartedChannelIsNotRunning() {
     RecordingObserver recorder;
-    ControlChannel channel(recorder);
+    FrameReplayer replayer(&acceptEverySubmission);
+    ControlChannel channel(recorder, replayer);
     check::isTrue(!channel.running(), "a channel nobody started is off");
     check::equal(channel.port(), uint16_t{0}, "and reports no port rather than a plausible one");
 }

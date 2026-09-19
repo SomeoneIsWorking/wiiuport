@@ -38,8 +38,12 @@ add_library(wiiuport STATIC
   Runtime.h
   frame/FrameRecording.cpp
   frame/FrameRecording.h
+  frame/FrameReplayer.cpp
+  frame/FrameReplayer.h
   frame/RecordingObserver.cpp
   frame/RecordingObserver.h
+  frame/ReplayScheduler.cpp
+  frame/ReplayScheduler.h
   interp/Transform3x4.cpp
   interp/Transform3x4.h
 )

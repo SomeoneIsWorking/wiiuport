@@ -2,6 +2,7 @@
 
 #include "wiiuport/control/ControlChannel.h"
 #include "wiiuport/frame/RecordingObserver.h"
+#include "wiiuport/frame/ReplayScheduler.h"
 
 namespace wiiuport {
 
@@ -15,7 +16,7 @@ class Runtime {
     // Constructible directly so a test can drive one without touching the
     // process-wide instance. Not copyable: the hook registry holds a pointer
     // to whichever one was installed.
-    Runtime() = default;
+    Runtime();
     Runtime(const Runtime&) = delete;
     Runtime& operator=(const Runtime&) = delete;
 
@@ -37,9 +38,15 @@ class Runtime {
         return m_control;
     }
 
+    frame::FrameReplayer& replayer() {
+        return m_replayer;
+    }
+
   private:
     frame::RecordingObserver m_recorder;
-    control::ControlChannel m_control{m_recorder};
+    frame::FrameReplayer m_replayer;
+    frame::ReplayScheduler m_scheduler{m_replayer};
+    control::ControlChannel m_control{m_recorder, m_replayer};
     bool m_hooksInstalled{false};
 };
 
