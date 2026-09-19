@@ -49,6 +49,10 @@ class BuildConfig:
     def build_dir(self) -> Path:
         return self.layout.cemu_build
 
+    @property
+    def binary(self) -> Path:
+        return Layout(root=self.layout.root, build_type=self.build_type).cemu_binary
+
 
 def _cmake_cache_value(build_dir: Path, key: str) -> str | None:
     cache = build_dir / "CMakeCache.txt"
@@ -122,9 +126,9 @@ def compile_all(config: BuildConfig, log: Path | None = None) -> Path:
     """Build the tree and return the produced binary, refusing a missing one."""
     verify_toolchain(config)
     _run(["cmake", "--build", str(config.build_dir)], log=log, what="build")
-    binary = config.layout.cemu_binary
+    binary = config.binary
     if not binary.is_file():
-        produced = sorted(p.name for p in (config.build_dir / "bin").glob("*") if p.is_file())
+        produced = sorted(p.name for p in binary.parent.glob("Cemu_*") if p.is_file())
         raise BuildError(
             f"the build reported success but {binary} does not exist. "
             f"bin/ holds: {produced or '(nothing)'}"

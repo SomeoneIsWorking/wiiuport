@@ -30,3 +30,15 @@ def test_build_outputs_stay_under_the_top_level_build_directory(tmp_path: Path) 
     layout = Layout(root=tmp_path)
     assert layout.cemu_build.is_relative_to(layout.build)
     assert not layout.cemu_build.is_relative_to(layout.scratch)
+
+
+def test_binary_path_follows_upstreams_data_root_layout(tmp_path: Path) -> None:
+    """Upstream resolves its data directory as the executable's parent, so the
+    binary must sit beside bin/resources rather than in the build tree."""
+    layout = Layout(root=tmp_path)
+    assert layout.cemu_binary == tmp_path / "external" / "cemu" / "bin" / "Cemu_relwithdebinfo"
+    assert layout.cemu_binary.parent.name == "bin"
+
+
+def test_build_type_selects_the_binary_name(tmp_path: Path) -> None:
+    assert Layout(root=tmp_path, build_type="Debug").cemu_binary.name == "Cemu_debug"
