@@ -19,6 +19,7 @@ from wiiuport.uniformcapture import (
     ShaderAnalysis,
     SlotVerdict,
     analyse,
+    clear_previous_capture,
     rank_for_review,
     read_records,
     without_frame_constant_slots,
@@ -142,3 +143,16 @@ def test_the_dull_set_is_exactly_those_without_frame_constant_slots() -> None:
     dull = _analysis(frame_constant=0, per_draw=2, draws=7)
     keen = _analysis(frame_constant=2, per_draw=2, draws=7)
     assert without_frame_constant_slots([dull, keen]) == [dull]
+
+
+def test_a_previous_capture_is_removed_before_a_run(tmp_path: Path) -> None:
+    """Without this, a run that captures nothing copies the previous run's
+    file out and reports it as its own result."""
+    older = tmp_path / "uniform-capture.bin"
+    older.write_bytes(b"stale")
+    assert clear_previous_capture(older) == [older]
+    assert not older.exists()
+
+
+def test_clearing_a_capture_that_is_not_there_is_not_an_error(tmp_path: Path) -> None:
+    assert clear_previous_capture(tmp_path / "absent.bin") == []

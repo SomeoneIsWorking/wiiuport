@@ -18,6 +18,7 @@ from pathlib import Path
 
 from wiiuport.headless import HeadlessSession, LogType, log_flags
 from wiiuport.paths import find_layout
+from wiiuport.uniformcapture import clear_previous_capture
 
 ENV_GAME = "WIIUPORT_GAME"
 CAPTURE_NAME = "uniform-capture.bin"
@@ -71,6 +72,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     with session:
         session.prepare(keys_source=args.keys)
+        for removed in clear_previous_capture(
+            session.data_home / "Cemu" / CAPTURE_NAME,
+            layout.activity_dir("uniform-capture") / CAPTURE_NAME,
+        ):
+            print(f"removed a capture from an earlier run: {removed}")
         result = session.run([str(binary), "--game", str(game)], timeout_seconds=args.seconds)
 
     print(

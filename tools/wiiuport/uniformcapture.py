@@ -205,3 +205,19 @@ def rank_for_review(results: list[ShaderAnalysis]) -> list[ShaderAnalysis]:
 
 def without_frame_constant_slots(results: list[ShaderAnalysis]) -> list[ShaderAnalysis]:
     return [r for r in results if not r.of("frame-constant")]
+
+
+def clear_previous_capture(*paths: Path) -> list[Path]:
+    """Remove captures left by an earlier run, returning what was removed.
+
+    Capture runs reuse one fixed scratch path, so a previous run's file sits
+    there until something deletes it. Without this a run that captured nothing
+    copies the older file out and reports it as its own result -- measured
+    once, and a wrong measurement is worse than a missing one.
+    """
+    removed = []
+    for path in paths:
+        if path.is_file():
+            path.unlink()
+            removed.append(path)
+    return removed
