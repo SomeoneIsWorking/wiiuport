@@ -8,11 +8,11 @@ than a number the verifier made up.
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .hostdeps import GATE_REQUIREMENTS, MissingHostPackages, check
 from .paths import Layout
 
 TEST_TARGET = "wiiuport_tests"
@@ -46,12 +46,10 @@ def build_and_run(layout: Layout) -> CxxTestReport:
     left to whatever happens to be first on PATH. That is this command's own
     choice and not a constraint the project places on anyone building it.
     """
-    for tool in ("cmake", "ninja", "clang++"):
-        if shutil.which(tool) is None:
-            raise CxxTestsUnavailable(
-                f"{tool} is not on PATH, so the C++ tests were never built or run. "
-                "Install it: sudo dnf install cmake ninja-build clang"
-            )
+    try:
+        check(GATE_REQUIREMENTS)
+    except MissingHostPackages as missing:
+        raise CxxTestsUnavailable(f"the C++ tests were never built or run.\n{missing}") from missing
     build = layout.wiiuport_build
     configure = _run(
         [

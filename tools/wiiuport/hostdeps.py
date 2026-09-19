@@ -68,6 +68,15 @@ def find_library(name: str) -> Path | None:
 # Fedora 44 satisfies zlib through zlib-ng-compat and the perl-core content
 # through the base perl split packages, so a package-name check would refuse a
 # host that is in fact ready.
+GATE_REQUIREMENTS: tuple[Requirement, ...] = (
+    Requirement("C++ compiler (clang)", ("clang",), executables=("clang", "clang++")),
+    Requirement("clang-format", ("clang-tools-extra",), executables=("clang-format",)),
+    Requirement("CMake", ("cmake",), executables=("cmake",)),
+    Requirement("Ninja", ("ninja-build",), executables=("ninja",)),
+)
+"""What the C++ gates need. Smaller than the runtime's list: a gate compiles
+first-party code and parses it, and needs none of Cemu's dependencies."""
+
 CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement("C++ compiler (clang)", ("clang",), executables=("clang", "clang++")),
     Requirement("CMake", ("cmake",), executables=("cmake",)),

@@ -18,7 +18,6 @@ Rule 3 tests the variable's own type, not its pointee, so ``const T*`` and
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from dataclasses import dataclass
 from functools import cache
@@ -26,6 +25,7 @@ from pathlib import Path
 
 from clang.cindex import Cursor, CursorKind, Index, StorageClass, TranslationUnit
 
+from .hostdeps import MissingHostPackages, Requirement, check
 from .paths import Layout
 from .structure import FIRST_PARTY_CXX_ROOTS
 
@@ -171,12 +171,14 @@ def _resource_directory() -> str:
     compile database keeps one answer rather than a guessed path per clang
     release.
     """
-    if shutil.which("clang++") is None:
+    compiler = Requirement("C++ compiler (clang)", ("clang",), executables=("clang++",))
+    try:
+        check((compiler,))
+    except MissingHostPackages as missing:
         raise CxxPolicyUnavailable(
-            "clang++ is not on PATH, so the builtin header directory needed to "
-            "parse first-party C++ is unknown and nothing was inspected. "
-            "Install it: sudo dnf install clang"
-        )
+            "the builtin header directory needed to parse first-party C++ is "
+            f"unknown, so nothing was inspected.\n{missing}"
+        ) from missing
     found = subprocess.run(
         ["clang++", "-print-resource-dir"], capture_output=True, text=True, check=False
     )
