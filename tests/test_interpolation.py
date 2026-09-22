@@ -70,6 +70,7 @@ def report(ticks: int, interpolated: int, no_view: int) -> Interpolation:
         objectValuesNotBlended=0,
         objectDrawsWritten=interpolated,
         objectReplaysDiverged=0,
+        pacing={"guestFrames": ticks, "runtimeFrames": interpolated, "p50Us": 16667},
         viewFramesTracked=0,
         viewFramesLost=0,
         viewReseedsRun=0,
@@ -85,6 +86,9 @@ def test_a_window_counts_only_what_happened_inside_it():
     assert (window.ticks, window.framesInterpolated) == (70, 60)
     assert window.skipped == {"noView": 10, "cameraCut": 0}
     assert window.objects == {"blended": 60, "unmatched": 0}
+    assert window.pacing == {"guestFrames": 100, "runtimeFrames": 60, "p50Us": 16667}, (
+        "pacing is measured over its own window, so the later one is kept whole"
+    )
 
 
 def test_one_shot_tools_switch_continuous_off_and_the_rest_leave_it_on():

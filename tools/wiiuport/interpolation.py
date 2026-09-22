@@ -35,6 +35,9 @@ class Interpolation:
     objectValuesNotBlended: int
     objectDrawsWritten: int
     objectReplaysDiverged: int
+    # Frame times at the display since the last POST /pacing: a measurement
+    # over its own window, not a counter, so a window of a run keeps it whole.
+    pacing: dict[str, int]
     viewFramesTracked: int
     viewFramesLost: int
     viewReseedsRun: int
@@ -53,10 +56,12 @@ class Interpolation:
         counted = {
             name: delta(name)
             for name in Interpolation.__annotations__
-            if name not in {"enabled", "skipped", "withheld", "phaseNanoseconds", "objects"}
+            if name
+            not in {"enabled", "skipped", "withheld", "phaseNanoseconds", "objects", "pacing"}
         }
         return Interpolation(
             enabled=self.enabled,
+            pacing=self.pacing,
             objects={k: v - earlier.objects.get(k, 0) for k, v in self.objects.items()},
             skipped={k: v - earlier.skipped.get(k, 0) for k, v in self.skipped.items()},
             withheld={k: v - earlier.withheld.get(k, 0) for k, v in self.withheld.items()},
@@ -102,7 +107,20 @@ class Interpolation:
                     f"{self.viewReseedsFound} of {self.viewReseedsRun} searches found it"
                 ),
                 f"  withheld from runtime submissions: {withheld or 'none'}",
+                self.render_pacing(),
             ]
+        )
+
+    def render_pacing(self) -> str:
+        p = self.pacing
+        ms = {name: p[name] / 1000 for name in p if name.endswith("Us")}
+        return (
+            f"  displayed: {p['guestFrames']} title frames, {p['runtimeFrames']} in-between; "
+            f"frame time p50 {ms['p50Us']:.1f} ms, p95 {ms['p95Us']:.1f} ms, "
+            f"p99 {ms['p99Us']:.1f} ms, longest {ms['longestUs']:.1f} ms "
+            f"over {p['intervalsKept']} of {p['intervals']} intervals; "
+            f"median title-to-in-between {ms['guestToRuntimeMedianUs']:.1f} ms, "
+            f"in-between-to-title {ms['runtimeToGuestMedianUs']:.1f} ms"
         )
 
 
@@ -117,6 +135,11 @@ def read_interpolation(port: int = DEFAULT_PORT, timeout: float = 5.0) -> Interp
         )
     require_fields(url, payload, Interpolation.__annotations__, "the interpolation report")
     return Interpolation(**{field: payload[field] for field in Interpolation.__annotations__})
+
+
+def restart_pacing(port: int = DEFAULT_PORT, timeout: float = 5.0) -> None:
+    """Measure frame times from now on, not since boot."""
+    request_bytes("POST", "/pacing", port, timeout)
 
 
 def set_continuous(on: bool, port: int = DEFAULT_PORT, timeout: float = 5.0) -> None:

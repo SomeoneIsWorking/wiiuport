@@ -40,6 +40,32 @@ bool landsOn(const Distances& distances) {
     return distances.residual <= ObjectPlanner::kPartnerTolerance * distances.step;
 }
 
+// Whether `blended` lies strictly between the object's two neighbours:
+// nearer each of them than they are to each other, over the values that are
+// numbers in all three. This is what an in-between frame promises, so it is
+// checked on the values drawn rather than assumed from the partner check.
+bool liesBetween(std::span<const float> oneBack, std::span<const float> blended,
+                 std::span<const float> latest) {
+    double apart = 0.0;
+    double fromOneBack = 0.0;
+    double fromLatest = 0.0;
+    for (size_t index = 0; index < latest.size(); ++index) {
+        float p = oneBack[index];
+        float v = blended[index];
+        float b = latest[index];
+        if (!isNumber(p) || !isNumber(v) || !isNumber(b)) {
+            continue;
+        }
+        double pb = static_cast<double>(b) - p;
+        double pv = static_cast<double>(v) - p;
+        double vb = static_cast<double>(b) - v;
+        apart += pb * pb;
+        fromOneBack += pv * pv;
+        fromLatest += vb * vb;
+    }
+    return fromOneBack < apart && fromLatest < apart;
+}
+
 bool equalValues(std::span<const float> l, std::span<const float> r) {
     return l.size() == r.size() && std::memcmp(l.data(), r.data(), l.size_bytes()) == 0;
 }
@@ -56,6 +82,8 @@ std::string_view ObjectPlanner::outcomeName(Outcome outcome) {
         return "unmatched";
     case Outcome::Unverified:
         return "unverified";
+    case Outcome::Outside:
+        return "outside";
     case Outcome::Count:
         break;
     }
@@ -199,32 +227,33 @@ std::optional<size_t> ObjectPlanner::searchPartner(const AssemblyKey& key,
     return best;
 }
 
-bool ObjectPlanner::findPartner(const AssemblyKey& key, std::span<const float> before,
-                                std::span<const float> after) {
+std::optional<size_t> ObjectPlanner::findPartner(const AssemblyKey& key,
+                                                 std::span<const float> before,
+                                                 std::span<const float> after) {
     const KeyedFrame& between = m_frames[0];
     if (std::optional<AssemblyKey> derived = derivedPartner(key)) {
         std::optional<size_t> entry = between.find(*derived);
         if (entry.has_value() && between.values(*entry).size() == after.size() &&
             landsOn(measure(before, after, between.values(*entry)))) {
             ++m_partnersDerived;
-            return true;
+            return entry;
         }
     }
     uint64_t hash = key.hash();
     if (auto failed = m_searchAgainAt.find(hash);
         failed != m_searchAgainAt.end() && failed->second > m_framesPlanned) {
         ++m_searchesDeferred;
-        return false;
+        return std::nullopt;
     }
     ++m_partnersSearched;
     std::optional<size_t> found = searchPartner(key, before, after);
     if (!found.has_value() || !landsOn(measure(before, after, between.values(*found)))) {
         m_searchAgainAt.insert_or_assign(hash, m_framesPlanned + kSearchRetryInterval);
-        return false;
+        return std::nullopt;
     }
     m_searchAgainAt.erase(hash);
     learn(key, between.key(*found));
-    return true;
+    return found;
 }
 
 ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
@@ -240,11 +269,13 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     if (equalValues(before, after)) {
         return Outcome::Held;
     }
-    if (!findPartner(key, before, after)) {
+    std::optional<size_t> partner = findPartner(key, before, after);
+    if (!partner.has_value()) {
         return Outcome::Unverified;
     }
     std::vector<float>& floats = m_buildingPlan.floats;
-    m_buildingPlan.blendedAt[entry] = static_cast<uint32_t>(floats.size());
+    size_t start = floats.size();
+    uint64_t notBlended = 0;
     for (size_t index = 0; index < after.size(); ++index) {
         float a = before[index];
         float b = after[index];
@@ -253,10 +284,17 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
             continue;
         }
         if (a != b) {
-            ++m_valuesNotBlended;
+            ++notBlended;
         }
         floats.push_back(b);
     }
+    std::span<const float> blended(floats.data() + start, after.size());
+    if (!liesBetween(m_frames[0].values(*partner), blended, after)) {
+        floats.resize(start);
+        return Outcome::Outside;
+    }
+    m_valuesNotBlended += notBlended;
+    m_buildingPlan.blendedAt[entry] = static_cast<uint32_t>(start);
     return Outcome::Blended;
 }
 

@@ -19,7 +19,7 @@ lucent::http::Response notFound() {
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
         "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
         "GET /recordings, POST /replay, POST /capture, POST /present, POST /nulldiff, POST "
-        "/interpolate, POST /continuous, POST /recordings and POST /input.\n");
+        "/interpolate, POST /continuous, POST /pacing, POST /recordings and POST /input.\n");
 }
 
 // The one-shot routes each own a frame boundary, and so does continuous
@@ -108,7 +108,7 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_input(sources.input), m_capture(sources.capture), m_presenter(sources.presenter),
       m_scheduler(sources.scheduler), m_interpolator(sources.interpolator),
       m_shapeLog(sources.shapeLog), m_viewTracker(sources.viewTracker),
-      m_continuous(sources.continuous), m_snapshot(sources.snapshot) {
+      m_continuous(sources.continuous), m_snapshot(sources.snapshot), m_pacing(sources.pacing) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -310,6 +310,18 @@ std::string ControlChannel::interpolationJson() const {
     body += ",\"objectValuesNotBlended\":" + std::to_string(objects.planner().valuesNotBlended());
     body += ",\"objectDrawsWritten\":" + std::to_string(objects.drawsWritten());
     body += ",\"objectReplaysDiverged\":" + std::to_string(objects.replaysDiverged());
+    frame::PresentPacing::Summary pacing = m_pacing.summary();
+    body += ",\"pacing\":{\"guestFrames\":" + std::to_string(pacing.guestFrames);
+    body += ",\"runtimeFrames\":" + std::to_string(pacing.runtimeFrames);
+    body += ",\"intervals\":" + std::to_string(pacing.intervals);
+    body += ",\"intervalsKept\":" + std::to_string(pacing.intervalsKept);
+    body += ",\"p50Us\":" + std::to_string(pacing.p50.count());
+    body += ",\"p95Us\":" + std::to_string(pacing.p95.count());
+    body += ",\"p99Us\":" + std::to_string(pacing.p99.count());
+    body += ",\"longestUs\":" + std::to_string(pacing.longest.count());
+    body += ",\"guestToRuntimeMedianUs\":" + std::to_string(pacing.guestToRuntimeMedian.count());
+    body += ",\"runtimeToGuestMedianUs\":" + std::to_string(pacing.runtimeToGuestMedian.count());
+    body += "}";
     body += ",\"viewFramesTracked\":" + std::to_string(m_viewTracker.framesTracked());
     body += ",\"viewFramesLost\":" + std::to_string(m_viewTracker.framesLost());
     body += ",\"viewReseedsRun\":" + std::to_string(m_viewTracker.reseedsRun());
@@ -508,6 +520,12 @@ bool ControlChannel::start(uint16_t port) {
             if (request.method == "POST" && request.path() == "/continuous") {
                 bool on = requestedFlag(std::string(request.query()), "on", true);
                 m_continuous.setEnabled(on);
+                return lucent::http::Response::json(200, "OK", interpolationJson());
+            }
+            // Frame pacing measured from here on, so a walk is not averaged
+            // with the boot and menus before it.
+            if (request.method == "POST" && request.path() == "/pacing") {
+                m_pacing.restart();
                 return lucent::http::Response::json(200, "OK", interpolationJson());
             }
             // Several consecutive frames' uniform assemblies, filled at the

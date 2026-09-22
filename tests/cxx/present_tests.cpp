@@ -2,10 +2,12 @@
 #include "suites.h"
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FramePresenter.h"
+#include "wiiuport/frame/PresentPacing.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -14,6 +16,7 @@ using wiiuport::frame::FrameCapture;
 using wiiuport::frame::FramePresenter;
 using wiiuport::frame::FrameRecording;
 using wiiuport::frame::FrameReplayer;
+using wiiuport::frame::PresentPacing;
 using wiiuport::frame::ReplayScheduler;
 
 namespace {
@@ -329,6 +332,77 @@ void anOutOfRangeSlotIsRefusedNotClamped() {
                   "and reading it gives nothing rather than another slot's image");
 }
 
+// The pacing tests' clock: moved by hand, so every interval is exact.
+PresentPacing::Clock::time_point g_displayedAt{};
+
+PresentPacing::Clock::time_point displayedAt() {
+    return g_displayedAt;
+}
+
+using std::chrono::microseconds;
+using std::chrono::milliseconds;
+
+// One interpolated tick as it should reach the display: the runtime's frame
+// `first` after the title's last one, then the title's `second` after that.
+void displayTick(PresentPacing& pacing, milliseconds first, milliseconds second) {
+    g_displayedAt += first;
+    pacing.onDisplayed(true);
+    g_displayedAt += second;
+    pacing.onDisplayed(false);
+}
+
+void pacingTimesEveryFrameTheDisplayIsHanded() {
+    PresentPacing pacing(&displayedAt);
+    pacing.onDisplayed(false);
+    for (int tick = 0; tick < 50; ++tick) {
+        displayTick(pacing, milliseconds(12), milliseconds(21));
+    }
+    PresentPacing::Summary seen = pacing.summary();
+    check::equal(seen.guestFrames, uint64_t{51}, "the title's frames are counted");
+    check::equal(seen.runtimeFrames, uint64_t{50}, "and the runtime's");
+    check::equal(seen.intervals, uint64_t{100}, "one interval fewer than frames");
+    check::equal(seen.guestToRuntimeMedian.count(), microseconds(milliseconds(12)).count(),
+                 "the title's frame is on screen for its own share of the tick");
+    check::equal(seen.runtimeToGuestMedian.count(), microseconds(milliseconds(21)).count(),
+                 "and the runtime's for the rest: uneven pacing is visible as such");
+    check::equal(seen.longest.count(), microseconds(milliseconds(21)).count(),
+                 "the longest interval is the longer half");
+}
+
+void aStallShowsInTheTailNotTheMedian() {
+    PresentPacing pacing(&displayedAt);
+    pacing.onDisplayed(false);
+    for (int tick = 0; tick < 99; ++tick) {
+        displayTick(pacing, milliseconds(16), milliseconds(16));
+    }
+    displayTick(pacing, milliseconds(16), milliseconds(100));
+    PresentPacing::Summary seen = pacing.summary();
+    check::equal(seen.p50.count(), microseconds(milliseconds(16)).count(), "the median holds");
+    check::equal(seen.longest.count(), microseconds(milliseconds(100)).count(),
+                 "the stall is the longest");
+}
+
+void restartingForgetsWhatCameBefore() {
+    PresentPacing pacing(&displayedAt);
+    pacing.onDisplayed(false);
+    displayTick(pacing, milliseconds(500), milliseconds(500));
+    pacing.restart();
+    pacing.onDisplayed(false);
+    displayTick(pacing, milliseconds(16), milliseconds(17));
+    PresentPacing::Summary seen = pacing.summary();
+    check::equal(seen.intervals, uint64_t{2}, "only intervals after the restart count");
+    check::equal(seen.longest.count(), microseconds(milliseconds(17)).count(),
+                 "and the menus before it are not in the tail");
+}
+
+void nothingDisplayedReportsNoIntervals() {
+    PresentPacing pacing(&displayedAt);
+    pacing.onDisplayed(false);
+    PresentPacing::Summary seen = pacing.summary();
+    check::equal(seen.intervals, uint64_t{0}, "one frame is no interval");
+    check::equal(seen.intervalsKept, uint64_t{0}, "and none is kept");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -349,6 +423,10 @@ void runPresentTests() {
     aNullDiffThatDrewNothingDoesNotCountAsOne();
     slotsAreChosenWhenArmedNotWhenDelivered();
     anOutOfRangeSlotIsRefusedNotClamped();
+    pacingTimesEveryFrameTheDisplayIsHanded();
+    aStallShowsInTheTailNotTheMedian();
+    restartingForgetsWhatCameBefore();
+    nothingDisplayedReportsNoIntervals();
 }
 
 } // namespace wiiuport::tests

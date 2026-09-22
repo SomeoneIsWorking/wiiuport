@@ -144,7 +144,10 @@ float Transform3x4::rotationError() const {
 
 Transform3x4 Transform3x4::blend(const Transform3x4& from, const Transform3x4& to, float t) {
     float clamped = std::clamp(t, 0.0f, 1.0f);
-    if (clamped <= 0.0f) {
+    // Ends that are one transform blend to it exactly. The general path only
+    // approaches it, through a quaternion and back, and a held-still scene's
+    // in-between frame has to be the title's bit for bit.
+    if (clamped <= 0.0f || from == to) {
         return from;
     }
     if (clamped >= 1.0f) {
@@ -183,7 +186,8 @@ Transform3x4 Transform3x4::rigidInverse() const {
 
 Transform3x4 Transform3x4::blendView(const Transform3x4& from, const Transform3x4& to, float t) {
     float clamped = std::clamp(t, 0.0f, 1.0f);
-    if (clamped <= 0.0f) {
+    // As in blend(): the two rigid inverses would round a held view.
+    if (clamped <= 0.0f || from == to) {
         return from;
     }
     if (clamped >= 1.0f) {
