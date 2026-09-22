@@ -183,6 +183,44 @@ def read_counters(port: int = DEFAULT_PORT, timeout: float = 2.0) -> Counters:
     return Counters(**{field: int(payload[field]) for field in Counters.__annotations__})
 
 
+@dataclass(frozen=True)
+class ControllerStatus:
+    """What the host reports about the physical pad it has attached."""
+
+    hostReports: bool
+    attachedDevice: str
+    devicesAttached: int
+    devicesLost: int
+    bindings: int
+
+    def render(self) -> str:
+        if not self.hostReports:
+            return "no host reported controllers; this build attaches none"
+        held = self.attachedDevice or "nothing"
+        return (
+            f"attached {held} with {self.bindings} bindings; "
+            f"{self.devicesAttached} attached and {self.devicesLost} lost so far"
+        )
+
+
+def read_controllers(port: int = DEFAULT_PORT, timeout: float = 2.0) -> ControllerStatus:
+    """Read /controllers, refusing by reason rather than returning empty."""
+    payload = _get("/controllers", port, timeout)
+    _require(
+        f"http://127.0.0.1:{port}/controllers",
+        payload,
+        ControllerStatus.__annotations__,
+        "a controller status",
+    )
+    return ControllerStatus(
+        hostReports=bool(payload["hostReports"]),
+        attachedDevice=str(payload["attachedDevice"]),
+        devicesAttached=int(payload["devicesAttached"]),
+        devicesLost=int(payload["devicesLost"]),
+        bindings=int(payload["bindings"]),
+    )
+
+
 def read_transforms(port: int = DEFAULT_PORT, timeout: float = 5.0) -> TransformReport:
     """Read /transforms, refusing by reason rather than returning empty."""
     url = f"http://127.0.0.1:{port}/transforms"

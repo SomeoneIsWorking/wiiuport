@@ -10,15 +10,6 @@
 namespace wiiuport {
 namespace {
 
-// Deliberately never destroyed. The renderer can still be running at static
-// destruction time, and the hook registry would be left pointing at a dead
-// object.
-Runtime g_runtime;
-
-} // namespace
-
-namespace {
-
 bool requestFrameCapture(LatteFrameHooks::CaptureCallback callback) {
     return LatteFrameHooks::RequestFrameCapture(std::move(callback));
 }
@@ -42,7 +33,10 @@ Runtime::Runtime()
 }
 
 Runtime& Runtime::instance() {
-    return g_runtime;
+    std::call_once(s_created, [] {
+        s_instance = new Runtime();
+    });
+    return *s_instance;
 }
 
 void Runtime::installHooks() {

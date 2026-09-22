@@ -23,7 +23,15 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
-from clang.cindex import Cursor, CursorKind, Index, StorageClass, TranslationUnit
+from clang.cindex import (
+    Config,
+    Cursor,
+    CursorKind,
+    Index,
+    StorageClass,
+    TranslationUnit,
+    TranslationUnitLoadError,
+)
 
 from .hostdeps import MissingHostPackages, Requirement, check
 from .paths import Layout
@@ -192,9 +200,46 @@ def _resource_directory() -> str:
     return found.stdout.strip()
 
 
+@cache
+def _load_matching_libclang() -> str:
+    """Point the bindings at the libclang that matches the builtin headers.
+
+    The PyPI bindings bundle their own, older, library. Parsing clang's own
+    builtin headers with it fails on intrinsics and standard library internals
+    that the newer compiler introduced, and the gate then reports a parse
+    error instead of inspecting anything. One clang answers for both.
+    """
+    resource = Path(_resource_directory())
+    major = resource.name
+    candidates = [
+        *Path("/usr/lib64").glob(f"libclang.so.{major}*"),
+        *Path("/usr/lib").glob(f"libclang.so.{major}*"),
+        *Path("/usr/lib/llvm-" + major + "/lib").glob("libclang.so*"),
+        *(resource.parent.parent / "lib").glob("libclang.so*"),
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            Config.set_library_file(str(candidate))
+            return str(candidate)
+    raise CxxPolicyUnavailable(
+        f"no libclang for clang {major} was found beside the compiler, so no "
+        "translation unit could be parsed. Install the matching library "
+        f"(Fedora: sudo dnf install clang-libs; Debian/Ubuntu: sudo apt install libclang-{major}-dev)."
+    )
+
+
 def _compile_arguments(source: Path, database: dict[str, list[str]], root: Path) -> list[str]:
     resource = [f"-resource-dir={_resource_directory()}"]
     arguments = database.get(str(source))
+    if arguments is None and source.suffix in {".h", ".hpp"}:
+        # A header is read the way its own implementation reads it, which is
+        # what puts the fork's precompiled declarations in scope. Parsing it
+        # bare reports hundreds of unknown types and inspects nothing.
+        arguments = database.get(str(source.with_suffix(".cpp")))
+        if arguments is not None:
+            # Those flags name a C++ translation unit; libclang would read a
+            # .h as C and reject them.
+            return ["-xc++-header", *arguments, *resource]
     if arguments is not None:
         return [*arguments, *resource]
     includes = [f"-I{root / include}" for include in INCLUDE_ROOTS]
@@ -211,13 +256,20 @@ def _load_compile_database(path: Path) -> dict[str, list[str]]:
         file = (directory / entry["file"]).resolve()
         arguments = entry.get("arguments") or entry["command"].split()
         kept: list[str] = []
-        skip = False
-        for argument in arguments[1:]:
+        skip = 0
+        for index, argument in enumerate(arguments[1:]):
             if skip:
-                skip = False
+                skip -= 1
                 continue
             if argument in {"-o", "-c"}:
-                skip = argument == "-o"
+                skip = 1 if argument == "-o" else 0
+                continue
+            # A precompiled header is built by the compiler that will consume
+            # it; libclang is a different build and rejects it. The textual
+            # `-include` of the same header stays, so the declarations it
+            # brings are still in scope.
+            if argument == "-Xclang" and arguments[index + 2 : index + 3] == ["-include-pch"]:
+                skip = 3
                 continue
             if Path(argument).resolve() == file:
                 continue
@@ -228,17 +280,24 @@ def _load_compile_database(path: Path) -> dict[str, list[str]]:
 
 def analyse(sources: list[Path], root: Path, database: dict[str, list[str]]) -> PolicyReport:
     """Parse each source and return its findings with the parsed denominator."""
+    _load_matching_libclang()
     index = Index.create()
     scanned: list[str] = []
     findings: list[Finding] = []
     for source in sources:
         resolved = source.resolve()
         relative = resolved.relative_to(root).as_posix()
-        unit = index.parse(
-            str(resolved),
-            args=_compile_arguments(resolved, database, root),
-            options=TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD,
-        )
+        try:
+            unit = index.parse(
+                str(resolved),
+                args=_compile_arguments(resolved, database, root),
+                options=TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD,
+            )
+        except TranslationUnitLoadError as failure:
+            raise CxxPolicyUnavailable(
+                f"{relative} could not be parsed at all, so its declarations were "
+                f"never inspected: {failure}"
+            ) from failure
         fatal = [str(d) for d in unit.diagnostics if d.severity >= 4]
         if fatal:
             raise CxxPolicyUnavailable(
@@ -270,7 +329,11 @@ def check_cxx_policy(layout: Layout) -> PolicyReport:
     root = layout.root.resolve()
     sources = first_party_sources(root)
     database: dict[str, list[str]] = {}
-    compile_commands = layout.wiiuport_build / "compile_commands.json"
-    if sources and compile_commands.is_file():
-        database = _load_compile_database(compile_commands)
+    # Two builds compile first-party sources: the standalone library and the
+    # fork, which is the only one that compiles the shell. Both databases are
+    # read, so a file is analysed with the flags it is actually built with.
+    for build in (layout.wiiuport_build, layout.cemu_build):
+        compile_commands = build / "compile_commands.json"
+        if sources and compile_commands.is_file():
+            database.update(_load_compile_database(compile_commands))
     return analyse(sources, root, database)

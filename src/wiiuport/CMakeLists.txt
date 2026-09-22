@@ -65,3 +65,49 @@ target_include_directories(wiiuport PUBLIC
 target_link_libraries(wiiuport PUBLIC lucent::lucent)
 target_compile_features(wiiuport PUBLIC cxx_std_20)
 add_library(wiiuport::wiiuport ALIAS wiiuport)
+
+# The product's own shell: the executable a player runs.
+#
+# It replaces Cemu's front end rather than sitting beside it, so it is built
+# only inside the fork's tree, where the emulated system's targets exist. A
+# standalone build of this directory still produces the library and its tests.
+if(TARGET CemuCafe)
+  find_package(SDL3 REQUIRED CONFIG)
+
+  add_executable(wiiuport_shell
+    shell/Main.cpp
+    shell/ControllerAutoMap.cpp
+    shell/ControllerAutoMap.h
+    shell/HostPaths.cpp
+    shell/HostPaths.h
+    shell/ShellHost.cpp
+    shell/ShellHost.h
+    shell/ShellWindow.cpp
+    shell/ShellWindow.h
+    shell/WindowSystemBridge.cpp
+  )
+  target_link_libraries(wiiuport_shell PRIVATE
+    wiiuport::wiiuport
+    CemuAudio
+    CemuBoot
+    CemuCafe
+    CemuCommon
+    CemuComponents
+    CemuConfig
+    CemuGui
+    CemuInput
+    CemuUtil
+    SDL3::SDL3
+  )
+  target_include_directories(wiiuport_shell PRIVATE "${WIIUPORT_FORK_INCLUDE_DIR}")
+  # Cemu's headers are written against its precompiled header, which is where
+  # its integer aliases and the standard library it assumes come from. A
+  # target that includes them uses the same one its own targets do.
+  cemu_use_precompiled_header(wiiuport_shell)
+  set_target_properties(wiiuport_shell PROPERTIES
+    # Beside the fork's data directories (resources/, gameProfiles/), because
+    # the core resolves those relative to the running executable.
+    RUNTIME_OUTPUT_DIRECTORY "${WIIUPORT_FORK_INCLUDE_DIR}/../bin/$<1:>"
+    OUTPUT_NAME "wiiuport"
+  )
+endif()

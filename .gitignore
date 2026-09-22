@@ -2,3 +2,9 @@ build/
 scratch/
 .venv/
 __pycache__/
+
+# Stray runtime state if a run ever starts without resolved user paths.
+# The product writes to the platform's user data directory; these are the
+# names it would fall back to in the current directory.
+/keys.txt
+/mlc01/

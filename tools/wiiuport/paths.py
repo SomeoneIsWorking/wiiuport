@@ -39,8 +39,8 @@ class Layout:
         return self.build / "cemu"
 
     @property
-    def cemu_binary(self) -> Path:
-        """Where the runtime executable actually lands.
+    def shell_binary(self) -> Path:
+        """Where the product's executable actually lands.
 
         Upstream's CMake puts it in the source tree's ``bin/`` rather than the
         build tree, and that is deliberate on its part: the application
@@ -49,10 +49,10 @@ class Layout:
         at startup. Relocating it would mean staging that data too, so the fork
         is left alone here and the path is followed instead. Object files,
         generated build files and the vcpkg tree all still live under
-        ``build/``, and upstream's own .gitignore covers ``bin/Cemu_*`` so a
-        built binary can never be committed to the submodule.
+        ``build/``, and the fork's .gitignore covers this name so a built
+        binary can never be committed to the submodule.
         """
-        return self.cemu_source / "bin" / f"Cemu_{self.build_type.lower()}"
+        return self.cemu_source / "bin" / "wiiuport"
 
     @property
     def scratch(self) -> Path:

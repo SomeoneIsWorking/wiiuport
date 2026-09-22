@@ -1,5 +1,6 @@
 #pragma once
 
+#include "wiiuport/control/ControllerStatus.h"
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameReplayer.h"
@@ -45,6 +46,14 @@ class ControlChannel {
     ControlChannel(const ControlChannel&) = delete;
     ControlChannel& operator=(const ControlChannel&) = delete;
 
+    // The host registers what it knows about physical controllers. Absent
+    // until it does, and GET /controllers then says so rather than reporting
+    // an empty state that looks like "no pad".
+    void setControllerStatus(const ControllerStatusSource* status);
+
+    // What is attached now, or an explicit statement that no host reported.
+    std::string controllersJson() const;
+
     // False when the listener could not bind, which is reported and not fatal:
     // a busy port must not stop the product running.
     bool start(uint16_t port);
@@ -78,6 +87,7 @@ class ControlChannel {
     input::InputDriver& m_input;
     frame::FrameCapture& m_capture;
     frame::FramePresenter& m_presenter;
+    const ControllerStatusSource* m_controllerStatus{nullptr};
     frame::ReplayScheduler& m_scheduler;
     std::unique_ptr<lucent::http::Server> m_server;
 };
