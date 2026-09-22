@@ -33,6 +33,7 @@ from wiiuport.control import (
     DEFAULT_PORT,
     ControlUnavailable,
     read_counters,
+    read_frames,
     read_substitution,
     read_transforms,
 )
@@ -105,11 +106,13 @@ def main(argv: list[str] | None = None) -> int:
                     # be acted on.
                     print(report.render())
                     print(read_counters(args.port).render())
+                    print(read_frames(args.port).render())
                     print(f"refused: {refused}", file=sys.stderr)
                     return 1
                 time.sleep(args.settle)
                 after = read_counters(args.port)
                 substitution = read_substitution(args.port)
+                read_window = read_frames(args.port)
                 title_frame = read_capture(args.port, slot=0)
                 blended_frame = read_capture(args.port, slot=1)
             except ControlUnavailable as unavailable:
@@ -134,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     lists = after.displayListsFromRuntime - before.displayListsFromRuntime
     substituted = after.assembliesSubstituted - before.assembliesSubstituted
     print(after.render())
+    print(read_window.render())
     print(substitution.render())
     print(
         f"{submissions} submissions of the "

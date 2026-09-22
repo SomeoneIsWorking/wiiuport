@@ -5,6 +5,7 @@
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameReplayer.h"
+#include "wiiuport/frame/FrameShapeLog.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/input/InputDriver.h"
@@ -42,7 +43,8 @@ class ControlChannel {
     ControlChannel(const frame::RecordingObserver& recorder, frame::FrameReplayer& replayer,
                    const interp::TransformSearch& search, input::InputDriver& input,
                    frame::FrameCapture& capture, frame::FramePresenter& presenter,
-                   frame::ReplayScheduler& scheduler, interp::FrameInterpolator& interpolator);
+                   frame::ReplayScheduler& scheduler, interp::FrameInterpolator& interpolator,
+                   const frame::FrameShapeLog& shapeLog);
     ~ControlChannel();
 
     ControlChannel(const ControlChannel&) = delete;
@@ -85,6 +87,11 @@ class ControlChannel {
     // statement about both and neither alone can show it.
     std::string substitutionJson() const;
 
+    // What the last few published frames held, oldest first. One frame's
+    // totals cannot show whether the recorder publishes whole frames or
+    // halves of them; a run of them can.
+    std::string framesJson() const;
+
     // Which capture slot a query names, defaulting to the first.
     static size_t requestedSlot(const std::string& query);
 
@@ -112,6 +119,7 @@ class ControlChannel {
     const SetupStatusSource* m_setupStatus{nullptr};
     frame::ReplayScheduler& m_scheduler;
     interp::FrameInterpolator& m_interpolator;
+    const frame::FrameShapeLog& m_shapeLog;
     std::unique_ptr<lucent::http::Server> m_server;
 };
 

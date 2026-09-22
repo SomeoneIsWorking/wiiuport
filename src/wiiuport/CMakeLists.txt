@@ -42,6 +42,8 @@ add_library(wiiuport STATIC
   frame/FramePresenter.h
   frame/FrameRecording.cpp
   frame/FrameRecording.h
+  frame/FrameShapeLog.cpp
+  frame/FrameShapeLog.h
   frame/FrameReplayer.cpp
   frame/FrameReplayer.h
   frame/RecordingObserver.cpp

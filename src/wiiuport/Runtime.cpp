@@ -32,6 +32,7 @@ Runtime::Runtime()
     // run it by the time the blend is taken down.
     m_recorder.addFrameEndListener(&m_interpolator);
     m_recorder.addFrameEndListener(&m_searchFeed);
+    m_recorder.addFrameEndListener(&m_shapeLog);
     m_recorder.addPresentListener(&m_presenter);
     // The substitution only ever sees the runtime's own replayed draws; the
     // recorder is what keeps the guest's frames out of its reach.

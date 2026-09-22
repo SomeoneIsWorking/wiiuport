@@ -61,20 +61,40 @@ measurement is unambiguous: **152,215 draws from command buffers, 0 straight fro
 over 2,290 frames. So the missing pass is not in a path the recorder cannot see; it is in a
 frame window the recorder does not attribute to the frame being replayed.
 
-## Next discriminator
+## The frame window does not alternate
 
-Whether `OnFrameEnd` is at the right boundary, which is now the only candidate left. The
-numbers to explain:
+`GET /frames` keeps the shape of the last 32 published frames, and the answer is not the one
+the boundary theory predicted:
 
-- 2,290 frame ends against 4,582 presents: one frame end per swap, two scan-buffer copies per
-  frame (TV and GamePad), as expected.
-- 66 draws per frame issued by the title, against 36 in the frame the replay reproduces.
-- 211 shaders tracked, **12 of them drawing in the last frame**, and that 12 is the same small
-  set every time it has been looked at -- not a rotating sample.
+```
+2392 frames published; the last 32 held 10 to 12 distinct shaders
+  frame 2360: 16 lists, 64 assemblies across 12 shaders, 34976 bytes
+  ...
+  frame 2370: 16 lists, 56 assemblies across 10 shaders, 23552 bytes
+  ...
+  frame 2391: 16 lists, 64 assemblies across 12 shaders, 34976 bytes
+```
 
-The measurement to make: poll `GET /transforms` across consecutive frames and see whether
-`shadersInLastFrame` alternates between a large and a small set. If it does, the recorder is
-publishing half a frame at a boundary the title does not treat as one.
+Every frame is the same small shape. Nothing alternates, so the recorder is not publishing
+half of each frame at the wrong boundary; it is consistently seeing the same small pass and
+never the world pass, for long stretches at a time.
+
+## What that leaves
+
+The numbers still to reconcile, all from one run of 2,392 frames:
+
+- 166,670 guest draws, 0 of them from the ring: every draw came out of a command buffer.
+- 40,166 top-level command buffers, all of them recorded: ~17 per frame, matching the 16 in
+  each published frame.
+- 271,949 uniform assemblies seen, ~114 per frame, against 56 to 64 in every published frame.
+
+Roughly half of each frame's assemblies are seen by the hook and are not in the frame that
+gets published, while every buffer the title submits is recorded. The next measurement is
+therefore about where those assemblies are relative to the frame's scan-buffer copies: record
+the presents that fall inside each frame window, by target, alongside its shape. A window that
+holds one copy rather than two is a frame boundary that fires mid-frame; a window that holds
+both and still misses half the assemblies means the draws are reaching the renderer through a
+path that submits no command buffer of its own.
 
 None of this is a reason to weaken the gate: `tools/interpolated_frame.py` refuses by naming
 which stage failed, and it is the instrument that found every one of these.

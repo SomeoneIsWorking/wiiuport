@@ -216,6 +216,57 @@ def read_counters(port: int = DEFAULT_PORT, timeout: float = 2.0) -> Counters:
 
 
 @dataclass(frozen=True)
+class FrameShape:
+    """What one published frame held."""
+
+    frameIndex: int
+    displayLists: int
+    uniformAssemblies: int
+    distinctShaders: int
+    byteCount: int
+    complete: bool
+
+    def render(self) -> str:
+        return (
+            f"frame {self.frameIndex}: {self.displayLists} lists, "
+            f"{self.uniformAssemblies} assemblies across {self.distinctShaders} shaders, "
+            f"{self.byteCount} bytes" + ("" if self.complete else " (incomplete)")
+        )
+
+
+@dataclass(frozen=True)
+class FrameWindow:
+    """The last few published frames, oldest first."""
+
+    framesLogged: int
+    frames: tuple[FrameShape, ...]
+
+    def render(self) -> str:
+        if not self.frames:
+            return f"{self.framesLogged} frames published, none held in the window"
+        shaders = [shape.distinctShaders for shape in self.frames]
+        headline = (
+            f"{self.framesLogged} frames published; the last {len(self.frames)} held "
+            f"{min(shaders)} to {max(shaders)} distinct shaders"
+        )
+        lines = [headline]
+        lines += [f"  {shape.render()}" for shape in self.frames]
+        return "\n".join(lines)
+
+
+def read_frames(port: int = DEFAULT_PORT, timeout: float = 5.0) -> FrameWindow:
+    """Read /frames, refusing by reason rather than returning empty."""
+    url = f"http://127.0.0.1:{port}/frames"
+    payload = _get("/frames", port, timeout)
+    _require(url, payload, FrameWindow.__annotations__, "a frame window")
+    shapes = []
+    for entry in payload["frames"]:
+        _require(url, entry, FrameShape.__annotations__, "a frame shape")
+        shapes.append(FrameShape(**entry))
+    return FrameWindow(framesLogged=int(payload["framesLogged"]), frames=tuple(shapes))
+
+
+@dataclass(frozen=True)
 class OfferedShader:
     """One shader the blend was armed for, or one a replayed draw used."""
 

@@ -17,7 +17,8 @@ lucent::http::Response notFound() {
     return lucent::http::Response::text(
         404, "Not Found",
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
-        "GET /controllers, GET /setup, GET /substitution, POST /replay, POST /capture, POST "
+        "GET /controllers, GET /setup, GET /substitution, GET /frames, POST /replay, POST "
+        "/capture, POST "
         "/present, "
         "POST /nulldiff, POST /interpolate and POST /input.\n");
 }
@@ -81,10 +82,11 @@ ControlChannel::ControlChannel(const frame::RecordingObserver& recorder,
                                const interp::TransformSearch& search, input::InputDriver& input,
                                frame::FrameCapture& capture, frame::FramePresenter& presenter,
                                frame::ReplayScheduler& scheduler,
-                               interp::FrameInterpolator& interpolator)
+                               interp::FrameInterpolator& interpolator,
+                               const frame::FrameShapeLog& shapeLog)
     : m_recorder(recorder), m_replayer(replayer), m_search(search), m_input(input),
       m_capture(capture), m_presenter(presenter), m_scheduler(scheduler),
-      m_interpolator(interpolator) {
+      m_interpolator(interpolator), m_shapeLog(shapeLog) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -226,6 +228,25 @@ std::string shaderArrayJson(const std::vector<interp::TransformSubstitution::Off
 }
 
 } // namespace
+
+std::string ControlChannel::framesJson() const {
+    std::string body = "{\"framesLogged\":" + std::to_string(m_shapeLog.framesLogged());
+    body += ",\"frames\":[";
+    auto first = true;
+    for (const frame::FrameShapeLog::FrameShape& shape : m_shapeLog.shapes()) {
+        if (!first) {
+            body += ",";
+        }
+        first = false;
+        body += "{\"frameIndex\":" + std::to_string(shape.frameIndex);
+        body += ",\"displayLists\":" + std::to_string(shape.displayLists);
+        body += ",\"uniformAssemblies\":" + std::to_string(shape.uniformAssemblies);
+        body += ",\"distinctShaders\":" + std::to_string(shape.distinctShaders);
+        body += ",\"byteCount\":" + std::to_string(shape.byteCount);
+        body += ",\"complete\":" + std::string(shape.complete ? "true" : "false") + "}";
+    }
+    return body + "]}\n";
+}
 
 std::string ControlChannel::substitutionJson() const {
     const interp::TransformSubstitution& substitution = m_interpolator.substitution();
@@ -483,6 +504,9 @@ bool ControlChannel::start(uint16_t port) {
                 }
                 return lucent::http::Response::binary(200, "OK", "application/octet-stream",
                                                       m_capture.lastImageFramed(slot));
+            }
+            if (request.path() == "/frames") {
+                return lucent::http::Response::json(200, "OK", framesJson());
             }
             if (request.path() == "/substitution") {
                 return lucent::http::Response::json(200, "OK", substitutionJson());
