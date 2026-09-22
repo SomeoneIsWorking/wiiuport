@@ -28,9 +28,8 @@ from wiiuport.control import (
     ControlUnavailable,
     read_controllers,
     read_counters,
+    runtime_env,
 )
-
-ENV_CONTROL_PORT = "WIIUPORT_CONTROL_PORT"
 
 
 def wait_for(port: int, seconds: int, predicate) -> ControllerStatus | None:
@@ -74,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     session = HeadlessSession(
         layout=layout,
         activity="controller-hotswap",
-        runtime_env={ENV_CONTROL_PORT: str(args.port), "SDL_VIDEODRIVER": "x11"},
+        runtime_env={**runtime_env(args.port), "SDL_VIDEODRIVER": "x11"},
     )
     with session:
         session.prepare(keys_source=keys)

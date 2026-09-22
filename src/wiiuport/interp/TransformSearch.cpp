@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
+#include <unordered_map>
 
 namespace wiiuport::interp {
 namespace {
@@ -19,30 +21,27 @@ float distanceBetween(const Vec3& a, const Vec3& b) {
     return std::sqrt((dx * dx) + (dy * dy) + (dz * dz));
 }
 
-// Where the span sits, or npos. One owner for both questions asked of it:
-// how many shaders carry this value, and where each of them carries it.
-constexpr size_t kNoSpan = static_cast<size_t>(-1);
+} // namespace
 
-size_t findSpan(const float* haystack, size_t width, const float* needle) {
-    if (width < static_cast<size_t>(Transform3x4::kFloats)) {
-        return kNoSpan;
+TransformSearch::SpanKey TransformSearch::SpanKey::of(const float* values) {
+    SpanKey key;
+    for (size_t i = 0; i < key.bits.size(); ++i) {
+        // Keyed as floats compare: a negative zero is the same value as a
+        // zero, and a NaN is equal to nothing, including itself.
+        float value = values[i] == 0.0f ? 0.0f : values[i];
+        key.bits[i] = std::bit_cast<uint32_t>(value);
+        key.hasNaN = key.hasNaN || std::isnan(value);
     }
-    for (size_t offset = 0; offset + Transform3x4::kFloats <= width; ++offset) {
-        auto same = true;
-        for (int i = 0; i < Transform3x4::kFloats; ++i) {
-            if (haystack[offset + static_cast<size_t>(i)] != needle[i]) {
-                same = false;
-                break;
-            }
-        }
-        if (same) {
-            return offset;
-        }
-    }
-    return kNoSpan;
+    return key;
 }
 
-} // namespace
+size_t TransformSearch::SpanKeyHash::operator()(const SpanKey& key) const {
+    size_t hash = 1469598103934665603ull;
+    for (uint32_t bits : key.bits) {
+        hash = (hash ^ bits) * 1099511628211ull;
+    }
+    return hash;
+}
 
 TransformSearch::TransformSearch(float rotationTolerance) : m_rotationTolerance(rotationTolerance) {
 }
@@ -126,17 +125,47 @@ void TransformSearch::observe(const frame::FrameRecording& recording) {
     m_framesObserved += 1;
 }
 
-uint32_t TransformSearch::countShadersSharing(const ShaderKey& exclude, const float* values) const {
-    uint32_t count = 1;
-    for (const auto& [key, state] : m_shaders) {
-        if (key == exclude || state.frames == 0) {
-            continue;
-        }
-        if (findSpan(state.currentFrame.data(), state.width, values) != kNoSpan) {
-            count += 1;
+void TransformSearch::countSharing(std::vector<TransformCandidate>& candidates) const {
+    // One pass over every tracked span, looking each up among the candidate
+    // values, instead of scanning every shader once per candidate: that grew
+    // with candidates times shaders times buffer width, and a reseed pays for
+    // it on the thread that draws the frame.
+    struct Sharing {
+        uint32_t shaders{0};
+        const ShaderState* lastCounted{nullptr};
+    };
+
+    std::unordered_map<SpanKey, Sharing, SpanKeyHash> sharing;
+    for (const auto& candidate : candidates) {
+        SpanKey key = SpanKey::of(candidate.latest.values().data());
+        if (!key.hasNaN) {
+            sharing.emplace(key, Sharing{});
         }
     }
-    return count;
+    for (const auto& [key, state] : m_shaders) {
+        if (state.frames == 0) {
+            continue;
+        }
+        for (size_t offset = 0; offset + Transform3x4::kFloats <= state.width; ++offset) {
+            SpanKey span = SpanKey::of(&state.currentFrame[offset]);
+            if (span.hasNaN) {
+                continue;
+            }
+            auto found = sharing.find(span);
+            // A value carried twice by one shader is still one shader.
+            if (found == sharing.end() || found->second.lastCounted == &state) {
+                continue;
+            }
+            found->second.lastCounted = &state;
+            found->second.shaders += 1;
+        }
+    }
+    for (auto& candidate : candidates) {
+        auto found = sharing.find(SpanKey::of(candidate.latest.values().data()));
+        // A value holding a NaN is carried by its own shader and matches no
+        // other, as it compares.
+        candidate.shadersSharing = found == sharing.end() ? 1 : found->second.shaders;
+    }
 }
 
 bool TransformSearch::drewInLastFrame(const ShaderState& state) const {
@@ -164,8 +193,8 @@ std::vector<ViewSlot> TransformSearch::viewSlots() const {
             // itself as armed and changes nothing.
             continue;
         }
-        size_t offset = findSpan(state.currentFrame.data(), state.width, values.data());
-        if (offset == kNoSpan) {
+        size_t offset = view->latest.findIn(state.currentFrame.data(), state.width);
+        if (offset == Transform3x4::kNotFound) {
             continue;
         }
         slots.push_back(ViewSlot{key, static_cast<uint32_t>(offset),
@@ -216,12 +245,12 @@ SearchReport TransformSearch::search() const {
             }
             auto steps = state.frames - 1;
             report.candidates.push_back(TransformCandidate{
-                key, static_cast<uint32_t>(offset), state.frames,
-                countShadersSharing(key, &state.currentFrame[offset]), error,
+                key, static_cast<uint32_t>(offset), state.frames, 0, error,
                 steps == 0 ? 0.0f : static_cast<float>(state.translationStepSum[offset] / steps),
                 transform});
         }
     }
+    countSharing(report.candidates);
     for (const auto& candidate : report.candidates) {
         if (candidate.isShared() && candidate.meanTranslationStep > 0.0f) {
             report.sharedAndMoving += 1;

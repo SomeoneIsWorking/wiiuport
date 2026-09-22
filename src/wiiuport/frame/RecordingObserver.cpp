@@ -23,6 +23,14 @@ void RecordingObserver::OnDisplayList(const LatteFrameHooks::DisplayList& list) 
     m_inFlight.addDisplayList(list.physicalAddress, list.data, list.sizeInBytes);
 }
 
+std::span<const uint32_t> sourceWordsOf(const LatteFrameHooks::UniformAssembly& assembly) {
+    if (assembly.blockAddresses == nullptr) {
+        return {};
+    }
+    uint32_t pairs = std::min(assembly.blockAddressCount, LatteFrameHooks::kMaxUniformBlockSources);
+    return {assembly.blockAddresses, static_cast<size_t>(pairs) * 2};
+}
+
 void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly& assembly) {
     m_uniformAssembliesSeen++;
     if (assembly.fromRuntime) {
@@ -38,11 +46,15 @@ void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly
     recorded.shaderBaseHash = assembly.shaderBaseHash;
     recorded.shaderAuxHash = assembly.shaderAuxHash;
     recorded.stageIndex = assembly.stageIndex;
-    uint32_t sources =
-        std::min(assembly.blockAddressCount, LatteFrameHooks::kMaxUniformBlockSources);
-    recorded.blockSources.assign(assembly.blockAddresses, assembly.blockAddresses + sources);
+    std::span<const uint32_t> sources = sourceWordsOf(assembly);
+    recorded.blockSources.assign(sources.begin(), sources.end());
     recorded.data.assign(assembly.data, assembly.data + assembly.sizeInBytes / sizeof(float));
-    m_inFlight.addUniformAssembly(recorded);
+    if (!m_inFlight.addUniformAssembly(recorded)) {
+        return;
+    }
+    for (AssemblyRecordedListener* listener : m_assemblyListeners) {
+        listener->onAssemblyRecorded(recorded);
+    }
 }
 
 void RecordingObserver::OnPresent(const LatteFrameHooks::PresentArguments& present) {
@@ -64,23 +76,33 @@ void RecordingObserver::OnRuntimeSubmission(const LatteFrameHooks::SubmissionSum
     ++m_runtimeSubmissions;
     m_runtimePacketsProcessed += summary.packetsProcessed;
     m_runtimeDrawsIssued += summary.drawsIssued;
+    for (size_t effect = 0; effect < m_runtimeWithheld.size(); ++effect) {
+        m_runtimeWithheld[effect] += summary.withheld[effect];
+    }
 }
 
-void RecordingObserver::OnFrameEnd() {
+void RecordingObserver::OnFrameComplete() {
     m_framesObserved++;
-    // An incomplete frame is dropped rather than published. Replaying one
-    // produces an image missing whatever went over the budget, which looks
-    // like a rendering bug rather than like the recording failure it is.
-    if (m_inFlight.isComplete()) {
-        m_completed = std::move(m_inFlight);
-    } else {
+    // An incomplete frame is published as incomplete rather than skipped:
+    // skipping would leave the frame before it standing in for it, and a
+    // listener would act on a frame that is over. Every reader refuses an
+    // incomplete recording by asking it.
+    if (!m_inFlight.isComplete()) {
         m_framesRefusedIncomplete++;
     }
+    m_previous = std::move(m_completed);
+    m_completed = std::move(m_inFlight);
     m_inFlight.clear();
     // After publishing, never before: a listener must not be handed a frame
     // that is still being filled.
     for (auto* listener : m_listeners) {
         listener->onFrameRecorded(m_completed);
+    }
+}
+
+void RecordingObserver::OnFrameEnd() {
+    for (auto* listener : m_shownListeners) {
+        listener->onFrameShown(m_completed);
     }
 }
 

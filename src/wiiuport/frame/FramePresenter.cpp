@@ -2,7 +2,7 @@
 
 namespace wiiuport::frame {
 
-FramePresenter::FramePresenter(Submit submit) : m_submit(submit) {
+FramePresenter::FramePresenter(Submit submit, Submit copy) : m_submit(submit), m_copy(copy) {
 }
 
 void FramePresenter::onPresentObserved(const LatteFrameHooks::PresentArguments& present) {
@@ -36,6 +36,19 @@ bool FramePresenter::presentNow() {
         return false;
     }
     ++m_presentsSubmitted;
+    return true;
+}
+
+bool FramePresenter::copyNow() {
+    if (!hasObservedPresent()) {
+        ++m_presentsRefusedUnobserved;
+        return false;
+    }
+    if (m_copy == nullptr || !m_copy(m_lastTvPresent)) {
+        ++m_presentsRefusedBySubmit;
+        return false;
+    }
+    ++m_copiesSubmitted;
     return true;
 }
 

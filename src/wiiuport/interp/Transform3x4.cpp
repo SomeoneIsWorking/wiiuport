@@ -161,4 +161,54 @@ Transform3x4 Transform3x4::blend(const Transform3x4& from, const Transform3x4& t
     return result;
 }
 
+Transform3x4 Transform3x4::rigidInverse() const {
+    const auto& m = m_values;
+    Transform3x4 inverse;
+    auto& r = inverse.m_values;
+    // Rows of the inverse rotation are the columns of this one.
+    r[0] = m[0];
+    r[1] = m[4];
+    r[2] = m[8];
+    r[4] = m[1];
+    r[5] = m[5];
+    r[6] = m[9];
+    r[8] = m[2];
+    r[9] = m[6];
+    r[10] = m[10];
+    r[3] = -(r[0] * m[3] + r[1] * m[7] + r[2] * m[11]);
+    r[7] = -(r[4] * m[3] + r[5] * m[7] + r[6] * m[11]);
+    r[11] = -(r[8] * m[3] + r[9] * m[7] + r[10] * m[11]);
+    return inverse;
+}
+
+Transform3x4 Transform3x4::blendView(const Transform3x4& from, const Transform3x4& to, float t) {
+    float clamped = std::clamp(t, 0.0f, 1.0f);
+    if (clamped <= 0.0f) {
+        return from;
+    }
+    if (clamped >= 1.0f) {
+        return to;
+    }
+    return blend(from.rigidInverse(), to.rigidInverse(), clamped).rigidInverse();
+}
+
+float Transform3x4::rotationAngleBetween(const Transform3x4& from, const Transform3x4& to) {
+    Quaternion a = toQuaternion(from.m_values);
+    Quaternion b = toQuaternion(to.m_values);
+    float dot = std::abs(a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z);
+    return 2.0f * std::acos(std::min(dot, 1.0f));
+}
+
+size_t Transform3x4::findIn(const float* buffer, size_t width) const {
+    if (width < static_cast<size_t>(kFloats)) {
+        return kNotFound;
+    }
+    for (size_t offset = 0; offset + kFloats <= width; ++offset) {
+        if (std::equal(m_values.begin(), m_values.end(), buffer + offset)) {
+            return offset;
+        }
+    }
+    return kNotFound;
+}
+
 } // namespace wiiuport::interp

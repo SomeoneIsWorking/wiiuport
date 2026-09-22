@@ -22,9 +22,7 @@ from wiiuport.headless import HeadlessSession
 from wiiuport.paths import find_layout
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
-from wiiuport.control import DEFAULT_PORT, ControlUnavailable, read_counters
-
-ENV_CONTROL_PORT = "WIIUPORT_CONTROL_PORT"
+from wiiuport.control import DEFAULT_PORT, ControlUnavailable, read_counters, runtime_env
 
 
 def arm_replay(port: int, timeout: float = 5.0) -> str:
@@ -61,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     session = HeadlessSession(
         layout=layout,
         activity="replay-probe",
-        runtime_env={ENV_CONTROL_PORT: str(args.port)},
+        runtime_env=runtime_env(args.port, continuous=False),
     )
     with session:
         session.prepare(keys_source=keys)

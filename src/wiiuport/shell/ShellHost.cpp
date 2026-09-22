@@ -161,6 +161,12 @@ bool ShellHost::bringUpRenderer() {
         m_failure = "the Vulkan loader would not initialise: no usable Vulkan driver was found";
         return false;
     }
+    // Interpolation presents twice per title frame and leaves the spacing to
+    // the display: FIFO puts each present on its own vblank. Immediate or
+    // mailbox presentation would show the two back to back and drop one.
+    if (Runtime::instance().continuous().enabled()) {
+        GetConfig().vsync = static_cast<int>(SwapchainInfoVk::VSync::FIFO);
+    }
     try {
         g_renderer = std::make_unique<VulkanRenderer>();
         VulkanRenderer::GetInstance()->InitializeSurface({width, height}, true);

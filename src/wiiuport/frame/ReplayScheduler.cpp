@@ -18,7 +18,7 @@ bool ReplayScheduler::armNullDiff(bool redraw) {
     return true;
 }
 
-void ReplayScheduler::onFrameRecorded(const FrameRecording& recording) {
+void ReplayScheduler::onFrameShown(const FrameRecording& recording) {
     switch (m_phase) {
     case Phase::Idle:
         if (m_replayer.replayIfArmed(recording) > 0) {

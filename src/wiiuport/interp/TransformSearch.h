@@ -3,6 +3,8 @@
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/interp/Transform3x4.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <vector>
@@ -155,7 +157,26 @@ class TransformSearch {
     bool drewInLastFrame(const ShaderState& state) const;
     void narrowTo(ShaderState& state, size_t width);
     void closeFrame(ShaderState& state);
-    uint32_t countShadersSharing(const ShaderKey& exclude, const float* values) const;
+
+    // Twelve floats as a hash key that matches the way they compare.
+    struct SpanKey {
+        std::array<uint32_t, Transform3x4::kFloats> bits{};
+        bool hasNaN{false};
+
+        static SpanKey of(const float* values);
+
+        // Only ever asked of keys without a NaN, which equal nothing.
+        bool operator==(const SpanKey& other) const {
+            return bits == other.bits;
+        }
+    };
+
+    struct SpanKeyHash {
+        size_t operator()(const SpanKey& key) const;
+    };
+
+    // How many tracked shaders carry each candidate's value.
+    void countSharing(std::vector<TransformCandidate>& candidates) const;
 
     float m_rotationTolerance;
     uint32_t m_framesObserved{0};

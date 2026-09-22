@@ -7,10 +7,13 @@
 #include "wiiuport/frame/FrameReplayer.h"
 #include "wiiuport/frame/FrameShapeLog.h"
 #include "wiiuport/frame/RecordingObserver.h"
+#include "wiiuport/frame/RecordingSnapshot.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/input/InputDriver.h"
+#include "wiiuport/interp/ContinuousInterpolator.h"
 #include "wiiuport/interp/FrameInterpolator.h"
 #include "wiiuport/interp/TransformSearch.h"
+#include "wiiuport/interp/ViewTracker.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -40,11 +43,25 @@ class ControlChannel {
     // say. Long enough that a title sampling once a frame cannot miss it.
     static constexpr uint32_t kDefaultPressReads = 8;
 
-    ControlChannel(const frame::RecordingObserver& recorder, frame::FrameReplayer& replayer,
-                   const interp::TransformSearch& search, input::InputDriver& input,
-                   frame::FrameCapture& capture, frame::FramePresenter& presenter,
-                   frame::ReplayScheduler& scheduler, interp::FrameInterpolator& interpolator,
-                   const frame::FrameShapeLog& shapeLog);
+    // Every owner the channel reads or drives, by name. Positional arguments
+    // stopped scaling once the list passed half a dozen references of
+    // interchangeable-looking types.
+    struct Sources {
+        const frame::RecordingObserver& recorder;
+        frame::FrameReplayer& replayer;
+        const interp::TransformSearch& search;
+        input::InputDriver& input;
+        frame::FrameCapture& capture;
+        frame::FramePresenter& presenter;
+        frame::ReplayScheduler& scheduler;
+        interp::FrameInterpolator& interpolator;
+        const frame::FrameShapeLog& shapeLog;
+        const interp::ViewTracker& viewTracker;
+        interp::ContinuousInterpolator& continuous;
+        frame::RecordingSnapshot& snapshot;
+    };
+
+    explicit ControlChannel(const Sources& sources);
     ~ControlChannel();
 
     ControlChannel(const ControlChannel&) = delete;
@@ -92,6 +109,11 @@ class ControlChannel {
     // halves of them; a run of them can.
     std::string framesJson() const;
 
+    // Whether every frame is being interpolated, and for every tick that was
+    // not, why -- with the tracker, phase-time and withheld-packet counts beside
+    // it, so a run that never interpolated says so in numbers.
+    std::string interpolationJson() const;
+
     // Which capture slot a query names, defaulting to the first.
     static size_t requestedSlot(const std::string& query);
 
@@ -102,6 +124,10 @@ class ControlChannel {
 
     // A boolean query parameter, defaulting when it is absent.
     static bool requestedFlag(const std::string& query, std::string_view name, bool fallback);
+
+    // A non-negative count query parameter. Zero when present but not a
+    // plain decimal number, so the caller's range check refuses it.
+    static size_t requestedCount(const std::string& query, std::string_view name, size_t fallback);
 
     // Applies one input request and returns the body describing what it did.
     // `accepted` is false when nothing in the query named a button or a
@@ -120,6 +146,9 @@ class ControlChannel {
     frame::ReplayScheduler& m_scheduler;
     interp::FrameInterpolator& m_interpolator;
     const frame::FrameShapeLog& m_shapeLog;
+    const interp::ViewTracker& m_viewTracker;
+    interp::ContinuousInterpolator& m_continuous;
+    frame::RecordingSnapshot& m_snapshot;
     std::unique_ptr<lucent::http::Server> m_server;
 };
 

@@ -36,7 +36,7 @@ bool FrameInterpolator::armOnce(float t) {
     return true;
 }
 
-void FrameInterpolator::onFrameRecorded(const frame::FrameRecording&) {
+void FrameInterpolator::onFrameShown(const frame::FrameRecording&) {
     if (m_substitution.isArmed() && !m_scheduler.nullDiffPending()) {
         m_substitution.disarm();
     }

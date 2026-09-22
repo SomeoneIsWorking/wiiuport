@@ -9,6 +9,7 @@ progress.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -17,6 +18,20 @@ DEFAULT_PORT = 21337
 """The port maintainer tools use. The product opens none unless one is
 configured, so this is a convention between tools, not a default the product
 carries."""
+
+
+ENV_CONTROL_PORT = "WIIUPORT_CONTROL_PORT"
+ENV_INTERPOLATION = "WIIUPORT_INTERPOLATION"
+
+
+def runtime_env(port: int, *, continuous: bool = True) -> dict[str, str]:
+    """The environment a driven run hands the product.
+
+    Continuous interpolation is the product and stays on unless a tool needs a
+    frame boundary of its own: a one-shot replay, null diff or single
+    interpolated frame would otherwise compete with it for every boundary, and
+    the runtime refuses them while it runs."""
+    return {ENV_CONTROL_PORT: str(port), ENV_INTERPOLATION: "1" if continuous else "0"}
 
 
 class ControlUnavailable(RuntimeError):
@@ -197,7 +212,25 @@ def _get(path: str, port: int, timeout: float) -> dict:
         )
 
 
-def _require(url: str, payload: dict, fields: object, what: str) -> None:
+def request_bytes(method: str, path: str, port: int, timeout: float) -> bytes:
+    """One request to the channel, refusing by reason: a refusal carries the
+    runtime's own explanation, and silence says the runtime is not there."""
+    url = f"http://127.0.0.1:{port}{path}"
+    request = urllib.request.Request(url, method=method, data=b"" if method == "POST" else None)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read()
+    except urllib.error.HTTPError as refused:
+        body = refused.read().decode("utf-8", "replace").strip()
+        raise ControlUnavailable(f"{url} was refused ({refused.code}): {body}") from refused
+    except urllib.error.URLError as unreachable:
+        raise ControlUnavailable(
+            f"{url} did not answer ({unreachable.reason}). The runtime is not running, "
+            "or was started without WIIUPORT_CONTROL_PORT."
+        ) from unreachable
+
+
+def require_fields(url: str, payload: dict, fields: object, what: str) -> None:
     missing = set(fields) - set(payload)
     if missing:
         raise ControlUnavailable(
@@ -206,10 +239,25 @@ def _require(url: str, payload: dict, fields: object, what: str) -> None:
         )
 
 
+def wait_for_channel(port: int, seconds: int) -> bool:
+    """Poll until the channel answers or `seconds` pass. False means the
+    runtime never opened it, which a caller reports rather than driving a
+    title nothing can observe."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        time.sleep(5)
+        try:
+            read_counters(port)
+        except ControlUnavailable:
+            continue
+        return True
+    return False
+
+
 def read_counters(port: int = DEFAULT_PORT, timeout: float = 2.0) -> Counters:
     """Read /counters, refusing by reason rather than returning empty."""
     payload = _get("/counters", port, timeout)
-    _require(
+    require_fields(
         f"http://127.0.0.1:{port}/counters", payload, Counters.__annotations__, "a counter set"
     )
     return Counters(**{field: int(payload[field]) for field in Counters.__annotations__})
@@ -258,10 +306,10 @@ def read_frames(port: int = DEFAULT_PORT, timeout: float = 5.0) -> FrameWindow:
     """Read /frames, refusing by reason rather than returning empty."""
     url = f"http://127.0.0.1:{port}/frames"
     payload = _get("/frames", port, timeout)
-    _require(url, payload, FrameWindow.__annotations__, "a frame window")
+    require_fields(url, payload, FrameWindow.__annotations__, "a frame window")
     shapes = []
     for entry in payload["frames"]:
-        _require(url, entry, FrameShape.__annotations__, "a frame shape")
+        require_fields(url, entry, FrameShape.__annotations__, "a frame shape")
         shapes.append(FrameShape(**entry))
     return FrameWindow(framesLogged=int(payload["framesLogged"]), frames=tuple(shapes))
 
@@ -315,7 +363,7 @@ def read_substitution(port: int = DEFAULT_PORT, timeout: float = 2.0) -> Substit
     """Read /substitution, refusing by reason rather than returning empty."""
     payload = _get("/substitution", port, timeout)
     url = f"http://127.0.0.1:{port}/substitution"
-    _require(url, payload, Substitution.__annotations__, "a substitution report")
+    require_fields(url, payload, Substitution.__annotations__, "a substitution report")
     return Substitution(
         armed=bool(payload["armed"]),
         blendPoint=float(payload["blendPoint"]),
@@ -349,7 +397,7 @@ class ControllerStatus:
 def read_controllers(port: int = DEFAULT_PORT, timeout: float = 2.0) -> ControllerStatus:
     """Read /controllers, refusing by reason rather than returning empty."""
     payload = _get("/controllers", port, timeout)
-    _require(
+    require_fields(
         f"http://127.0.0.1:{port}/controllers",
         payload,
         ControllerStatus.__annotations__,
@@ -386,7 +434,7 @@ class SetupStatus:
 def read_setup(port: int = DEFAULT_PORT, timeout: float = 2.0) -> SetupStatus:
     """Read /setup, refusing by reason rather than returning empty."""
     payload = _get("/setup", port, timeout)
-    _require(
+    require_fields(
         f"http://127.0.0.1:{port}/setup",
         payload,
         SetupStatus.__annotations__,
@@ -404,10 +452,10 @@ def read_transforms(port: int = DEFAULT_PORT, timeout: float = 5.0) -> Transform
     """Read /transforms, refusing by reason rather than returning empty."""
     url = f"http://127.0.0.1:{port}/transforms"
     payload = _get("/transforms", port, timeout)
-    _require(url, payload, TransformReport.__annotations__, "a transform report")
+    require_fields(url, payload, TransformReport.__annotations__, "a transform report")
     candidates = []
     for entry in payload["candidates"]:
-        _require(url, entry, TransformCandidate.__annotations__, "a transform candidate")
+        require_fields(url, entry, TransformCandidate.__annotations__, "a transform candidate")
         candidates.append(
             TransformCandidate(
                 stageIndex=int(entry["stageIndex"]),

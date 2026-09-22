@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-from wiiuport.headless import HeadlessError, HeadlessSession
+from wiiuport.headless import Display, HeadlessError, HeadlessSession
 from wiiuport.paths import Layout, find_layout
 from wiiuport.screenshot import ScreenshotUnavailable, capture_display, spread
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
@@ -30,9 +30,9 @@ from wiiuport.control import (
     ControlUnavailable,
     read_counters,
     read_setup,
+    runtime_env,
 )
 
-ENV_CONTROL_PORT = "WIIUPORT_CONTROL_PORT"
 RECORD_NAME = "selected-title.txt"
 
 
@@ -169,7 +169,9 @@ def main(argv: list[str] | None = None) -> int:
     session = HeadlessSession(
         layout=layout,
         activity="setup-screen",
-        runtime_env={ENV_CONTROL_PORT: str(args.port)},
+        runtime_env=runtime_env(args.port),
+        # It screenshots the X root window, which only Xvfb exposes.
+        display_server=Display.XVFB,
     )
     try:
         with session:

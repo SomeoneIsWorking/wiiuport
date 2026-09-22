@@ -22,7 +22,7 @@ namespace wiiuport::interp {
 // It arms; it never presents. The frame boundary owns that, and it is also
 // where the blend is taken back down: a substitution left armed would write
 // the camera of a frame that is over into whatever replay ran next.
-class FrameInterpolator final : public frame::FrameEndListener {
+class FrameInterpolator final : public frame::FrameShownListener {
   public:
     FrameInterpolator(const TransformSearch& search, TransformSubstitution& substitution,
                       frame::ReplayScheduler& scheduler);
@@ -50,7 +50,7 @@ class FrameInterpolator final : public frame::FrameEndListener {
     // Disarms the blend once the frame it was armed for has been replayed.
     // Reading the scheduler rather than counting frames is what keeps this
     // right when a frame end arrives that the scheduler did nothing with.
-    void onFrameRecorded(const frame::FrameRecording& recording) override;
+    void onFrameShown(const frame::FrameRecording& recording) override;
 
     const TransformSubstitution& substitution() const {
         return m_substitution;

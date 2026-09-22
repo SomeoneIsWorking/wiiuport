@@ -3,18 +3,49 @@
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/FrameRecording.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace wiiuport::frame {
 
+// The (bufferId, address) words of the blocks one assembly sourced, capped at
+// the interface's own limit: a count the interface says cannot happen must not
+// be read past the caller's buffer.
+std::span<const uint32_t> sourceWordsOf(const LatteFrameHooks::UniformAssembly& assembly);
+
 // Notified once a frame is complete and published, which is the only moment
-// anything may act on a whole frame. Kept as a narrow interface so the
-// recorder does not acquire an opinion about what happens next.
+// anything may act on a whole frame. That is when the guest has finished
+// drawing it and before its swap shows it, so a listener here can still put a
+// frame of its own on screen ahead of the guest's. Kept as a narrow interface
+// so the recorder does not acquire an opinion about what happens next.
 class FrameEndListener {
   public:
     virtual ~FrameEndListener() = default;
     virtual void onFrameRecorded(const FrameRecording& recording) = 0;
+};
+
+// Notified for each of the guest's uniform assemblies as it is recorded, while
+// the frame is still being drawn. Work done here is spread over the frame; work
+// done at the frame's end lands between the frame and its swap, where the title
+// waits for it.
+class AssemblyRecordedListener {
+  public:
+    virtual ~AssemblyRecordedListener() = default;
+    virtual void onAssemblyRecorded(const RecordedUniformAssembly& assembly) = 0;
+};
+
+// Notified after the guest's swap has shown the frame most recently recorded.
+// Separate from FrameEndListener because some measurements are defined by
+// what is already on screen: a null diff captures the guest's present and
+// then redraws over it, which only means something once that present has
+// happened.
+class FrameShownListener {
+  public:
+    virtual ~FrameShownListener() = default;
+    virtual void onFrameShown(const FrameRecording& recording) = 0;
 };
 
 // Notified for every present the title makes. Separate from FrameEndListener
@@ -52,6 +83,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void OnDisplayList(const LatteFrameHooks::DisplayList& list) override;
     void OnUniformAssembly(const LatteFrameHooks::UniformAssembly& assembly) override;
     void OnPresent(const LatteFrameHooks::PresentArguments& present) override;
+    void OnFrameComplete() override;
     void OnFrameEnd() override;
     void OnGuestDraw(bool fromCommandBuffer) override;
     void OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) override;
@@ -63,6 +95,18 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void addFrameEndListener(FrameEndListener* listener) {
         if (listener != nullptr) {
             m_listeners.push_back(listener);
+        }
+    }
+
+    void addAssemblyRecordedListener(AssemblyRecordedListener* listener) {
+        if (listener != nullptr) {
+            m_assemblyListeners.push_back(listener);
+        }
+    }
+
+    void addFrameShownListener(FrameShownListener* listener) {
+        if (listener != nullptr) {
+            m_shownListeners.push_back(listener);
         }
     }
 
@@ -86,6 +130,11 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     // frame being filled so a replay never reads a half-recorded frame.
     const FrameRecording& lastCompleteFrame() const {
         return m_completed;
+    }
+
+    // The frame published before that one: the other end of every blend.
+    const FrameRecording& previousFrame() const {
+        return m_previous;
     }
 
     // Denominators. A run where these stay at zero reached no draws, which is
@@ -152,11 +201,22 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
         return m_runtimeDrawsIssued;
     }
 
+    // Packets the runtime's submissions were not allowed to execute, by class.
+    // A replay that needed one of them to draw correctly shows up here rather
+    // than as an image that is quietly wrong.
+    uint64_t runtimeWithheld(LatteFrameHooks::WithheldEffect effect) const {
+        return m_runtimeWithheld[static_cast<size_t>(effect)];
+    }
+
   private:
     std::vector<FrameEndListener*> m_listeners;
+    std::vector<AssemblyRecordedListener*> m_assemblyListeners;
+    std::vector<FrameShownListener*> m_shownListeners;
     std::vector<PresentListener*> m_presentListeners;
     FrameRecording m_inFlight;
     FrameRecording m_completed;
+    FrameRecording m_previous;
+    std::array<uint64_t, LatteFrameHooks::kWithheldEffectCount> m_runtimeWithheld{};
     uint64_t m_framesObserved{0};
     uint64_t m_framesRefusedIncomplete{0};
     uint64_t m_displayListsSeen{0};

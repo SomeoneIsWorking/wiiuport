@@ -20,21 +20,14 @@ from wiiuport.headless import HeadlessSession
 from wiiuport.paths import find_layout
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
-from wiiuport.control import DEFAULT_PORT, ControlUnavailable, read_counters, read_transforms
-
-ENV_CONTROL_PORT = "WIIUPORT_CONTROL_PORT"
-
-
-def wait_for_channel(port: int, seconds: int) -> bool:
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        time.sleep(5)
-        try:
-            read_counters(port)
-        except ControlUnavailable:
-            continue
-        return True
-    return False
+from wiiuport.control import (
+    DEFAULT_PORT,
+    ControlUnavailable,
+    read_counters,
+    read_transforms,
+    runtime_env,
+    wait_for_channel,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -64,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     session = HeadlessSession(
         layout=layout,
         activity="reach-gameplay",
-        runtime_env={ENV_CONTROL_PORT: str(args.port)},
+        runtime_env=runtime_env(args.port),
     )
     report = None
     counters = None

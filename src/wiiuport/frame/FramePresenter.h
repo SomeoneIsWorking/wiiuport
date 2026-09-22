@@ -32,7 +32,10 @@ class FramePresenter final : public PresentListener {
     // treated as a present that happened.
     using Submit = bool (*)(const LatteFrameHooks::PresentArguments& present);
 
-    explicit FramePresenter(Submit submit);
+    // `copy` sends only the colour-buffer copy, so the guest's own swap that
+    // follows presents it. Null in a build or test with no need to put a
+    // guest frame back, and then copyNow() refuses.
+    explicit FramePresenter(Submit submit, Submit copy = nullptr);
 
     // Called for every present the title makes, so the arguments stay current
     // with the scan buffer the title is actually filling.
@@ -60,6 +63,14 @@ class FramePresenter final : public PresentListener {
     // present has been observed yet, rather than submitting a packet full of
     // zeroes that would read as a present of nothing.
     bool presentNow();
+
+    // Copy the last observed TV colour buffer to the scan buffer without
+    // swapping. Refuses under the same conditions as presentNow().
+    bool copyNow();
+
+    uint64_t copiesSubmitted() const {
+        return m_copiesSubmitted;
+    }
 
     // Does nothing unless armed, and disarms whether or not it succeeded.
     bool presentIfArmed();
@@ -92,6 +103,7 @@ class FramePresenter final : public PresentListener {
 
   private:
     Submit m_submit;
+    Submit m_copy;
     LatteFrameHooks::PresentArguments m_lastTvPresent{};
     bool m_armed{false};
     uint64_t m_presentsObserved{0};
@@ -100,6 +112,7 @@ class FramePresenter final : public PresentListener {
     uint64_t m_presentsSubmitted{0};
     uint64_t m_presentsRefusedUnobserved{0};
     uint64_t m_presentsRefusedBySubmit{0};
+    uint64_t m_copiesSubmitted{0};
 };
 
 } // namespace wiiuport::frame

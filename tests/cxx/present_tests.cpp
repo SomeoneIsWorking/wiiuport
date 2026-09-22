@@ -181,11 +181,11 @@ void aReplayThatDrewSomethingIsPresented() {
     std::array<uint32_t, 4> words{};
     recording.addDisplayList(0x100, words.data(), sizeof(words));
 
-    scheduler.onFrameRecorded(recording);
+    scheduler.onFrameShown(recording);
     check::equal(g_submitted.size(), size_t{0}, "an unarmed frame end presents nothing");
 
     replayer.armOnce();
-    scheduler.onFrameRecorded(recording);
+    scheduler.onFrameShown(recording);
     check::isTrue(g_listsSubmitted > 0, "the replay submitted its lists");
     check::equal(g_submitted.size(), size_t{1}, "and the frame it drew was presented");
 }
@@ -200,7 +200,7 @@ void aReplayThatDrewNothingIsNotPresented() {
 
     FrameRecording empty;
     replayer.armOnce();
-    scheduler.onFrameRecorded(empty);
+    scheduler.onFrameShown(empty);
     check::equal(g_submitted.size(), size_t{0},
                  "presenting an empty replay would show the guest's frame as the replay's");
 }
@@ -228,13 +228,13 @@ void aNullDiffCapturesTheSameFrameTwice() {
 
     // First frame end: the title's capture is armed, to be consumed by the
     // swap that ends the next frame.
-    scheduler.onFrameRecorded(recording);
+    scheduler.onFrameShown(recording);
     check::equal(g_armedSlots.size(), size_t{1}, "the title's half is armed at a frame end");
     check::equal(g_armedSlots.front(), ReplayScheduler::kTitleSlot, "into the title's slot");
     check::equal(g_listsSubmitted, uint64_t{0}, "and nothing is replayed yet");
 
     g_nextSlot = ReplayScheduler::kReplaySlot;
-    scheduler.onFrameRecorded(recording);
+    scheduler.onFrameShown(recording);
 
     check::equal(g_armedSlots.size(), size_t{2}, "the replay's half is armed at the frame end");
     check::equal(g_armedSlots.back(), ReplayScheduler::kReplaySlot, "into the other slot");
@@ -255,11 +255,11 @@ void aNullDiffWithoutRedrawPresentsWhatTheTitleDrew() {
     ReplayScheduler scheduler(replayer, presenter, capture);
 
     check::isTrue(scheduler.armNullDiff(false), "the control arms");
-    scheduler.onFrameRecorded(FrameRecording{});
+    scheduler.onFrameShown(FrameRecording{});
     check::isTrue(!replayer.isArmed(), "without arming a replay");
 
     g_nextSlot = ReplayScheduler::kReplaySlot;
-    scheduler.onFrameRecorded(FrameRecording{});
+    scheduler.onFrameShown(FrameRecording{});
     check::equal(g_armedSlots.size(), size_t{2}, "both halves are still captured");
     check::equal(g_listsSubmitted, uint64_t{0}, "with nothing replayed");
     check::equal(g_submitted.size(), size_t{1}, "and the same buffer presented again");
@@ -289,9 +289,9 @@ void aNullDiffThatDrewNothingDoesNotCountAsOne() {
     ReplayScheduler scheduler(replayer, presenter, capture);
 
     check::isTrue(scheduler.armNullDiff(true), "armed");
-    scheduler.onFrameRecorded(FrameRecording{});
+    scheduler.onFrameShown(FrameRecording{});
     g_nextSlot = ReplayScheduler::kReplaySlot;
-    scheduler.onFrameRecorded(FrameRecording{});
+    scheduler.onFrameShown(FrameRecording{});
     check::equal(g_armedSlots.size(), size_t{1}, "only the title's half was ever armed");
     check::equal(g_submitted.size(), size_t{0}, "nothing was presented");
     check::equal(scheduler.nullDiffsCompleted(), uint64_t{0}, "and no run is claimed");
