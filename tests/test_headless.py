@@ -117,3 +117,42 @@ def test_runtime_overrides_cannot_break_the_isolation(tmp_path: Path) -> None:
     env = session.environment()
     assert env["XDG_DATA_HOME"] == str(session.data_home)
     assert env["DISPLAY"] == ":99"
+
+
+def test_a_save_is_copied_not_linked_so_a_driven_run_cannot_ruin_it(
+    session: HeadlessSession, tmp_path: Path
+) -> None:
+    """A run presses buttons at random and writes to its save as it plays.
+
+    Linking would put the operator's own quest log behind that.
+    """
+    source = tmp_path / "10143500"
+    (source / "user" / "80000001").mkdir(parents=True)
+    (source / "user" / "80000001" / "cking.sav").write_bytes(b"quest log")
+    session.prepare(save_source=source)
+
+    staged = (
+        session.data_home
+        / "Cemu"
+        / "mlc01"
+        / "usr"
+        / "save"
+        / "00050000"
+        / "10143500"
+        / "user"
+        / "80000001"
+        / "cking.sav"
+    )
+    assert staged.is_file()
+    assert not staged.is_symlink()
+    staged.write_bytes(b"overwritten by the run")
+    assert (source / "user" / "80000001" / "cking.sav").read_bytes() == b"quest log"
+
+
+def test_a_named_save_that_is_not_there_is_refused_rather_than_skipped(
+    session: HeadlessSession, tmp_path: Path
+) -> None:
+    from wiiuport.headless import HeadlessError
+
+    with pytest.raises(HeadlessError, match="is not a directory"):
+        session.prepare(save_source=tmp_path / "no-such-save")

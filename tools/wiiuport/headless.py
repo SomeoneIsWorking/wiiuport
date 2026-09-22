@@ -156,7 +156,7 @@ class HeadlessSession:
         env["XDG_SESSION_TYPE"] = "x11"
         return env
 
-    def prepare(self, keys_source: Path | None = None) -> None:
+    def prepare(self, keys_source: Path | None = None, save_source: Path | None = None) -> None:
         """Create the isolated directories and write the offscreen settings."""
         for directory in (self.config_home, self.data_home, self.cache_home):
             directory.mkdir(parents=True, exist_ok=True)
@@ -168,6 +168,8 @@ class HeadlessSession:
         self._write_gamepad_profile()
         if keys_source is not None:
             self._link_keys(keys_source)
+        if save_source is not None:
+            self._copy_save(save_source)
 
     def _write_gamepad_profile(self) -> None:
         """Give player one a gamepad, because the title only reads one that exists.
@@ -200,6 +202,25 @@ class HeadlessSession:
         if target.is_symlink() or target.exists():
             target.unlink()
         target.symlink_to(keys_source)
+
+    def _copy_save(self, save_source: Path) -> None:
+        """Copy, never link, the operator's save into the session's own mlc.
+
+        A run writes to its save as it plays. Linking would put the operator's
+        own progress behind a driven run that presses buttons at random, and
+        the first overwritten quest log would be theirs. The copy is in
+        gitignored scratch and is the session's to ruin.
+        """
+        if not save_source.is_dir():
+            raise HeadlessError(
+                f"a save was requested but {save_source} is not a directory; "
+                "a run without one stops at the name-entry keyboard"
+            )
+        target = self.data_home / "Cemu" / "mlc01" / "usr" / "save" / "00050000" / save_source.name
+        if target.exists():
+            shutil.rmtree(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(save_source, target)
 
     def start_display(self) -> None:
         if shutil.which("Xvfb") is None:
