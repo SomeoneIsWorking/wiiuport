@@ -2,6 +2,7 @@
 
 #include "wiiuport/control/ControlChannel.h"
 #include "wiiuport/frame/FrameCapture.h"
+#include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/frame/SearchFeed.h"
@@ -58,15 +59,25 @@ class Runtime {
         return m_capture;
     }
 
+    frame::FramePresenter& presenter() {
+        return m_presenter;
+    }
+
+    frame::ReplayScheduler& scheduler() {
+        return m_scheduler;
+    }
+
   private:
     frame::RecordingObserver m_recorder;
     frame::FrameReplayer m_replayer;
-    frame::ReplayScheduler m_scheduler{m_replayer};
+    frame::FramePresenter m_presenter;
+    frame::FrameCapture m_capture;
+    frame::ReplayScheduler m_scheduler{m_replayer, m_presenter, m_capture};
     interp::TransformSearch m_search;
     frame::SearchFeed m_searchFeed{m_search};
     input::InputDriver m_input;
-    frame::FrameCapture m_capture;
-    control::ControlChannel m_control{m_recorder, m_replayer, m_search, m_input, m_capture};
+    control::ControlChannel m_control{m_recorder, m_replayer,  m_search,   m_input,
+                                      m_capture,  m_presenter, m_scheduler};
     bool m_hooksInstalled{false};
 };
 

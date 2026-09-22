@@ -87,9 +87,9 @@ def decode(body: bytes) -> Image:
     return Image(width=width, height=height, rgb=body[HEADER_BYTES:])
 
 
-def read_capture(port: int = DEFAULT_PORT, timeout: float = 20.0) -> Image:
-    """Fetch the last captured frame, refusing by reason rather than empty."""
-    url = f"http://127.0.0.1:{port}/capture"
+def read_capture(port: int = DEFAULT_PORT, timeout: float = 20.0, slot: int = 0) -> Image:
+    """Fetch a captured frame, refusing by reason rather than empty."""
+    url = f"http://127.0.0.1:{port}/capture?slot={slot}"
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
             return decode(response.read())
@@ -103,8 +103,8 @@ def read_capture(port: int = DEFAULT_PORT, timeout: float = 20.0) -> Image:
         ) from unreachable
 
 
-def arm_capture(port: int = DEFAULT_PORT, timeout: float = 5.0) -> bool:
-    url = f"http://127.0.0.1:{port}/capture"
+def arm_capture(port: int = DEFAULT_PORT, timeout: float = 5.0, slot: int = 0) -> bool:
+    url = f"http://127.0.0.1:{port}/capture?slot={slot}"
     request = urllib.request.Request(url, method="POST", data=b"")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -113,5 +113,22 @@ def arm_capture(port: int = DEFAULT_PORT, timeout: float = 5.0) -> bool:
         raise ControlUnavailable(
             f"{url} refused to arm a capture ({refused.code}); the renderer may not exist yet"
         ) from refused
+    except urllib.error.URLError as unreachable:
+        raise ControlUnavailable(f"{url} did not answer ({unreachable.reason})") from unreachable
+
+
+def arm_null_diff(port: int = DEFAULT_PORT, timeout: float = 5.0, redraw: bool = True) -> bool:
+    """Ask the runtime to capture one frame twice: as the title presented it
+    and as a replay of that same frame redrew it. Both halves are armed around
+    one frame boundary inside the runtime, which is the only place that knows
+    where that boundary is."""
+    url = f"http://127.0.0.1:{port}/nulldiff?redraw={1 if redraw else 0}"
+    request = urllib.request.Request(url, method="POST", data=b"")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status == 200
+    except urllib.error.HTTPError as refused:
+        body = refused.read().decode("utf-8", "replace").strip()
+        raise ControlUnavailable(f"{url} refused ({refused.code}): {body}") from refused
     except urllib.error.URLError as unreachable:
         raise ControlUnavailable(f"{url} did not answer ({unreachable.reason})") from unreachable

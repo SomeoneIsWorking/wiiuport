@@ -32,11 +32,14 @@ if(NOT TARGET lucent::lucent)
 endif()
 
 add_library(wiiuport STATIC
-  control/ControlChannel.cpp
-  control/ControlChannel.h
   Runtime.cpp
   Runtime.h
+  control/ControlChannel.cpp
+  control/ControlChannel.h
   frame/FrameCapture.cpp
+  frame/FrameCapture.h
+  frame/FramePresenter.cpp
+  frame/FramePresenter.h
   frame/FrameRecording.cpp
   frame/FrameRecording.h
   frame/FrameReplayer.cpp
@@ -44,12 +47,15 @@ add_library(wiiuport STATIC
   frame/RecordingObserver.cpp
   frame/RecordingObserver.h
   frame/ReplayScheduler.cpp
-  frame/SearchFeed.cpp
-  input/InputDriver.cpp
   frame/ReplayScheduler.h
+  frame/SearchFeed.cpp
+  frame/SearchFeed.h
+  input/InputDriver.cpp
+  input/InputDriver.h
   interp/Transform3x4.cpp
-  interp/TransformSearch.cpp
   interp/Transform3x4.h
+  interp/TransformSearch.cpp
+  interp/TransformSearch.h
 )
 
 target_include_directories(wiiuport PUBLIC

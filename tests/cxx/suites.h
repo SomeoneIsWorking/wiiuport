@@ -12,5 +12,6 @@ void runReplayTests();
 void runSearchTests();
 void runInputTests();
 void runCaptureTests();
+void runPresentTests();
 
 } // namespace wiiuport::tests

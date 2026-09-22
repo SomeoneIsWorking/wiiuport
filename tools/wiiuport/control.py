@@ -40,6 +40,14 @@ class Counters:
     inputPollsSeen: int
     inputPollsAnswered: int
     inputPressesQueued: int
+    capturesRequested: int
+    capturesRefused: int
+    imagesReceived: int
+    presentsObserved: int
+    presentsSubmitted: int
+    presentsRefusedUnobserved: int
+    presentsRefusedBySubmit: int
+    nullDiffsCompleted: int
 
     @property
     def recorded_anything(self) -> bool:
@@ -53,7 +61,11 @@ class Counters:
             f"{self.lastFrameDisplayLists} lists and "
             f"{self.lastFrameUniformAssemblies} assemblies in {self.lastFrameBytes} bytes; "
             f"replays {self.replaysRun} submitting {self.replayListsSubmitted} lists "
-            f"({self.replayListsRefused} refused)"
+            f"({self.replayListsRefused} refused); presents observed "
+            f"{self.presentsObserved}, submitted {self.presentsSubmitted} "
+            f"({self.presentsRefusedUnobserved} with nothing to send, "
+            f"{self.presentsRefusedBySubmit} refused); null diffs "
+            f"{self.nullDiffsCompleted}"
         )
 
 

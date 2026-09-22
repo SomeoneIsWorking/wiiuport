@@ -17,6 +17,15 @@ class FrameEndListener {
     virtual void onFrameRecorded(const FrameRecording& recording) = 0;
 };
 
+// Notified for every present the title makes. Separate from FrameEndListener
+// because a present and a finished recording are different moments: the
+// arguments arrive with the copy packet, before the swap.
+class PresentListener {
+  public:
+    virtual ~PresentListener() = default;
+    virtual void onPresentObserved(const LatteFrameHooks::PresentArguments& present) = 0;
+};
+
 // Fills a FrameRecording from the fork's hooks, and nothing else.
 //
 // Kept separate from FrameRecording so the recording stays testable without
@@ -29,6 +38,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
 
     void OnDisplayList(const LatteFrameHooks::DisplayList& list) override;
     void OnUniformAssembly(const LatteFrameHooks::UniformAssembly& assembly) override;
+    void OnPresent(const LatteFrameHooks::PresentArguments& present) override;
     void OnFrameEnd() override;
 
     // Empty by default, so a build that installs no listener behaves as a
@@ -39,6 +49,16 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
         if (listener != nullptr) {
             m_listeners.push_back(listener);
         }
+    }
+
+    void addPresentListener(PresentListener* listener) {
+        if (listener != nullptr) {
+            m_presentListeners.push_back(listener);
+        }
+    }
+
+    uint64_t presentsSeen() const {
+        return m_presentsSeen;
     }
 
     // The last frame that ended. Empty until one has. Held separately from the
@@ -67,12 +87,14 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
 
   private:
     std::vector<FrameEndListener*> m_listeners;
+    std::vector<PresentListener*> m_presentListeners;
     FrameRecording m_inFlight;
     FrameRecording m_completed;
     uint64_t m_framesObserved{0};
     uint64_t m_framesRefusedIncomplete{0};
     uint64_t m_displayListsSeen{0};
     uint64_t m_uniformAssembliesSeen{0};
+    uint64_t m_presentsSeen{0};
 };
 
 } // namespace wiiuport::frame

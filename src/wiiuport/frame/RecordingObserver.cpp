@@ -23,6 +23,13 @@ void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly
     m_inFlight.addUniformAssembly(recorded);
 }
 
+void RecordingObserver::OnPresent(const LatteFrameHooks::PresentArguments& present) {
+    ++m_presentsSeen;
+    for (PresentListener* listener : m_presentListeners) {
+        listener->onPresentObserved(present);
+    }
+}
+
 void RecordingObserver::OnFrameEnd() {
     m_framesObserved++;
     // An incomplete frame is dropped rather than published. Replaying one

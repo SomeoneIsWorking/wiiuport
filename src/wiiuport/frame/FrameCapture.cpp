@@ -7,16 +7,22 @@ namespace wiiuport::frame {
 FrameCapture::FrameCapture(Request request) : m_request(request) {
 }
 
-bool FrameCapture::armOnce() {
+bool FrameCapture::armOnce(size_t slot) {
+    if (slot >= kSlotCount) {
+        std::lock_guard<std::mutex> guard(m_mutex);
+        m_requested += 1;
+        m_refused += 1;
+        return false;
+    }
     {
         std::lock_guard<std::mutex> guard(m_mutex);
         m_requested += 1;
     }
-    // The callback outlives this call and runs on the renderer's thread.
-    // `this` is a process-lifetime owner, which is the only reason capturing
-    // it here is safe.
-    auto armed = m_request([this](const LatteFrameHooks::FrameImage& image) {
-        receive(image);
+    // The callback outlives this call and runs on a thread the renderer
+    // detaches at the swap. `this` is a process-lifetime owner, which is the
+    // only reason capturing it here is safe.
+    auto armed = m_request([this, slot](const LatteFrameHooks::FrameImage& image) {
+        receive(slot, image);
     });
     if (!armed) {
         std::lock_guard<std::mutex> guard(m_mutex);
@@ -25,17 +31,21 @@ bool FrameCapture::armOnce() {
     return armed;
 }
 
-void FrameCapture::receive(const LatteFrameHooks::FrameImage& image) {
+void FrameCapture::receive(size_t slot, const LatteFrameHooks::FrameImage& image) {
     std::lock_guard<std::mutex> guard(m_mutex);
-    m_last.width = image.width;
-    m_last.height = image.height;
-    m_last.rgb.assign(image.rgb, image.rgb + image.byteCount);
+    CapturedImage& destination = m_slots[slot];
+    destination.width = image.width;
+    destination.height = image.height;
+    destination.rgb.assign(image.rgb, image.rgb + image.byteCount);
     m_received += 1;
 }
 
-CapturedImage FrameCapture::lastImage() const {
+CapturedImage FrameCapture::lastImage(size_t slot) const {
+    if (slot >= kSlotCount) {
+        return {};
+    }
     std::lock_guard<std::mutex> guard(m_mutex);
-    return m_last;
+    return m_slots[slot];
 }
 
 uint64_t FrameCapture::capturesRequested() const {
@@ -53,17 +63,17 @@ uint64_t FrameCapture::imagesReceived() const {
     return m_received;
 }
 
-std::string FrameCapture::lastImageFramed() const {
-    std::lock_guard<std::mutex> guard(m_mutex);
+std::string FrameCapture::lastImageFramed(size_t slot) const {
+    CapturedImage image = lastImage(slot);
     std::string framed;
-    framed.resize(kHeaderBytes + m_last.rgb.size());
+    framed.resize(kHeaderBytes + image.rgb.size());
     std::memcpy(framed.data(), kMagic, 8);
-    auto width = static_cast<uint32_t>(m_last.width);
-    auto height = static_cast<uint32_t>(m_last.height);
+    auto width = static_cast<uint32_t>(image.width);
+    auto height = static_cast<uint32_t>(image.height);
     std::memcpy(framed.data() + 8, &width, sizeof(width));
     std::memcpy(framed.data() + 12, &height, sizeof(height));
-    if (!m_last.rgb.empty()) {
-        std::memcpy(framed.data() + kHeaderBytes, m_last.rgb.data(), m_last.rgb.size());
+    if (!image.rgb.empty()) {
+        std::memcpy(framed.data() + kHeaderBytes, image.rgb.data(), image.rgb.size());
     }
     return framed;
 }
