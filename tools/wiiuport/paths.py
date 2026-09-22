@@ -54,6 +54,23 @@ class Layout:
         """
         return self.cemu_source / "bin" / "wiiuport"
 
+    def shell_command(self, game: Path | None = None) -> list[str]:
+        """How a maintainer tool launches the product.
+
+        One owner, because the product's command line changed when it stopped
+        being Cemu's front end: the title is a positional argument and an
+        unknown option is refused outright. Five tools kept passing the
+        ``--game`` flag it no longer takes, and each one failed at launch with
+        an exit code that looked like the title not loading.
+
+        No argument at all is the packaged product's own path: the remembered
+        title, or the setup screen.
+        """
+        command = [str(self.shell_binary)]
+        if game is not None:
+            command.append(str(game))
+        return command
+
     @property
     def scratch(self) -> Path:
         return self.root / "scratch"

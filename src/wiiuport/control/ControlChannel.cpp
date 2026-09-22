@@ -144,6 +144,8 @@ std::string ControlChannel::countersJson() const {
     body += ",\"capturesRefused\":" + std::to_string(m_capture.capturesRefused());
     body += ",\"imagesReceived\":" + std::to_string(m_capture.imagesReceived());
     body += ",\"presentsObserved\":" + std::to_string(m_presenter.presentsObserved());
+    body += ",\"presentsObservedTv\":" + std::to_string(m_presenter.presentsObservedTv());
+    body += ",\"presentsObservedDrc\":" + std::to_string(m_presenter.presentsObservedDrc());
     body += ",\"presentsSubmitted\":" + std::to_string(m_presenter.presentsSubmitted());
     body +=
         ",\"presentsRefusedUnobserved\":" + std::to_string(m_presenter.presentsRefusedUnobserved());

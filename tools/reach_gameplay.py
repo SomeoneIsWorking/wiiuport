@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     counters = None
     with session:
         session.prepare(keys_source=keys)
-        with session.launch([str(binary), "--game", str(game)]) as running:
+        with session.launch(layout.shell_command(game)) as running:
             if not wait_for_channel(args.port, args.boot):
                 print(
                     "refused: the channel never answered while booting, so nothing was "

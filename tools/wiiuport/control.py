@@ -44,6 +44,8 @@ class Counters:
     capturesRefused: int
     imagesReceived: int
     presentsObserved: int
+    presentsObservedTv: int
+    presentsObservedDrc: int
     presentsSubmitted: int
     presentsRefusedUnobserved: int
     presentsRefusedBySubmit: int
@@ -62,7 +64,8 @@ class Counters:
             f"{self.lastFrameUniformAssemblies} assemblies in {self.lastFrameBytes} bytes; "
             f"replays {self.replaysRun} submitting {self.replayListsSubmitted} lists "
             f"({self.replayListsRefused} refused); presents observed "
-            f"{self.presentsObserved}, submitted {self.presentsSubmitted} "
+            f"{self.presentsObserved} ({self.presentsObservedTv} TV, "
+            f"{self.presentsObservedDrc} GamePad), submitted {self.presentsSubmitted} "
             f"({self.presentsRefusedUnobserved} with nothing to send, "
             f"{self.presentsRefusedBySubmit} refused); null diffs "
             f"{self.nullDiffsCompleted}"

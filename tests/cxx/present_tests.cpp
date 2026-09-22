@@ -56,8 +56,14 @@ bool acceptList(const void*, uint32_t) {
     return true;
 }
 
+// The TV's copy: the screen the main window shows and every capture holds.
 LatteFrameHooks::PresentArguments scanBuffer(uint32_t address) {
-    return LatteFrameHooks::PresentArguments{address, 1920, 1080, 1920, 4, 0, 0, 1, 0};
+    return LatteFrameHooks::PresentArguments{address, 1920, 1080, 1920, 4, 0, 0, 1, 1, true, false};
+}
+
+// The GamePad's copy, which a title emits in the same frame.
+LatteFrameHooks::PresentArguments padScanBuffer(uint32_t address) {
+    return LatteFrameHooks::PresentArguments{address, 854, 480, 854, 4, 0, 0, 1, 4, false, true};
 }
 
 void reset() {
@@ -91,6 +97,33 @@ void theArgumentsPresentedAreTheOnesTheTitleLastUsed() {
     check::equal(g_submitted.front().width, uint32_t{1920}, "and its width");
     check::equal(presenter.presentsObserved(), uint64_t{2}, "both observations are counted");
     check::equal(presenter.presentsSubmitted(), uint64_t{1}, "and one submission");
+}
+
+void theGamePadsCopyIsNotWhatTheMainWindowIsShowing() {
+    // A title copies twice a frame. Presenting the second one re-presents the
+    // GamePad's scan buffer into the window the user is watching, which is
+    // how a null-diff control that must be byte-identical came back with a
+    // GamePad item icon drawn across it.
+    reset();
+    FramePresenter presenter(&recordPresent);
+    presenter.onPresentObserved(scanBuffer(0x1000));
+    presenter.onPresentObserved(padScanBuffer(0x2000));
+    check::isTrue(presenter.presentNow(), "a present is still submitted");
+    check::equal(g_submitted.front().physicalAddress, uint32_t{0x1000},
+                 "carrying the TV's scan buffer and not the GamePad's");
+    check::equal(presenter.presentsObserved(), uint64_t{2}, "both copies are counted");
+    check::equal(presenter.presentsObservedTv(), uint64_t{1}, "one of them the TV's");
+    check::equal(presenter.presentsObservedDrc(), uint64_t{1}, "and one the GamePad's");
+}
+
+void aGamePadOnlyTitleIsRefusedRatherThanShownTheWrongScreen() {
+    reset();
+    FramePresenter presenter(&recordPresent);
+    presenter.onPresentObserved(padScanBuffer(0x2000));
+    check::isTrue(!presenter.presentNow(), "nothing is presented from the GamePad's copy alone");
+    check::equal(presenter.presentsRefusedUnobserved(), uint64_t{1}, "and the refusal is counted");
+    check::equal(presenter.presentsObservedDrc(), uint64_t{1},
+                 "with the GamePad copies it did see reported, so the silence is explained");
 }
 
 void aRefusedSubmissionIsCountedSeparately() {
@@ -303,6 +336,8 @@ namespace wiiuport::tests {
 void runPresentTests() {
     presentingBeforeTheTitleHasIsRefusedNotInvented();
     theArgumentsPresentedAreTheOnesTheTitleLastUsed();
+    theGamePadsCopyIsNotWhatTheMainWindowIsShowing();
+    aGamePadOnlyTitleIsRefusedRatherThanShownTheWrongScreen();
     aRefusedSubmissionIsCountedSeparately();
     armingPresentsExactlyOnce();
     observationsFlowFromTheRecorderToThePresenter();

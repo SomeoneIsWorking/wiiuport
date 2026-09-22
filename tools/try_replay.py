@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     with session:
         session.prepare(keys_source=keys)
-        with session.launch([str(binary), "--game", str(game)]) as running:
+        with session.launch(layout.shell_command(game)) as running:
             deadline = time.monotonic() + args.settle
             before = None
             while time.monotonic() < deadline:
