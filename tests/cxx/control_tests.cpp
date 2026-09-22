@@ -2,7 +2,9 @@
 #include "suites.h"
 #include "wiiuport/control/ControlChannel.h"
 #include "wiiuport/frame/FrameCapture.h"
+#include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameReplayer.h"
+#include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/interp/TransformSearch.h"
 
@@ -23,6 +25,24 @@ bool refuseCapture(LatteFrameHooks::CaptureCallback) {
     return false;
 }
 
+bool refusePresent(const LatteFrameHooks::PresentArguments&) {
+    return false;
+}
+
+// Everything a channel needs, in one place. The constructor has widened
+// three times as subsystems were added, and each time it widened in five
+// tests at once; here it widens in one.
+struct Fixture {
+    RecordingObserver recorder;
+    FrameReplayer replayer{&acceptEverySubmission};
+    wiiuport::interp::TransformSearch search;
+    wiiuport::input::InputDriver input;
+    wiiuport::frame::FrameCapture capture{&refuseCapture};
+    wiiuport::frame::FramePresenter presenter{&refusePresent};
+    wiiuport::frame::ReplayScheduler scheduler{replayer, presenter, capture};
+    ControlChannel channel{recorder, replayer, search, input, capture, presenter, scheduler};
+};
+
 bool contains(const std::string& haystack, const std::string& needle) {
     return haystack.find(needle) != std::string::npos;
 }
@@ -32,13 +52,8 @@ void anIdleRuntimeReportsZerosRatherThanNothing() {
     // and then saw nothing must be distinguishable from one that is working.
     // An empty body, or a route that only answers once there is something to
     // say, cannot tell those apart.
-    RecordingObserver recorder;
-    FrameReplayer replayer(&acceptEverySubmission);
-    wiiuport::interp::TransformSearch search;
-    wiiuport::input::InputDriver input;
-    wiiuport::frame::FrameCapture capture(&refuseCapture);
-    ControlChannel channel(recorder, replayer, search, input, capture);
-    std::string body = channel.countersJson();
+    Fixture fixture;
+    std::string body = fixture.channel.countersJson();
 
     check::isTrue(contains(body, "\"framesObserved\":0"), "frames observed is reported as zero");
     check::isTrue(contains(body, "\"displayListsSeen\":0"), "and so is the display list count");
@@ -52,16 +67,11 @@ void theCountersFollowTheRecorder() {
     list.data = guest.data();
     list.sizeInBytes = 16;
 
-    RecordingObserver recorder;
-    FrameReplayer replayer(&acceptEverySubmission);
-    wiiuport::interp::TransformSearch search;
-    wiiuport::input::InputDriver input;
-    wiiuport::frame::FrameCapture capture(&refuseCapture);
-    ControlChannel channel(recorder, replayer, search, input, capture);
-    recorder.OnDisplayList(list);
-    recorder.OnFrameEnd();
+    Fixture fixture;
+    fixture.recorder.OnDisplayList(list);
+    fixture.recorder.OnFrameEnd();
 
-    std::string body = channel.countersJson();
+    std::string body = fixture.channel.countersJson();
     check::isTrue(contains(body, "\"framesObserved\":1"), "the ended frame is counted");
     check::isTrue(contains(body, "\"displayListsSeen\":1"), "and so is its list");
     check::isTrue(contains(body, "\"lastFrameBytes\":16"), "with the bytes it held");
@@ -71,13 +81,8 @@ void aSearchThatFoundNothingStillSaysWhatItLookedAt() {
     // A bare "candidates: []" cannot be told from a search that never ran.
     // The denominators are the part that distinguishes them, so they are
     // asserted here rather than the empty list.
-    RecordingObserver recorder;
-    FrameReplayer replayer(&acceptEverySubmission);
-    wiiuport::interp::TransformSearch search;
-    wiiuport::input::InputDriver input;
-    wiiuport::frame::FrameCapture capture(&refuseCapture);
-    ControlChannel channel(recorder, replayer, search, input, capture);
-    auto body = channel.transformsJson(ControlChannel::kDefaultTransformLimit);
+    Fixture fixture;
+    auto body = fixture.channel.transformsJson(ControlChannel::kDefaultTransformLimit);
     check::isTrue(contains(body, "\"candidatesFound\":0"), "nothing was found");
     check::isTrue(contains(body, "\"framesObserved\":0"), "because no frame was watched");
     check::isTrue(contains(body, "\"spansExamined\":0"), "and nothing was examined");
@@ -85,35 +90,26 @@ void aSearchThatFoundNothingStillSaysWhatItLookedAt() {
 }
 
 void aFoundTransformIsReportedWithItsValues() {
-    RecordingObserver recorder;
-    FrameReplayer replayer(&acceptEverySubmission);
-    wiiuport::interp::TransformSearch search;
-    wiiuport::input::InputDriver input;
-    wiiuport::frame::FrameCapture capture(&refuseCapture);
-    ControlChannel channel(recorder, replayer, search, input, capture);
+    Fixture fixture;
     for (auto x : {1.0f, 4.0f}) {
         wiiuport::frame::FrameRecording frame;
         wiiuport::frame::RecordedUniformAssembly assembly;
         assembly.shaderBaseHash = 0x1234;
         assembly.data = {1.0f, 0.0f, 0.0f, x, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
         frame.addUniformAssembly(assembly);
-        search.observe(frame);
+        fixture.search.observe(frame);
     }
-    auto body = channel.transformsJson(ControlChannel::kDefaultTransformLimit);
+    auto body = fixture.channel.transformsJson(ControlChannel::kDefaultTransformLimit);
     check::isTrue(contains(body, "\"candidatesFound\":1"), "the moving transform is reported");
     check::isTrue(contains(body, "\"meanTranslationStep\":3"), "with how far it moved");
     check::isTrue(contains(body, "\"values\":[1,0,0,4,"), "and the values themselves");
 }
 
 void anUnstartedChannelIsNotRunning() {
-    RecordingObserver recorder;
-    FrameReplayer replayer(&acceptEverySubmission);
-    wiiuport::interp::TransformSearch search;
-    wiiuport::input::InputDriver input;
-    wiiuport::frame::FrameCapture capture(&refuseCapture);
-    ControlChannel channel(recorder, replayer, search, input, capture);
-    check::isTrue(!channel.running(), "a channel nobody started is off");
-    check::equal(channel.port(), uint16_t{0}, "and reports no port rather than a plausible one");
+    Fixture fixture;
+    check::isTrue(!fixture.channel.running(), "a channel nobody started is off");
+    check::equal(fixture.channel.port(), uint16_t{0},
+                 "and reports no port rather than a plausible one");
 }
 
 } // namespace

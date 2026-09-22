@@ -12,10 +12,19 @@ This tool does not assume that; it measures it and prints the distribution,
 because "identical" and "nearly identical" are different findings and the
 second one is the interesting one.
 
-It measures two arms, because one alone cannot attribute anything. The title
-keeps running between captures, so two frames differ whether or not a replay
-happened. The control arm captures the same pair with no replay in between;
-only the difference between the arms says anything about the replay.
+Both images come from one frame. An earlier version captured them seconds
+apart and measured the scene advancing: 0.122% of bytes differed with no
+replay at all, against 0.173% with one. The runtime now arms both halves
+around a single frame boundary -- the title's present just before it, the
+replay's just after.
+
+That is still not enough on its own, so this runs a control first: the same
+sequence with nothing replayed, which re-presents the colour buffer the title
+just presented and must therefore be byte-identical. If it is not, the
+capture or present path is the difference and nothing the replay arm reports
+can be believed. That control exists because the first same-frame run
+reported exactly the 7,604 differing bytes an unrelated earlier measurement
+had, which is not how a real difference behaves.
 """
 
 from __future__ import annotations
@@ -25,15 +34,45 @@ import sys
 import time
 from pathlib import Path
 
-from wiiuport.drive import arm_replay, press, release
+from wiiuport.drive import press, release
 from wiiuport.headless import HeadlessSession
-from wiiuport.image import Image, arm_capture, read_capture
+from wiiuport.image import Image, arm_capture, arm_null_diff, read_capture
 from wiiuport.paths import find_layout
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
 from wiiuport.control import DEFAULT_PORT, ControlUnavailable, read_counters, read_transforms
 
 ENV_CONTROL_PORT = "WIIUPORT_CONTROL_PORT"
+
+
+def bounding_box(before: Image, after: Image) -> str:
+    """Where the differing pixels are. A difference spread over the whole
+    frame and one confined to a small box are different faults, and the
+    numbers alone cannot tell them apart."""
+    width = before.width
+    stride = width * 3
+    minx = miny = None
+    maxx = maxy = -1
+    touched = 0
+    for y in range(before.height):
+        row_a = before.rgb[y * stride : (y + 1) * stride]
+        row_b = after.rgb[y * stride : (y + 1) * stride]
+        if row_a == row_b:
+            continue
+        touched += 1
+        for x in range(width):
+            i = x * 3
+            if row_a[i : i + 3] != row_b[i : i + 3]:
+                minx = x if minx is None else min(minx, x)
+                maxx = max(maxx, x)
+                miny = y if miny is None else min(miny, y)
+                maxy = max(maxy, y)
+    if minx is None:
+        return "nowhere"
+    return (
+        f"x {minx}..{maxx}, y {miny}..{maxy} ({maxx - minx + 1}x{maxy - miny + 1}), "
+        f"{touched} rows touched"
+    )
 
 
 def compare(before: Image, after: Image) -> tuple[int, int, float]:
@@ -60,12 +99,6 @@ def compare(before: Image, after: Image) -> tuple[int, int, float]:
     return differing, largest, total / len(before.rgb)
 
 
-def capture_now(port: int, settle: float = 3.0) -> Image:
-    arm_capture(port)
-    time.sleep(settle)
-    return read_capture(port)
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--game", type=Path, help="disc image; defaults to $WIIUPORT_GAME")
@@ -75,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--presses", type=int, default=12)
     parser.add_argument("--interval", type=int, default=8)
     parser.add_argument(
-        "--gap", type=int, default=3, help="seconds between the two captures of each arm"
+        "--settle", type=int, default=5, help="seconds to wait for both captures to land"
     )
     parser.add_argument("--out", type=Path, help="where to write the two PNGs")
     args = parser.parse_args(argv)
@@ -124,19 +157,35 @@ def main(argv: list[str] | None = None) -> int:
 
             try:
                 report = read_transforms(args.port)
-                # Control arm first: the same spacing, nothing replayed. Its
-                # difference is what the running title does on its own, and
-                # it is the only thing that makes the other arm readable.
-                control_before = capture_now(args.port)
-                time.sleep(args.gap)
-                control_after = capture_now(args.port)
-                # Replay arm: identical spacing, one replay inside it.
-                before = capture_now(args.port)
+                # The control: present the same buffer again, replaying
+                # nothing. Anything but zero here is the instrument.
+                arm_null_diff(args.port, redraw=False)
+                time.sleep(args.settle)
+                control_title = read_capture(args.port, slot=0)
+                control_replay = read_capture(args.port, slot=1)
+                control_counters = read_counters(args.port)
+
+                # What the title alone changes between two of its own
+                # presents. If the control above matches this, the second
+                # capture landed on a guest frame rather than on the
+                # runtime's present, and the fault is in the capture path.
+                arm_capture(args.port, slot=0)
+                time.sleep(args.settle)
+                arm_capture(args.port, slot=1)
+                time.sleep(args.settle)
+                guest_first = read_capture(args.port, slot=0)
+                guest_second = read_capture(args.port, slot=1)
+
                 counters_before = read_counters(args.port)
-                arm_replay(args.port)
-                time.sleep(args.gap)
-                after = capture_now(args.port)
+                arm_null_diff(args.port, redraw=True)
+                time.sleep(args.settle)
                 counters_after = read_counters(args.port)
+                # Slot 0 is the frame as the title presented it, slot 1 the
+                # same frame as the replay redrew it. Which image landed
+                # where was decided when each was armed, so the order the
+                # renderer's detached threads delivered them cannot matter.
+                title_frame = read_capture(args.port, slot=0)
+                replay_frame = read_capture(args.port, slot=1)
             except ControlUnavailable as unavailable:
                 print(f"refused: {unavailable}", file=sys.stderr)
                 return 1
@@ -149,55 +198,76 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    if counters_after.replaysRun == counters_before.replaysRun:
+    pixels_hint = len(control_title.rgb)
+    if counters_after.nullDiffsCompleted == counters_before.nullDiffsCompleted:
         print(
-            "refused: the replay never ran between the two captures, so the second image "
-            "is simply a later frame and the comparison is meaningless.",
+            "refused: the runtime never completed a null diff, so the two slots do not "
+            "hold two views of one frame and comparing them would measure nothing.",
             file=sys.stderr,
         )
         return 1
 
-    before.write_png(out / "before.png")
-    after.write_png(out / "after.png")
-    control_before.write_png(out / "control-before.png")
-    control_after.write_png(out / "control-after.png")
-    control_differing, control_largest, control_mean = compare(control_before, control_after)
-    differing, largest, mean = compare(before, after)
-    total = len(before.rgb)
-    pixels = before.width * before.height
-    print(f"{before.width}x{before.height}, {pixels} pixels, {total} bytes")
-    print(
-        f"replays {counters_before.replaysRun} -> {counters_after.replaysRun}, "
-        f"{counters_after.replayListsSubmitted - counters_before.replayListsSubmitted} "
-        f"lists submitted between the captures"
-    )
-    print(
-        f"control (no replay): {control_differing} bytes differ "
-        f"({100.0 * control_differing / total:.3f}%), largest {control_largest}, "
-        f"mean {control_mean:.4f}"
-    )
-    print(
-        f"replay:              {differing} bytes differ "
-        f"({100.0 * differing / total:.3f}%), largest {largest}, mean {mean:.4f}"
-    )
-    print(f"wrote four PNGs to {out}")
-    print(f"process exit {exit_code}")
-
-    if control_differing == 0 and differing == 0:
+    control_differing, control_largest, control_mean = compare(control_title, control_replay)
+    if control_differing != 0:
+        control_title.write_png(out / "control-title.png")
+        control_replay.write_png(out / "control-replay.png")
+        guest_differing, guest_largest, _ = compare(guest_first, guest_second)
         print(
-            "both arms are identical, so this scene does not change between captures and "
-            "the comparison has no power to detect a replay that drew something else. "
-            "Re-run somewhere the view is moving."
+            f"refused: the control re-presented the title's own colour buffer and "
+            f"{control_differing} of {len(control_title.rgb)} bytes still differed "
+            f"(largest {control_largest}, mean {control_mean:.4f}), at "
+            f"{bounding_box(control_title, control_replay)}. Nothing was replayed.",
+            file=sys.stderr,
+        )
+        print(
+            f"  two of the title's own presents differ by {guest_differing} bytes "
+            f"(largest {guest_largest}) at {bounding_box(guest_first, guest_second)}",
+            file=sys.stderr,
+        )
+        print(
+            f"  runtime presents submitted {control_counters.presentsSubmitted}, "
+            f"observed {control_counters.presentsObserved}, images received "
+            f"{control_counters.imagesReceived}",
+            file=sys.stderr,
+        )
+        print(
+            "  a control that matches the title's own frame-to-frame change means the "
+            "second capture landed on a guest frame, not on the runtime's present.",
+            file=sys.stderr,
+        )
+        print(
+            f"  wrote {out / 'control-title.png'} and {out / 'control-replay.png'}", file=sys.stderr
         )
         return 1
+    print(f"control: re-presenting the same buffer is byte-identical over {pixels_hint} bytes")
+
+    title_frame.write_png(out / "title.png")
+    replay_frame.write_png(out / "replay.png")
+    differing, largest, mean = compare(title_frame, replay_frame)
+    total = len(title_frame.rgb)
+    pixels = title_frame.width * title_frame.height
+    lists = counters_after.replayListsSubmitted - counters_before.replayListsSubmitted
+    print(f"{title_frame.width}x{title_frame.height}, {pixels} pixels, {total} bytes")
+    print(
+        f"null diffs {counters_before.nullDiffsCompleted} -> "
+        f"{counters_after.nullDiffsCompleted}, {lists} lists replayed, "
+        f"{counters_after.presentsSubmitted - counters_before.presentsSubmitted} "
+        f"runtime presents"
+    )
+    print(
+        f"title frame vs replay of the same frame: {differing} bytes differ "
+        f"({100.0 * differing / total:.3f}%), largest {largest}, mean {mean:.4f}"
+    )
+    print(f"wrote {out / 'title.png'} and {out / 'replay.png'}")
+    print(f"process exit {exit_code}")
+
     if differing == 0:
-        print("identical across the replay, while the control moved: the replay is faithful")
+        print("identical: the replay reproduced the frame it recorded, byte for byte")
         return 0
     print(
-        f"not identical. Against a control that differs by {control_differing} bytes, the "
-        f"replay arm differs by {differing}. A replay arm close to the control is the title "
-        "advancing rather than the replay drawing something else; a much larger one is the "
-        "replay. This run does not separate them on its own -- the four PNGs are the evidence."
+        "not identical. Both images are one frame -- the title's present and the replay's "
+        "present of the same recording -- so this difference is the replay, not the scene "
+        "advancing. The two PNGs show where."
     )
     return 1
 

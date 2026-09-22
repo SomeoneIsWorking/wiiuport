@@ -16,7 +16,7 @@ lucent::http::Response notFound() {
     return lucent::http::Response::text(
         404, "Not Found",
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
-        "POST /replay, POST /capture and POST /input.\n");
+        "POST /replay, POST /capture, POST /present, POST /nulldiff and POST /input.\n");
 }
 
 // One `key=value` pair at a time out of a query string. Returns false at the
@@ -76,9 +76,10 @@ std::string transformJson(const interp::TransformCandidate& candidate) {
 ControlChannel::ControlChannel(const frame::RecordingObserver& recorder,
                                frame::FrameReplayer& replayer,
                                const interp::TransformSearch& search, input::InputDriver& input,
-                               frame::FrameCapture& capture)
+                               frame::FrameCapture& capture, frame::FramePresenter& presenter,
+                               frame::ReplayScheduler& scheduler)
     : m_recorder(recorder), m_replayer(replayer), m_search(search), m_input(input),
-      m_capture(capture) {
+      m_capture(capture), m_presenter(presenter), m_scheduler(scheduler) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -103,6 +104,13 @@ std::string ControlChannel::countersJson() const {
     body += ",\"capturesRequested\":" + std::to_string(m_capture.capturesRequested());
     body += ",\"capturesRefused\":" + std::to_string(m_capture.capturesRefused());
     body += ",\"imagesReceived\":" + std::to_string(m_capture.imagesReceived());
+    body += ",\"presentsObserved\":" + std::to_string(m_presenter.presentsObserved());
+    body += ",\"presentsSubmitted\":" + std::to_string(m_presenter.presentsSubmitted());
+    body +=
+        ",\"presentsRefusedUnobserved\":" + std::to_string(m_presenter.presentsRefusedUnobserved());
+    body += ",\"nullDiffsCompleted\":" + std::to_string(m_scheduler.nullDiffsCompleted());
+    body += ",\"nullDiffPending\":" + std::string(m_scheduler.nullDiffPending() ? "true" : "false");
+    body += ",\"presentsRefusedBySubmit\":" + std::to_string(m_presenter.presentsRefusedBySubmit());
     body += "}\n";
     return body;
 }
@@ -127,6 +135,36 @@ std::string ControlChannel::transformsJson(size_t limit) const {
     }
     body += "]}\n";
     return body;
+}
+
+// The slot a capture route is talking about. Out of range is refused by the
+// capture itself rather than clamped, so a typo does not silently read the
+// wrong image.
+size_t ControlChannel::requestedSlot(const std::string& query) {
+    std::string_view rest(query);
+    std::string_view key;
+    std::string_view value;
+    while (nextParameter(rest, key, value)) {
+        if (key == "slot") {
+            return static_cast<size_t>(std::strtoul(std::string(value).c_str(), nullptr, 10));
+        }
+    }
+    return 0;
+}
+
+// A boolean query parameter, absent meaning the default. "0" and "false" are
+// the only ways to turn one off, so a typo reads as the default rather than
+// silently disabling a control.
+bool ControlChannel::requestedFlag(const std::string& query, std::string_view name, bool fallback) {
+    std::string_view rest(query);
+    std::string_view key;
+    std::string_view value;
+    while (nextParameter(rest, key, value)) {
+        if (key == name) {
+            return !(value == "0" || value == "false");
+        }
+    }
+    return fallback;
 }
 
 std::string ControlChannel::applyInput(const std::string& query, bool& accepted) {
@@ -229,8 +267,46 @@ bool ControlChannel::start(uint16_t port) {
                     "{\"armed\":true,\"replaysRun\":" + std::to_string(m_replayer.replaysRun()) +
                         "}\n");
             }
+            // One frame captured twice, as the title drew it and as a replay
+            // redrew it. The two halves have to be armed around the same
+            // frame boundary, which only the scheduler can do.
+            if (request.method == "POST" && request.path() == "/nulldiff") {
+                bool redraw = requestedFlag(std::string(request.query()), "redraw", true);
+                if (!m_scheduler.armNullDiff(redraw)) {
+                    return lucent::http::Response::text(
+                        409, "Conflict",
+                        "a replay or a null diff is already armed, and taking it over would "
+                        "compare a frame against one somebody else asked for.\n");
+                }
+                return lucent::http::Response::json(
+                    200, "OK",
+                    "{\"armed\":true,\"redraw\":" + std::string(redraw ? "true" : "false") +
+                        ",\"nullDiffsCompleted\":" +
+                        std::to_string(m_scheduler.nullDiffsCompleted()) + "}");
+            }
+
+            // A present the runtime owns, so a replay's output can be seen
+            // instead of being overdrawn by the guest's next frame. Refused
+            // when the title has not presented yet, because the arguments
+            // are observed and never invented.
+            if (request.method == "POST" && request.path() == "/present") {
+                bool presented = m_presenter.presentNow();
+                if (!presented && !m_presenter.hasObservedPresent()) {
+                    return lucent::http::Response::text(
+                        409, "Conflict",
+                        "the title has not presented a frame yet, so there are no present "
+                        "arguments to reuse. Reach gameplay first.\n");
+                }
+                return lucent::http::Response::json(
+                    200, "OK",
+                    "{\"presented\":" + std::string(presented ? "true" : "false") +
+                        ",\"presentsSubmitted\":" +
+                        std::to_string(m_presenter.presentsSubmitted()) +
+                        ",\"presentsRefusedBySubmit\":" +
+                        std::to_string(m_presenter.presentsRefusedBySubmit()) + "}");
+            }
             if (request.method == "POST" && request.path() == "/capture") {
-                auto armed = m_capture.armOnce();
+                auto armed = m_capture.armOnce(requestedSlot(std::string(request.query())));
                 return lucent::http::Response::json(
                     armed ? 200 : 503, armed ? "OK" : "Service Unavailable",
                     std::string("{\"armed\":") + (armed ? "true" : "false") +
@@ -250,17 +326,19 @@ bool ControlChannel::start(uint16_t port) {
                 return lucent::http::Response::json(200, "OK", countersJson());
             }
             if (request.path() == "/capture") {
-                auto image = m_capture.lastImage();
+                size_t slot = requestedSlot(std::string(request.query()));
+                auto image = m_capture.lastImage(slot);
                 if (image.empty()) {
                     // An empty body would read as a black frame. Refusing
                     // says which of the two actually happened.
                     return lucent::http::Response::text(
                         404, "Not Found",
-                        "no frame has been captured yet. Arm one with POST /capture and "
-                        "let the title present at least once.\n");
+                        "no frame has been captured into slot " + std::to_string(slot) +
+                            " yet. Arm one with POST /capture and let the title present at "
+                            "least once.\n");
                 }
                 return lucent::http::Response::binary(200, "OK", "application/octet-stream",
-                                                      m_capture.lastImageFramed());
+                                                      m_capture.lastImageFramed(slot));
             }
             if (request.path() == "/transforms") {
                 return lucent::http::Response::json(200, "OK",

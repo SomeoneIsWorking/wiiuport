@@ -1,8 +1,10 @@
 #pragma once
 
 #include "wiiuport/frame/FrameCapture.h"
+#include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameReplayer.h"
 #include "wiiuport/frame/RecordingObserver.h"
+#include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/interp/TransformSearch.h"
 
@@ -10,6 +12,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace lucent::http {
 class Server;
@@ -35,7 +38,8 @@ class ControlChannel {
 
     ControlChannel(const frame::RecordingObserver& recorder, frame::FrameReplayer& replayer,
                    const interp::TransformSearch& search, input::InputDriver& input,
-                   frame::FrameCapture& capture);
+                   frame::FrameCapture& capture, frame::FramePresenter& presenter,
+                   frame::ReplayScheduler& scheduler);
     ~ControlChannel();
 
     ControlChannel(const ControlChannel&) = delete;
@@ -56,6 +60,12 @@ class ControlChannel {
     // describe the whole search.
     std::string transformsJson(size_t limit) const;
 
+    // Which capture slot a query names, defaulting to the first.
+    static size_t requestedSlot(const std::string& query);
+
+    // A boolean query parameter, defaulting when it is absent.
+    static bool requestedFlag(const std::string& query, std::string_view name, bool fallback);
+
     // Applies one input request and returns the body describing what it did.
     // `accepted` is false when nothing in the query named a button or a
     // stick, so a typo is refused rather than answered with a cheerful no-op.
@@ -67,6 +77,8 @@ class ControlChannel {
     const interp::TransformSearch& m_search;
     input::InputDriver& m_input;
     frame::FrameCapture& m_capture;
+    frame::FramePresenter& m_presenter;
+    frame::ReplayScheduler& m_scheduler;
     std::unique_ptr<lucent::http::Server> m_server;
 };
 

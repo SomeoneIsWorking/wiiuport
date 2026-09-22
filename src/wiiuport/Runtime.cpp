@@ -23,15 +23,22 @@ bool requestFrameCapture(LatteFrameHooks::CaptureCallback callback) {
     return LatteFrameHooks::RequestFrameCapture(std::move(callback));
 }
 
+bool submitPresent(const LatteFrameHooks::PresentArguments& present) {
+    return LatteFrameHooks::SubmitPresent(present);
+}
+
 bool submitToCommandProcessor(const void* data, uint32_t sizeInBytes) {
     return LatteFrameHooks::SubmitDisplayList(data, sizeInBytes);
 }
 
 } // namespace
 
-Runtime::Runtime() : m_replayer(&submitToCommandProcessor), m_capture(&requestFrameCapture) {
+Runtime::Runtime()
+    : m_replayer(&submitToCommandProcessor), m_presenter(&submitPresent),
+      m_capture(&requestFrameCapture) {
     m_recorder.addFrameEndListener(&m_scheduler);
     m_recorder.addFrameEndListener(&m_searchFeed);
+    m_recorder.addPresentListener(&m_presenter);
 }
 
 Runtime& Runtime::instance() {
