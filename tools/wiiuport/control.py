@@ -43,6 +43,8 @@ class Counters:
     capturesRequested: int
     capturesRefused: int
     imagesReceived: int
+    displayListsFromRuntime: int
+    uniformAssembliesFromRuntime: int
     presentsObserved: int
     presentsObservedTv: int
     presentsObservedDrc: int
@@ -59,7 +61,9 @@ class Counters:
         return (
             f"frames {self.framesObserved} (refused incomplete "
             f"{self.framesRefusedIncomplete}), display lists {self.displayListsSeen}, "
-            f"uniform assemblies {self.uniformAssembliesSeen}; last frame held "
+            f"uniform assemblies {self.uniformAssembliesSeen} (of which the runtime's own "
+            f"replays: {self.displayListsFromRuntime} lists, "
+            f"{self.uniformAssembliesFromRuntime} assemblies); last frame held "
             f"{self.lastFrameDisplayLists} lists and "
             f"{self.lastFrameUniformAssemblies} assemblies in {self.lastFrameBytes} bytes; "
             f"replays {self.replaysRun} submitting {self.replayListsSubmitted} lists "

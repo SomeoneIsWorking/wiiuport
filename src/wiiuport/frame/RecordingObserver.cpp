@@ -7,11 +7,26 @@ namespace wiiuport::frame {
 
 void RecordingObserver::OnDisplayList(const LatteFrameHooks::DisplayList& list) {
     m_displayListsSeen++;
+    if (list.fromRuntime) {
+        // A replay's own nested buffers. Recording them would make the next
+        // frame a copy of this one with the replay folded in.
+        ++m_displayListsFromRuntime;
+        return;
+    }
     m_inFlight.addDisplayList(list.physicalAddress, list.data, list.sizeInBytes);
 }
 
 void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly& assembly) {
     m_uniformAssembliesSeen++;
+    if (assembly.fromRuntime) {
+        ++m_uniformAssembliesFromRuntime;
+        // The one moment a substitution belongs to: the runtime's own draw,
+        // after the renderer assembled the buffer and before it uploads it.
+        if (m_assemblyFilter != nullptr) {
+            m_assemblyFilter->onRuntimeAssembly(assembly);
+        }
+        return;
+    }
     RecordedUniformAssembly recorded;
     recorded.shaderBaseHash = assembly.shaderBaseHash;
     recorded.shaderAuxHash = assembly.shaderAuxHash;
