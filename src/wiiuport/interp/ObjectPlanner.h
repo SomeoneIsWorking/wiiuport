@@ -87,6 +87,10 @@ class ObjectPlanner {
         Unmatched,
         // Moved, but nothing in N-1 is where it passed through.
         Unverified,
+        // Its partner was found, but its blend would not lie strictly between
+        // N-1 and N: nearer each than they are to each other. An object that
+        // stood still from N-1 to N is one, and N is then where it belongs.
+        Outside,
         Count
     };
     static constexpr size_t kOutcomeCount = static_cast<size_t>(Outcome::Count);
@@ -149,8 +153,9 @@ class ObjectPlanner {
     // Whether the object at `before` in N-2 and `after` in N has a partner in
     // N-1 its midpoint lands on. Derived from learned block pairs when they
     // still pass, searched among the same shader's draws otherwise.
-    bool findPartner(const AssemblyKey& key, std::span<const float> before,
-                     std::span<const float> after);
+    // Returns the partner's entry in N-1.
+    std::optional<size_t> findPartner(const AssemblyKey& key, std::span<const float> before,
+                                      std::span<const float> after);
     // The key of `key`'s draw in N-1 under the learned block pairs, if every
     // block it sourced is either paired or shared by both frames.
     std::optional<AssemblyKey> derivedPartner(const AssemblyKey& key) const;

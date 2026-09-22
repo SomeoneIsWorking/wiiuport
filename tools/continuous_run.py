@@ -27,6 +27,7 @@ from wiiuport.interpolation import (
     fetch_recordings,
     parse_recordings,
     read_interpolation,
+    restart_pacing,
 )
 from wiiuport.paths import find_layout
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
@@ -130,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
                 press("b", port=args.port)
                 time.sleep(3)
 
+                restart_pacing(args.port)
                 before = sample("walk start")
                 walk_started = time.monotonic()
                 samples: list[Interpolation] = []

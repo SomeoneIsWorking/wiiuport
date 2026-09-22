@@ -6,6 +6,7 @@
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameShapeLog.h"
+#include "wiiuport/frame/PresentPacing.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/RecordingSnapshot.h"
 #include "wiiuport/frame/ReplayScheduler.h"
@@ -113,6 +114,7 @@ class Runtime {
     interp::ViewTracker m_viewTracker{m_search};
     interp::ContinuousInterpolator m_continuous;
     frame::RecordingSnapshot m_snapshot;
+    frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
     input::InputDriver m_input;
     control::ControlChannel m_control{control::ControlChannel::Sources{
         .recorder = m_recorder,
@@ -127,6 +129,7 @@ class Runtime {
         .viewTracker = m_viewTracker,
         .continuous = m_continuous,
         .snapshot = m_snapshot,
+        .pacing = m_pacing,
     }};
     bool m_hooksInstalled{false};
 };

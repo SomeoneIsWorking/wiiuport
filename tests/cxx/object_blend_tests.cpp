@@ -2,9 +2,13 @@
 #include "suites.h"
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/interp/ObjectBlend.h"
+#include "wiiuport/interp/ReplayBlend.h"
+#include "wiiuport/interp/TransformSubstitution.h"
 
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -298,6 +302,77 @@ void aFrameOfManyDrawsIsPlannedWhileItIsDrawn() {
                  "the last one handed over too");
 }
 
+void aBlendThatWouldNotLieBetweenItsNeighboursIsNotDrawn() {
+    // The partner lands exactly at the tolerance, three quarters of the way
+    // along: the blend at 0.75 of N-2..N is then the partner itself, which is
+    // N-1 again and not a frame between N-1 and N.
+    std::vector<Draw> latest{{kBlockA, {2.0f, 7.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {0.0f, 7.0f}}}, {{kBlockB, {1.5f, 7.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Outside), uint64_t{1}, "it is counted as outside");
+    check::equal(uploaded[0][0], 2.0f, "and drawn as the title drew it");
+}
+
+void anObjectThatStoppedAtNMinusOneIsDrawnWhereItStopped() {
+    // Moved from N-2 to N-1 and stood still since: between N-1 and N it is at
+    // N, not anywhere on the way from N-2.
+    std::vector<Draw> latest{{kBlockA, {2.0f, 7.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {0.0f, 7.0f}}}, {{kBlockB, {2.0f, 7.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(uploaded[0][0], 2.0f, "it is drawn where it stopped");
+}
+
+constexpr uint64_t kCameraShader = 0xcafe;
+constexpr uint32_t kCameraBlock = 0xf4003000;
+
+// A camera turned and standing far out at sea, where rounding a pose through
+// a quaternion and back shows in the low bits for most angles, not all.
+std::vector<float> cameraView(float angle) {
+    float c = std::cos(angle);
+    float s = std::sin(angle);
+    return {c, 0.0f, -s, 301234.5f + angle, 0.0f, 1.0f, 0.0f, -42.25f, s, 0.0f, c, -287654.25f};
+}
+
+// How many of a held-still world's replayed draws come out byte-identical to
+// the title's, with the camera held at `angle`.
+size_t identicalDrawsWithTheCameraAt(float angle) {
+    float integer = 4.2e-45f;
+    std::vector<Draw> still{{kCameraBlock, cameraView(angle), kCameraShader},
+                            {kBlockA, {2.0f, 7.0f, 3.0f}},
+                            {kOtherA, {5.0f, integer, 5.0f}},
+                            {kBlockA, {-1.0f, 0.1f, 1e-3f}, kOutline}};
+    ObjectBlend objects{kHalfway};
+    armAfter(objects, still, still, still);
+    auto view = wiiuport::interp::Transform3x4::fromRowMajor(cameraView(angle).data());
+    wiiuport::interp::TransformSubstitution camera;
+    camera.armOnce({{{kCameraShader, 0, 0}, 0, view, view}}, kHalfway);
+    wiiuport::interp::ReplayBlend filter{objects, camera};
+    size_t identical = 0;
+    for (const Draw& draw : still) {
+        ReplayedDraw replayed(draw);
+        filter.onRuntimeAssembly(replayed.assembly);
+        identical += std::memcmp(replayed.values.data(), draw.values.data(),
+                                 draw.values.size() * sizeof(float)) == 0
+                         ? 1
+                         : 0;
+    }
+    check::equal(objects.objects(Outcome::Held), uint64_t{4}, "every object is held");
+    check::equal(camera.assembliesSubstituted(), uint64_t{1},
+                 "and the camera is written: the comparison sees its bits");
+    return identical;
+}
+
+constexpr size_t kDrawsPerWorld = 4;
+
+void aHeldStillWorldReplaysByteIdenticalToTheTitlesFrame() {
+    for (int step = 0; step < 16; ++step) {
+        check::equal(identicalDrawsWithTheCameraAt(static_cast<float>(step) * 0.1f), kDrawsPerWorld,
+                     "every replayed draw is the title's, byte for byte");
+    }
+}
+
 void turningPlanningOffForgetsTheFramesItHeld() {
     ObjectBlend blend{kHalfway};
     armAfter(blend, kWalkTwoBack, kWalkOneBack, kWalkLatest);
@@ -331,6 +406,9 @@ void runObjectBlendTests() {
     aPartnerIsFoundAmongManyDrawsOfItsShader();
     aPartnerWithNoNumberWhereItsShaderIsOrderedIsStillFound();
     aFrameOfManyDrawsIsPlannedWhileItIsDrawn();
+    aBlendThatWouldNotLieBetweenItsNeighboursIsNotDrawn();
+    anObjectThatStoppedAtNMinusOneIsDrawnWhereItStopped();
+    aHeldStillWorldReplaysByteIdenticalToTheTitlesFrame();
     turningPlanningOffForgetsTheFramesItHeld();
 }
 

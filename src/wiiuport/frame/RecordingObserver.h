@@ -57,6 +57,14 @@ class PresentListener {
     virtual void onPresentObserved(const LatteFrameHooks::PresentArguments& present) = 0;
 };
 
+// Notified for every frame handed to the display, the guest's and the
+// runtime's, once the renderer has presented it.
+class DisplayedListener {
+  public:
+    virtual ~DisplayedListener() = default;
+    virtual void onDisplayed(bool fromRuntime) = 0;
+};
+
 // Something that may edit a uniform buffer the runtime is about to upload.
 // Only the runtime's own replayed draws are offered: editing the guest's
 // frame would change what the title is showing rather than what the runtime
@@ -85,6 +93,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void OnPresent(const LatteFrameHooks::PresentArguments& present) override;
     void OnFrameComplete() override;
     void OnFrameEnd() override;
+    void OnDisplayed(bool fromRuntime) override;
     void OnGuestDraw(bool fromCommandBuffer) override;
     void OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) override;
 
@@ -113,6 +122,12 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void addPresentListener(PresentListener* listener) {
         if (listener != nullptr) {
             m_presentListeners.push_back(listener);
+        }
+    }
+
+    void addDisplayedListener(DisplayedListener* listener) {
+        if (listener != nullptr) {
+            m_displayedListeners.push_back(listener);
         }
     }
 
@@ -213,6 +228,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     std::vector<AssemblyRecordedListener*> m_assemblyListeners;
     std::vector<FrameShownListener*> m_shownListeners;
     std::vector<PresentListener*> m_presentListeners;
+    std::vector<DisplayedListener*> m_displayedListeners;
     FrameRecording m_inFlight;
     FrameRecording m_completed;
     FrameRecording m_previous;

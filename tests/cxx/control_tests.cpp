@@ -52,6 +52,7 @@ struct Fixture {
     wiiuport::interp::ContinuousInterpolator continuous{
         viewTracker, substitution, objects, replayer, presenter, scheduler, &neverNow};
     wiiuport::frame::RecordingSnapshot snapshot;
+    wiiuport::frame::PresentPacing pacing{&neverNow};
     ControlChannel channel{ControlChannel::Sources{
         .recorder = recorder,
         .replayer = replayer,
@@ -65,6 +66,7 @@ struct Fixture {
         .viewTracker = viewTracker,
         .continuous = continuous,
         .snapshot = snapshot,
+        .pacing = pacing,
     }};
 };
 

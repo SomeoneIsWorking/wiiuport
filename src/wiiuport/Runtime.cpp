@@ -41,6 +41,7 @@ Runtime::Runtime()
     // frame first, and the continuous interpolator last, because it needs the
     // view tracker and the object blend to have taken this frame in.
     m_recorder.addAssemblyRecordedListener(&m_objectBlend);
+    m_recorder.addDisplayedListener(&m_pacing);
     m_recorder.addFrameEndListener(&m_searchFeed);
     m_recorder.addFrameEndListener(&m_shapeLog);
     m_recorder.addFrameEndListener(&m_viewTracker);

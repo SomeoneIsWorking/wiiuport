@@ -100,6 +100,12 @@ void RecordingObserver::OnFrameComplete() {
     }
 }
 
+void RecordingObserver::OnDisplayed(bool fromRuntime) {
+    for (auto* listener : m_displayedListeners) {
+        listener->onDisplayed(fromRuntime);
+    }
+}
+
 void RecordingObserver::OnFrameEnd() {
     for (auto* listener : m_shownListeners) {
         listener->onFrameShown(m_completed);

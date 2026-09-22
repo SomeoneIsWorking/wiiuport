@@ -6,6 +6,7 @@
 #include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameReplayer.h"
 #include "wiiuport/frame/FrameShapeLog.h"
+#include "wiiuport/frame/PresentPacing.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/RecordingSnapshot.h"
 #include "wiiuport/frame/ReplayScheduler.h"
@@ -59,6 +60,7 @@ class ControlChannel {
         const interp::ViewTracker& viewTracker;
         interp::ContinuousInterpolator& continuous;
         frame::RecordingSnapshot& snapshot;
+        frame::PresentPacing& pacing;
     };
 
     explicit ControlChannel(const Sources& sources);
@@ -149,6 +151,7 @@ class ControlChannel {
     const interp::ViewTracker& m_viewTracker;
     interp::ContinuousInterpolator& m_continuous;
     frame::RecordingSnapshot& m_snapshot;
+    frame::PresentPacing& m_pacing;
     std::unique_ptr<lucent::http::Server> m_server;
 };
 

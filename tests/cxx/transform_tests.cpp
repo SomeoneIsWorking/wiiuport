@@ -98,6 +98,21 @@ void rotationErrorSeesAScale() {
                 0.0f, 1e-6f, "translation does not affect the rotation error");
 }
 
+void aViewThatHeldStillBlendsToItselfExactly() {
+    // A camera that did not move must give an in-between frame byte-identical
+    // to the title's, which rounding through two rigid inverses and a slerp
+    // does not: every held view is checked bit for bit.
+    for (int step = 0; step < 64; ++step) {
+        auto angle = static_cast<float>(step) * 0.1f;
+        auto view = Transform3x4::fromRowMajor(
+            aroundZ(angle, 300000.0f + angle, -1234.5f * angle, 17.0f).data());
+        check::isTrue(Transform3x4::blendView(view, view, 0.5f) == view,
+                      "a held view blends to itself, bit for bit");
+        check::isTrue(Transform3x4::blend(view, view, 0.5f) == view,
+                      "and so does a held transform");
+    }
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -110,6 +125,7 @@ void runTransformTests() {
     theLongWayRoundIsNotTaken();
     outOfRangeIsClamped();
     rotationErrorSeesAScale();
+    aViewThatHeldStillBlendsToItselfExactly();
 }
 
 } // namespace wiiuport::tests
