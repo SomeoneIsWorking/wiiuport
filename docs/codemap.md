@@ -47,6 +47,7 @@ tracked patch files, and the submodule pin is the source of truth.
 | First-party C++ tests | `tests/cxx/` | A harness that prints its own check count, so a suite that ran nothing fails. Suites are declared in `tests/cxx/suites.h`. |
 | Building and running those tests as a gate | `tools/wiiuport/cxxtests.py` | Configures with Clang, reads the compiler back out of the cache, and scores the run by the checks it reports rather than by exit status alone. |
 | Build orchestration, provisioning, verification | `tools/` (Python) | One locked environment via `uv run --frozen`. |
+| User-supplied inputs a maintainer run needs (disc image, keys, save) | `tools/wiiuport/title.py` resolves, `tools/wiiuport/headless.py` stages | One resolver per input, each refusing a named-but-missing path rather than running without it. A save is copied into the session's own mlc, never linked: a driven run writes to its save as it plays. |
 | Native development packages a build needs | `tools/wiiuport/hostdeps.py` | The one list, and the refusal that names them. Never duplicated into a script or a setup doc; `docs/dev-container.md` points at it. |
 | Where those packages are installed | `docs/dev-container.md` | A Fedora toolbox sharing the same home, so installs need no host privileges. Not a build boundary: the build is the same inside and out. |
 

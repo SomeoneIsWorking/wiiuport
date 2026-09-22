@@ -25,13 +25,20 @@ from pathlib import Path
 
 from wiiuport.drive import press, release
 from wiiuport.headless import HeadlessSession
-from wiiuport.image import arm_interpolated_frame, bounding_box, compare, read_capture
+from wiiuport.image import (
+    arm_capture,
+    arm_interpolated_frame,
+    bounding_box,
+    compare,
+    read_capture,
+)
 from wiiuport.paths import find_layout
-from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
+from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
 from wiiuport.control import (
     DEFAULT_PORT,
     ControlUnavailable,
+    TransformReport,
     read_counters,
     read_frames,
     read_substitution,
@@ -41,22 +48,50 @@ from wiiuport.control import (
 ENV_CONTROL_PORT = "WIIUPORT_CONTROL_PORT"
 
 
+def render_trace(trace: list[tuple[int, int, int]]) -> str:
+    """How many shaders were drawing at each sample, so a run that never
+    reached the world is distinguishable from one that reached it and moved
+    on. A trace with one value throughout is itself the finding."""
+    if not trace:
+        return "no samples taken: nothing was read while the title was driven"
+    widest = max(shaders for _, _, shaders in trace)
+    lines = [f"shaders drawing, sampled while driving (peak {widest}):"]
+    lines += [
+        f"  t+{seconds:>3}s  frame {frames:>6}  {shaders:>4} shaders"
+        for seconds, frames, shaders in trace
+    ]
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--game", type=Path, help="disc image; defaults to $WIIUPORT_GAME")
     parser.add_argument("--keys", type=Path, help="keys.txt; defaults to $WIIUPORT_KEYS")
+    parser.add_argument(
+        "--save",
+        type=Path,
+        help="the title's save folder, copied into the session; defaults to $WIIUPORT_SAVE. "
+        "Without one the title starts a new game and stops at its name-entry keyboard.",
+    )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--boot", type=int, default=90)
     parser.add_argument("--presses", type=int, default=12)
     parser.add_argument("--interval", type=int, default=8)
     parser.add_argument("--t", type=float, default=0.5, help="where between the two frames")
     parser.add_argument("--settle", type=int, default=5)
+    parser.add_argument(
+        "--reach",
+        type=int,
+        default=60,
+        help="seconds to keep trying to arm while the title keeps drawing",
+    )
     parser.add_argument("--out", type=Path, help="where to write the two PNGs")
     args = parser.parse_args(argv)
 
     try:
         game = resolve_game(args.game)
         keys = resolve_keys(args.keys)
+        save = resolve_save(args.save)
     except TitleUnavailable as unavailable:
         print(f"refused: {unavailable}", file=sys.stderr)
         return 2
@@ -73,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_env={ENV_CONTROL_PORT: str(args.port)},
     )
     with session:
-        session.prepare(keys_source=keys)
+        session.prepare(keys_source=keys, save_source=save)
         with session.launch(layout.shell_command(game)) as running:
             deadline = time.monotonic() + args.boot
             ready = False
@@ -87,28 +122,57 @@ def main(argv: list[str] | None = None) -> int:
             if not ready:
                 print("refused: the channel never answered while booting.", file=sys.stderr)
                 return 1
+            # What the title is drawing, sampled while it is driven. Arming at
+            # the end of a fixed press sequence measures whatever screen that
+            # sequence happened to land on; this shows whether the world was
+            # ever on screen, and when.
+            trace: list[tuple[int, int, int]] = []
+            started = time.monotonic()
+
+            def sample() -> TransformReport:
+                seen = read_transforms(args.port)
+                trace.append(
+                    (int(time.monotonic() - started), seen.framesObserved, seen.shadersInLastFrame)
+                )
+                return seen
+
+            report = sample()
             for index in range(args.presses):
                 if running.poll() is not None:
                     break
                 press("a" if index % 2 == 0 else "plus", port=args.port)
                 time.sleep(args.interval)
+                report = sample()
             release(port=args.port)
-            time.sleep(5)
+
+            # Keep trying while sampling: the view can only be offered while
+            # the shaders that carry it are drawing, so one attempt at a fixed
+            # moment arms against whatever is on screen then.
+            deadline = time.monotonic() + args.reach
+            slots = 0
+            before = read_counters(args.port)
+            while True:
+                try:
+                    before = read_counters(args.port)
+                    slots = arm_interpolated_frame(args.port, t=args.t)
+                    break
+                except ControlUnavailable as refused:
+                    if time.monotonic() >= deadline:
+                        print(render_trace(trace))
+                        print(read_frames(args.port).render())
+                        # What the title was showing when it refused. A
+                        # refusal that cannot say which screen the run was
+                        # sitting on sends the next person back to guessing.
+                        arm_capture(args.port, slot=0)
+                        time.sleep(args.settle)
+                        read_capture(args.port, slot=0).write_png(out / "refused.png")
+                        print(f"wrote {out / 'refused.png'}")
+                        print(f"refused: {refused}", file=sys.stderr)
+                        return 1
+                    time.sleep(2)
+                    report = sample()
 
             try:
-                report = read_transforms(args.port)
-                before = read_counters(args.port)
-                try:
-                    slots = arm_interpolated_frame(args.port, t=args.t)
-                except ControlUnavailable as refused:
-                    # Printed after the measurements below, not instead of
-                    # them: a refusal without the state it was made in cannot
-                    # be acted on.
-                    print(report.render())
-                    print(read_counters(args.port).render())
-                    print(read_frames(args.port).render())
-                    print(f"refused: {refused}", file=sys.stderr)
-                    return 1
                 time.sleep(args.settle)
                 after = read_counters(args.port)
                 substitution = read_substitution(args.port)

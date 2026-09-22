@@ -63,3 +63,16 @@ def test_the_product_launches_with_no_arguments_at_all(tmp_path: Path) -> None:
     """A packaged player runs it with nothing; that path has to be reachable."""
     layout = Layout(root=tmp_path)
     assert layout.shell_command() == [str(layout.shell_binary)]
+
+
+def test_no_save_named_is_a_legitimate_answer_and_a_wrong_one_is_not(tmp_path) -> None:
+    """Absent means "start a new game"; a typo must not read as absent."""
+    import pytest
+    from wiiuport.title import TitleUnavailable, resolve_save
+
+    assert resolve_save(None) is None
+    with pytest.raises(TitleUnavailable, match="is not a directory"):
+        resolve_save(tmp_path / "typo")
+    real = tmp_path / "10143500"
+    real.mkdir()
+    assert resolve_save(real) == real

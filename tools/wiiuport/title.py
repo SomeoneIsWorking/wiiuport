@@ -46,3 +46,28 @@ def resolve_keys(argument: Path | None) -> Path:
     if not keys.is_file():
         raise TitleUnavailable(f"{keys} is not a file")
     return keys
+
+
+ENV_SAVE = "WIIUPORT_SAVE"
+
+
+def resolve_save(argument: Path | None) -> Path | None:
+    """The operator's save for the title, or None when none was named.
+
+    Optional, and absent is a legitimate answer: a run without one starts a
+    new game and stops at the name-entry keyboard, which no button press can
+    pass. What is never acceptable is pretending a run reached gameplay when
+    it sat on that screen, so the tools that need gameplay say so themselves.
+
+    A named save that does not exist is refused rather than ignored: a typo
+    would otherwise read as "no save", which is the case this exists to avoid.
+    """
+    save = argument or (Path(os.environ[ENV_SAVE]) if ENV_SAVE in os.environ else None)
+    if save is None:
+        return None
+    if not save.is_dir():
+        raise TitleUnavailable(
+            f"{save} is not a directory. A save is the title's save folder, the one "
+            f"holding user/<account>; pass --save or set {ENV_SAVE}."
+        )
+    return save
