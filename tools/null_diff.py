@@ -46,9 +46,13 @@ from wiiuport.image import (
 from wiiuport.paths import find_layout
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
-from wiiuport.control import DEFAULT_PORT, ControlUnavailable, read_counters, read_transforms
-
-ENV_CONTROL_PORT = "WIIUPORT_CONTROL_PORT"
+from wiiuport.control import (
+    DEFAULT_PORT,
+    ControlUnavailable,
+    read_counters,
+    read_transforms,
+    runtime_env,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -82,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     session = HeadlessSession(
         layout=layout,
         activity="null-diff",
-        runtime_env={ENV_CONTROL_PORT: str(args.port)},
+        runtime_env=runtime_env(args.port, continuous=False),
     )
     with session:
         session.prepare(keys_source=keys)

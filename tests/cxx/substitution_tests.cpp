@@ -270,8 +270,8 @@ void theBlendIsTakenDownOnceItsFrameHasBeenReplayed() {
     addAssembly(frame, 0xaaaa, bufferWithView(0, viewAt(10, 20, 30)));
     for (int end = 0; end < 2; ++end) {
         // The order the recorder calls them in.
-        fixture.scheduler.onFrameRecorded(frame);
-        fixture.interpolator.onFrameRecorded(frame);
+        fixture.scheduler.onFrameShown(frame);
+        fixture.interpolator.onFrameShown(frame);
     }
     check::isTrue(!fixture.substitution.isArmed(), "the blend is disarmed after its replay");
     check::isTrue(fixture.substitution.assembliesSubstituted() == 0,

@@ -104,7 +104,7 @@ void aFrameIsOnlyPublishedWhenItEnds() {
                  "a frame still being recorded is not readable as a complete one");
     check::equal(observer.framesObserved(), uint64_t{0}, "and no frame has ended yet");
 
-    observer.OnFrameEnd();
+    observer.OnFrameComplete();
     check::equal(observer.framesObserved(), uint64_t{1}, "the frame ended");
     check::equal(observer.lastCompleteFrame().displayLists().size(), size_t{1},
                  "and is now readable");
@@ -114,10 +114,10 @@ void theNextFrameDoesNotAccumulateOntoTheLast() {
     std::array<uint32_t, 4> guest{1, 2, 3, 4};
     RecordingObserver observer;
     observer.OnDisplayList(listOf(1, guest.data(), 16));
-    observer.OnFrameEnd();
+    observer.OnFrameComplete();
     observer.OnDisplayList(listOf(2, guest.data(), 16));
     observer.OnDisplayList(listOf(3, guest.data(), 16));
-    observer.OnFrameEnd();
+    observer.OnFrameComplete();
 
     check::equal(observer.lastCompleteFrame().displayLists().size(), size_t{2},
                  "the second frame holds its own two lists, not four");
@@ -143,13 +143,13 @@ void aReplaysOwnDrawsAreNotRecordedAsTheNextFrame() {
     // compound once a replay runs every frame.
     std::array<uint32_t, 4> guest{1, 2, 3, 4};
     RecordingObserver observer;
-    observer.OnFrameEnd();
+    observer.OnFrameComplete();
 
     LatteFrameHooks::DisplayList replayed = listOf(0x50000000, guest.data(), 16);
     replayed.fromRuntime = true;
     observer.OnDisplayList(replayed);
     observer.OnDisplayList(listOf(0x60000000, guest.data(), 16));
-    observer.OnFrameEnd();
+    observer.OnFrameComplete();
 
     check::equal(observer.lastCompleteFrame().displayLists().size(), size_t{1},
                  "the frame holds the guest's list alone");
@@ -178,7 +178,7 @@ void onlyTheRuntimesOwnAssembliesReachTheFilter() {
     observer.setAssemblyFilter(&filter);
     observer.OnUniformAssembly(guestDraw);
     observer.OnUniformAssembly(replayedDraw);
-    observer.OnFrameEnd();
+    observer.OnFrameComplete();
 
     check::equal(filter.offered.size(), size_t{1}, "one assembly was offered to the filter");
     check::equal(filter.offered.front(), uint64_t{0x2222}, "and it is the runtime's own");
@@ -197,11 +197,12 @@ void aUniformAssemblyCrossesTheHookIntact() {
     assembly.data = values.data();
     assembly.sizeInBytes = static_cast<uint32_t>(values.size() * sizeof(float));
     assembly.blockAddresses = sources.data();
-    assembly.blockAddressCount = static_cast<uint32_t>(sources.size());
+    // Counted in pairs, as the renderer passes it: one block, two words.
+    assembly.blockAddressCount = 1;
 
     RecordingObserver observer;
     observer.OnUniformAssembly(assembly);
-    observer.OnFrameEnd();
+    observer.OnFrameComplete();
     values[3] = 999.0f;
 
     const auto& recorded = observer.lastCompleteFrame().uniformAssemblies();
@@ -209,12 +210,14 @@ void aUniformAssemblyCrossesTheHookIntact() {
     check::equal(recorded[0].data.size(), size_t{12}, "all twelve floats came across");
     check::equal(recorded[0].data[3], 10.0f, "by copy, so the guest's later write is not seen");
     check::equal(recorded[0].blockSources.size(), size_t{2}, "both source words came across");
+    check::equal(recorded[0].blockSources[1], uint32_t{0xf4000000},
+                 "including the address, which is the object's identity");
     check::equal(recorded[0].shaderBaseHash, 0xb7252004aba21c10ull,
                  "with the shader it belongs to");
 }
 
 void anOversizedSourceListIsCappedNotTrusted() {
-    std::array<uint32_t, 64> sources{};
+    std::array<uint32_t, 128> sources{};
     std::array<float, 4> values{};
     LatteFrameHooks::UniformAssembly assembly{};
     assembly.data = values.data();
@@ -226,9 +229,9 @@ void anOversizedSourceListIsCappedNotTrusted() {
 
     RecordingObserver observer;
     observer.OnUniformAssembly(assembly);
-    observer.OnFrameEnd();
+    observer.OnFrameComplete();
     check::equal(observer.lastCompleteFrame().uniformAssemblies()[0].blockSources.size(),
-                 size_t{LatteFrameHooks::kMaxUniformBlockSources},
+                 size_t{LatteFrameHooks::kMaxUniformBlockSources} * 2,
                  "the read stops at the interface's own cap");
 }
 
@@ -259,7 +262,7 @@ void aNestedBufferIsCountedAndNotRecordedTwice() {
     nested.topLevel = false;
     observer.OnDisplayList(nested);
     observer.OnDisplayList(listOf(0x30001000, guest.data(), 16));
-    observer.OnFrameEnd();
+    observer.OnFrameComplete();
 
     check::equal(observer.lastCompleteFrame().displayLists().size(), size_t{1},
                  "only the buffer the command queue submitted is recorded");

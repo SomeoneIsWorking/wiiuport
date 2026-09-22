@@ -48,12 +48,28 @@ add_library(wiiuport STATIC
   frame/FrameReplayer.h
   frame/RecordingObserver.cpp
   frame/RecordingObserver.h
+  frame/RecordingSnapshot.cpp
+  frame/RecordingSnapshot.h
   frame/ReplayScheduler.cpp
   frame/ReplayScheduler.h
   frame/SearchFeed.cpp
   frame/SearchFeed.h
   input/InputDriver.cpp
   input/InputDriver.h
+  interp/ContinuousInterpolator.cpp
+  interp/ContinuousInterpolator.h
+  interp/AssemblyKey.cpp
+  interp/AssemblyKey.h
+  interp/Blendable.h
+  interp/CutDetector.cpp
+  interp/CutDetector.h
+  interp/KeyedFrame.cpp
+  interp/KeyedFrame.h
+  interp/ObjectBlend.cpp
+  interp/ObjectBlend.h
+  interp/ObjectPlanner.cpp
+  interp/ObjectPlanner.h
+  interp/ReplayBlend.h
   interp/Transform3x4.cpp
   interp/Transform3x4.h
   interp/TransformSearch.cpp
@@ -62,6 +78,8 @@ add_library(wiiuport STATIC
   interp/FrameInterpolator.h
   interp/TransformSubstitution.cpp
   interp/TransformSubstitution.h
+  interp/ViewTracker.cpp
+  interp/ViewTracker.h
 )
 
 target_include_directories(wiiuport PUBLIC

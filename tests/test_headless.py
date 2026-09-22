@@ -6,7 +6,14 @@ import os
 from pathlib import Path
 
 import pytest
-from wiiuport.headless import HeadlessSession, LogType, _own_process_group, log_flags
+from wiiuport.headless import (
+    Display,
+    HeadlessError,
+    HeadlessSession,
+    LogType,
+    _own_process_group,
+    log_flags,
+)
 from wiiuport.paths import Layout
 
 
@@ -15,7 +22,9 @@ def session(tmp_path: Path) -> HeadlessSession:
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "project-goals.md").write_text("x")
     (tmp_path / "external").mkdir()
-    made = HeadlessSession(layout=Layout(root=tmp_path), display=96, activity="test")
+    made = HeadlessSession(
+        layout=Layout(root=tmp_path), display=96, activity="test", display_server=Display.XVFB
+    )
     made.prepare()
     return made
 
@@ -116,7 +125,9 @@ def test_runtime_overrides_cannot_break_the_isolation(tmp_path: Path) -> None:
     )
     env = session.environment()
     assert env["XDG_DATA_HOME"] == str(session.data_home)
-    assert env["DISPLAY"] == ":99"
+    assert "DISPLAY" not in env, "a GPU run must not inherit the operator's display"
+    session.display_server = Display.XVFB
+    assert session.environment()["DISPLAY"] == ":99"
 
 
 def test_a_save_is_copied_not_linked_so_a_driven_run_cannot_ruin_it(
@@ -156,3 +167,30 @@ def test_a_named_save_that_is_not_there_is_refused_rather_than_skipped(
 
     with pytest.raises(HeadlessError, match="is not a directory"):
         session.prepare(save_source=tmp_path / "no-such-save")
+
+
+def test_a_gpu_session_runs_under_gamescope_and_inherits_no_display(
+    session: HeadlessSession,
+) -> None:
+    session.display_server = Display.GPU
+    assert session.command_for(["product"])[0] == "gamescope"
+    assert session.command_for(["product"])[-1] == "product"
+    assert "DISPLAY" not in session.environment()
+
+
+def test_an_xvfb_session_launches_the_command_as_given(session: HeadlessSession) -> None:
+    assert session.command_for(["product"]) == ["product"]
+
+
+def test_the_device_is_read_from_the_runtimes_own_log(session: HeadlessSession) -> None:
+    log = session.data_home / "Cemu" / "log.txt"
+    log.write_text("[00:00] Using GPU: AMD Radeon RX 6700 XT (RADV NAVI22)\n")
+    assert session.rendered_on() == "AMD Radeon RX 6700 XT (RADV NAVI22)"
+    assert not session.is_software_rendered()
+    log.write_text("[00:00] Using GPU: llvmpipe (LLVM 22.1.8, 256 bits)\n")
+    assert session.is_software_rendered()
+
+
+def test_an_unknown_device_is_refused(session: HeadlessSession) -> None:
+    with pytest.raises(HeadlessError, match="names no Vulkan device"):
+        session.rendered_on()

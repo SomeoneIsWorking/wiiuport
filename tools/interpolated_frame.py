@@ -43,9 +43,8 @@ from wiiuport.control import (
     read_frames,
     read_substitution,
     read_transforms,
+    runtime_env,
 )
-
-ENV_CONTROL_PORT = "WIIUPORT_CONTROL_PORT"
 
 
 def render_trace(trace: list[tuple[int, int, int]]) -> str:
@@ -105,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     session = HeadlessSession(
         layout=layout,
         activity="interpolated-frame",
-        runtime_env={ENV_CONTROL_PORT: str(args.port)},
+        runtime_env=runtime_env(args.port, continuous=False),
     )
     with session:
         session.prepare(keys_source=keys, save_source=save)

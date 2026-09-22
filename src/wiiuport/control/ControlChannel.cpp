@@ -17,10 +17,36 @@ lucent::http::Response notFound() {
     return lucent::http::Response::text(
         404, "Not Found",
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
-        "GET /controllers, GET /setup, GET /substitution, GET /frames, POST /replay, POST "
-        "/capture, POST "
-        "/present, "
-        "POST /nulldiff, POST /interpolate and POST /input.\n");
+        "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
+        "GET /recordings, POST /replay, POST /capture, POST /present, POST /nulldiff, POST "
+        "/interpolate, POST /continuous, POST /recordings and POST /input.\n");
+}
+
+// The one-shot routes each own a frame boundary, and so does continuous
+// interpolation. Two owners of one boundary produce a capture of whichever
+// happened to win, so a one-shot waits until continuous is switched off.
+lucent::http::Response continuousOwnsFrames() {
+    return lucent::http::Response::text(
+        409, "Conflict",
+        "continuous interpolation owns every frame boundary. POST /continuous?on=0 first.\n");
+}
+
+std::string_view withheldName(LatteFrameHooks::WithheldEffect effect) {
+    switch (effect) {
+    case LatteFrameHooks::WithheldEffect::Presentation:
+        return "presentation";
+    case LatteFrameHooks::WithheldEffect::Synchronisation:
+        return "synchronisation";
+    case LatteFrameHooks::WithheldEffect::GuestMemoryWrite:
+        return "guestMemoryWrite";
+    case LatteFrameHooks::WithheldEffect::OcclusionQuery:
+        return "occlusionQuery";
+    case LatteFrameHooks::WithheldEffect::TextureReadback:
+        return "textureReadback";
+    case LatteFrameHooks::WithheldEffect::Count:
+        break;
+    }
+    return "unknown";
 }
 
 // One `key=value` pair at a time out of a query string. Returns false at the
@@ -77,16 +103,12 @@ std::string transformJson(const interp::TransformCandidate& candidate) {
 
 } // namespace
 
-ControlChannel::ControlChannel(const frame::RecordingObserver& recorder,
-                               frame::FrameReplayer& replayer,
-                               const interp::TransformSearch& search, input::InputDriver& input,
-                               frame::FrameCapture& capture, frame::FramePresenter& presenter,
-                               frame::ReplayScheduler& scheduler,
-                               interp::FrameInterpolator& interpolator,
-                               const frame::FrameShapeLog& shapeLog)
-    : m_recorder(recorder), m_replayer(replayer), m_search(search), m_input(input),
-      m_capture(capture), m_presenter(presenter), m_scheduler(scheduler),
-      m_interpolator(interpolator), m_shapeLog(shapeLog) {
+ControlChannel::ControlChannel(const Sources& sources)
+    : m_recorder(sources.recorder), m_replayer(sources.replayer), m_search(sources.search),
+      m_input(sources.input), m_capture(sources.capture), m_presenter(sources.presenter),
+      m_scheduler(sources.scheduler), m_interpolator(sources.interpolator),
+      m_shapeLog(sources.shapeLog), m_viewTracker(sources.viewTracker),
+      m_continuous(sources.continuous), m_snapshot(sources.snapshot) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -248,6 +270,63 @@ std::string ControlChannel::framesJson() const {
     return body + "]}\n";
 }
 
+std::string ControlChannel::interpolationJson() const {
+    using Skip = interp::ContinuousInterpolator::Skip;
+    std::string body = "{";
+    body += "\"enabled\":" + std::string(m_continuous.enabled() ? "true" : "false");
+    body += ",\"ticks\":" + std::to_string(m_continuous.ticks());
+    body += ",\"framesInterpolated\":" + std::to_string(m_continuous.framesInterpolated());
+    body += ",\"skipped\":{";
+    for (size_t index = 0; index < interp::ContinuousInterpolator::kSkipCount; ++index) {
+        auto skip = static_cast<Skip>(index);
+        body += index == 0 ? "\"" : ",\"";
+        body += std::string(interp::ContinuousInterpolator::skipName(skip)) +
+                "\":" + std::to_string(m_continuous.skipped(skip));
+    }
+    body += "}";
+    body += ",\"restoresRefused\":" + std::to_string(m_continuous.restoresRefused());
+    body += ",\"phaseNanoseconds\":{";
+    for (size_t index = 0; index < interp::ContinuousInterpolator::kPhaseCount; ++index) {
+        auto phase = static_cast<interp::ContinuousInterpolator::Phase>(index);
+        body += index == 0 ? "\"" : ",\"";
+        body += std::string(interp::ContinuousInterpolator::phaseName(phase)) +
+                "\":" + std::to_string(m_continuous.timeIn(phase).count());
+    }
+    body += "}";
+    body += ",\"cutsByTurn\":" + std::to_string(m_continuous.cuts().cutsByTurn());
+    body += ",\"cutsByStep\":" + std::to_string(m_continuous.cuts().cutsByStep());
+    const interp::ObjectBlend& objects = m_continuous.objects();
+    body += ",\"objects\":{";
+    for (size_t index = 0; index < interp::ObjectPlanner::kOutcomeCount; ++index) {
+        auto outcome = static_cast<interp::ObjectPlanner::Outcome>(index);
+        body += index == 0 ? "\"" : ",\"";
+        body += std::string(interp::ObjectPlanner::outcomeName(outcome)) +
+                "\":" + std::to_string(objects.objects(outcome));
+    }
+    body += "}";
+    body += ",\"objectPartnersDerived\":" + std::to_string(objects.planner().partnersDerived());
+    body += ",\"objectPartnersSearched\":" + std::to_string(objects.planner().partnersSearched());
+    body += ",\"objectSearchesDeferred\":" + std::to_string(objects.planner().searchesDeferred());
+    body += ",\"objectValuesNotBlended\":" + std::to_string(objects.planner().valuesNotBlended());
+    body += ",\"objectDrawsWritten\":" + std::to_string(objects.drawsWritten());
+    body += ",\"objectReplaysDiverged\":" + std::to_string(objects.replaysDiverged());
+    body += ",\"viewFramesTracked\":" + std::to_string(m_viewTracker.framesTracked());
+    body += ",\"viewFramesLost\":" + std::to_string(m_viewTracker.framesLost());
+    body += ",\"viewReseedsRun\":" + std::to_string(m_viewTracker.reseedsRun());
+    body += ",\"viewReseedsFound\":" + std::to_string(m_viewTracker.reseedsFound());
+    body += ",\"copiesSubmitted\":" + std::to_string(m_presenter.copiesSubmitted());
+    body += ",\"withheld\":{";
+    for (uint32_t index = 0; index < LatteFrameHooks::kWithheldEffectCount; ++index) {
+        auto effect = static_cast<LatteFrameHooks::WithheldEffect>(index);
+        body += index == 0 ? "\"" : ",\"";
+        body += std::string(withheldName(effect)) +
+                "\":" + std::to_string(m_recorder.runtimeWithheld(effect));
+    }
+    body += "}";
+    body += ",\"recordingSnapshots\":" + std::to_string(m_snapshot.snapshotsCompleted());
+    return body + "}\n";
+}
+
 std::string ControlChannel::substitutionJson() const {
     const interp::TransformSubstitution& substitution = m_interpolator.substitution();
     std::string body = "{";
@@ -286,6 +365,29 @@ bool ControlChannel::requestedFlag(const std::string& query, std::string_view na
         if (key == name) {
             return !(value == "0" || value == "false");
         }
+    }
+    return fallback;
+}
+
+size_t ControlChannel::requestedCount(const std::string& query, std::string_view name,
+                                      size_t fallback) {
+    std::string_view rest(query);
+    std::string_view key;
+    std::string_view value;
+    while (nextParameter(rest, key, value)) {
+        if (key != name) {
+            continue;
+        }
+        // Anything that is not a plain decimal count is zero, which every
+        // caller refuses, rather than whatever prefix happened to parse.
+        size_t count = 0;
+        for (char digit : value) {
+            if (digit < '0' || digit > '9' || count > 1000000) {
+                return 0;
+            }
+            count = (count * 10) + static_cast<size_t>(digit - '0');
+        }
+        return value.empty() ? 0 : count;
     }
     return fallback;
 }
@@ -403,6 +505,33 @@ bool ControlChannel::start(uint16_t port) {
             // Arming is a deliberate one-shot: the next frame to end is
             // replayed, and nothing after it. A replay that repeated every
             // frame would make a crash impossible to attribute.
+            if (request.method == "POST" && request.path() == "/continuous") {
+                bool on = requestedFlag(std::string(request.query()), "on", true);
+                m_continuous.setEnabled(on);
+                return lucent::http::Response::json(200, "OK", interpolationJson());
+            }
+            // Several consecutive frames' uniform assemblies, filled at the
+            // frame boundaries that follow; GET /recordings reads them back.
+            if (request.method == "POST" && request.path() == "/recordings") {
+                size_t frames = requestedCount(std::string(request.query()), "frames", 2);
+                if (!m_snapshot.arm(frames)) {
+                    return lucent::http::Response::text(
+                        409, "Conflict",
+                        "a snapshot is already filling, or frames is zero or above " +
+                            std::to_string(frame::RecordingSnapshot::kMaxFrames) + ".\n");
+                }
+                return lucent::http::Response::json(
+                    200, "OK",
+                    "{\"armed\":true,\"frames\":" + std::to_string(frames) +
+                        ",\"snapshotsCompleted\":" +
+                        std::to_string(m_snapshot.snapshotsCompleted()) + "}\n");
+            }
+            bool oneShot = request.method == "POST" &&
+                           (request.path() == "/replay" || request.path() == "/nulldiff" ||
+                            request.path() == "/interpolate");
+            if (oneShot && m_continuous.enabled()) {
+                return continuousOwnsFrames();
+            }
             if (request.method == "POST" && request.path() == "/replay") {
                 m_replayer.armOnce();
                 return lucent::http::Response::json(
@@ -507,6 +636,20 @@ bool ControlChannel::start(uint16_t port) {
             }
             if (request.path() == "/frames") {
                 return lucent::http::Response::json(200, "OK", framesJson());
+            }
+            if (request.path() == "/interpolation") {
+                return lucent::http::Response::json(200, "OK", interpolationJson());
+            }
+            if (request.path() == "/recordings") {
+                std::string framed = m_snapshot.framed();
+                if (framed.empty()) {
+                    return lucent::http::Response::text(
+                        404, "Not Found",
+                        "no snapshot has completed yet. Arm one with POST /recordings?frames=K "
+                        "and let K frames end.\n");
+                }
+                return lucent::http::Response::binary(200, "OK", "application/octet-stream",
+                                                      framed);
             }
             if (request.path() == "/substitution") {
                 return lucent::http::Response::json(200, "OK", substitutionJson());

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 
 namespace wiiuport::interp {
 
@@ -40,6 +41,31 @@ class Transform3x4 {
     // at t=0 and t=1 are the inputs unchanged, so a blend that never fires
     // cannot be mistaken for one that did.
     static Transform3x4 blend(const Transform3x4& from, const Transform3x4& to, float t);
+
+    // Blends a view transform -- world to camera -- as the camera's pose.
+    //
+    // Its translation column is not where the camera is: it is the world
+    // origin seen from the camera, so a camera turning on the spot sweeps it
+    // through an arc. Lerping that column pulls the camera towards the world
+    // origin on every in-between frame, by more the further out it stands --
+    // tens of units at the coordinates a large world uses. Inverting, blending
+    // the pose, and inverting back keeps the camera on its path. Exact at both
+    // ends, like blend().
+    static Transform3x4 blendView(const Transform3x4& from, const Transform3x4& to, float t);
+
+    // The inverse of a rotation-and-translation: transposed rotation, and the
+    // translation taken back through it. Only meaningful for a rigid transform.
+    Transform3x4 rigidInverse() const;
+
+    // The angle, in radians, of the rotation that takes `from`'s rotation to
+    // `to`'s. What a blend has to sweep through, so the measure of whether
+    // two values are one motion or a cut.
+    static float rotationAngleBetween(const Transform3x4& from, const Transform3x4& to);
+
+    // Where these twelve floats first occur in a buffer of `width` floats, or
+    // kNotFound. Compared as floats, so a zero and a negative zero match.
+    static constexpr size_t kNotFound = static_cast<size_t>(-1);
+    size_t findIn(const float* buffer, size_t width) const;
 
     const std::array<float, kFloats>& values() const {
         return m_values;

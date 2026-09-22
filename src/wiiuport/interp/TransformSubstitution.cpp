@@ -10,7 +10,7 @@ bool TransformSubstitution::armOnce(const std::vector<ViewSlot>& slots, float t)
     m_offered.clear();
     for (const ViewSlot& slot : slots) {
         m_blended[slot.shader] =
-            BlendedSlot{slot.floatOffset, Transform3x4::blend(slot.before, slot.after, t)};
+            BlendedSlot{slot.floatOffset, Transform3x4::blendView(slot.before, slot.after, t)};
     }
     m_blendPoint = t;
     m_armed = true;

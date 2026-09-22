@@ -29,6 +29,10 @@ bool refusePresent(const LatteFrameHooks::PresentArguments&) {
     return false;
 }
 
+wiiuport::interp::ContinuousInterpolator::Clock::time_point neverNow() {
+    return {};
+}
+
 // Everything a channel needs, in one place. The constructor has widened
 // three times as subsystems were added, and each time it widened in five
 // tests at once; here it widens in one.
@@ -43,8 +47,25 @@ struct Fixture {
     wiiuport::interp::TransformSubstitution substitution;
     wiiuport::interp::FrameInterpolator interpolator{search, substitution, scheduler};
     wiiuport::frame::FrameShapeLog shapeLog;
-    ControlChannel channel{recorder,  replayer,  search,       input,   capture,
-                           presenter, scheduler, interpolator, shapeLog};
+    wiiuport::interp::ViewTracker viewTracker{search};
+    wiiuport::interp::ObjectBlend objects{wiiuport::interp::ContinuousInterpolator::kBlendPoint};
+    wiiuport::interp::ContinuousInterpolator continuous{
+        viewTracker, substitution, objects, replayer, presenter, scheduler, &neverNow};
+    wiiuport::frame::RecordingSnapshot snapshot;
+    ControlChannel channel{ControlChannel::Sources{
+        .recorder = recorder,
+        .replayer = replayer,
+        .search = search,
+        .input = input,
+        .capture = capture,
+        .presenter = presenter,
+        .scheduler = scheduler,
+        .interpolator = interpolator,
+        .shapeLog = shapeLog,
+        .viewTracker = viewTracker,
+        .continuous = continuous,
+        .snapshot = snapshot,
+    }};
 };
 
 bool contains(const std::string& haystack, const std::string& needle) {
@@ -74,7 +95,7 @@ void theCountersFollowTheRecorder() {
 
     Fixture fixture;
     fixture.recorder.OnDisplayList(list);
-    fixture.recorder.OnFrameEnd();
+    fixture.recorder.OnFrameComplete();
 
     std::string body = fixture.channel.countersJson();
     check::isTrue(contains(body, "\"framesObserved\":1"), "the ended frame is counted");

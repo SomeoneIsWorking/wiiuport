@@ -21,7 +21,7 @@ namespace wiiuport::frame {
 // It exists so the recorder stays a recorder and the replayer stays free of
 // any opinion about when it runs. Everything it holds is a reference to an
 // owner that outlives it.
-class ReplayScheduler final : public FrameEndListener {
+class ReplayScheduler final : public FrameShownListener {
   public:
     // Which slot each half of a null diff lands in. Fixed here because this
     // is the only code that knows which present is which.
@@ -65,7 +65,7 @@ class ReplayScheduler final : public FrameEndListener {
         return m_nullDiffsCompleted;
     }
 
-    void onFrameRecorded(const FrameRecording& recording) override;
+    void onFrameShown(const FrameRecording& recording) override;
 
   private:
     FrameReplayer& m_replayer;

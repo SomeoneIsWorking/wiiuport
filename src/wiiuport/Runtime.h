@@ -7,12 +7,17 @@
 #include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameShapeLog.h"
 #include "wiiuport/frame/RecordingObserver.h"
+#include "wiiuport/frame/RecordingSnapshot.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/frame/SearchFeed.h"
 #include "wiiuport/input/InputDriver.h"
+#include "wiiuport/interp/ContinuousInterpolator.h"
 #include "wiiuport/interp/FrameInterpolator.h"
+#include "wiiuport/interp/ObjectBlend.h"
+#include "wiiuport/interp/ReplayBlend.h"
 #include "wiiuport/interp/TransformSearch.h"
 #include "wiiuport/interp/TransformSubstitution.h"
+#include "wiiuport/interp/ViewTracker.h"
 
 namespace wiiuport {
 
@@ -85,6 +90,10 @@ class Runtime {
         return m_interpolator;
     }
 
+    const interp::ContinuousInterpolator& continuous() const {
+        return m_continuous;
+    }
+
   private:
     inline static Runtime* s_instance{nullptr};
     inline static std::once_flag s_created;
@@ -98,11 +107,27 @@ class Runtime {
     frame::SearchFeed m_searchFeed{m_search};
     frame::FrameShapeLog m_shapeLog;
     interp::TransformSubstitution m_substitution;
+    interp::ObjectBlend m_objectBlend{interp::ContinuousInterpolator::kBlendPoint};
+    interp::ReplayBlend m_replayBlend{m_objectBlend, m_substitution};
     interp::FrameInterpolator m_interpolator{m_search, m_substitution, m_scheduler};
+    interp::ViewTracker m_viewTracker{m_search};
+    interp::ContinuousInterpolator m_continuous;
+    frame::RecordingSnapshot m_snapshot;
     input::InputDriver m_input;
-    control::ControlChannel m_control{m_recorder,  m_replayer,     m_search,
-                                      m_input,     m_capture,      m_presenter,
-                                      m_scheduler, m_interpolator, m_shapeLog};
+    control::ControlChannel m_control{control::ControlChannel::Sources{
+        .recorder = m_recorder,
+        .replayer = m_replayer,
+        .search = m_search,
+        .input = m_input,
+        .capture = m_capture,
+        .presenter = m_presenter,
+        .scheduler = m_scheduler,
+        .interpolator = m_interpolator,
+        .shapeLog = m_shapeLog,
+        .viewTracker = m_viewTracker,
+        .continuous = m_continuous,
+        .snapshot = m_snapshot,
+    }};
     bool m_hooksInstalled{false};
 };
 
