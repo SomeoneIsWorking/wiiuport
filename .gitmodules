@@ -5,3 +5,10 @@
 [submodule "external/lucent"]
 	path = external/lucent
 	url = https://github.com/SomeoneIsWorking/lucent.git
+[submodule "external/setup-ui"]
+	path = external/setup-ui
+	url = https://github.com/SomeoneIsWorking/setup-ui.git
+	branch = main
+[submodule "external/RmlUi"]
+	path = external/RmlUi
+	url = https://github.com/mikke89/RmlUi.git

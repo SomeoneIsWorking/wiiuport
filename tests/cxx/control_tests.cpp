@@ -105,6 +105,50 @@ void aFoundTransformIsReportedWithItsValues() {
     check::isTrue(contains(body, "\"values\":[1,0,0,4,"), "and the values themselves");
 }
 
+// A setup screen as the channel sees one.
+struct FakeSetup final : public wiiuport::control::SetupStatusSource {
+    bool shown = true;
+    std::string state = "rejected";
+    size_t offered = 2;
+
+    bool setupShown() const override {
+        return shown;
+    }
+
+    std::string setupState() const override {
+        return state;
+    }
+
+    size_t setupSelectionsOffered() const override {
+        return offered;
+    }
+};
+
+void aChannelWithNoSetupScreenSaysSoRatherThanReportingAClosedOne() {
+    Fixture fixture;
+    std::string body = fixture.channel.setupJson();
+    check::isTrue(contains(body, "\"hostReports\":false"),
+                  "a build with no host to show setup says nothing reported");
+    check::isTrue(contains(body, "\"shown\":false"), "and does not claim a screen is up");
+}
+
+void aShownSetupScreenReportsWhatItIsWaitingFor() {
+    Fixture fixture;
+    FakeSetup setup;
+    fixture.channel.setSetupStatus(&setup);
+    std::string body = fixture.channel.setupJson();
+    check::isTrue(contains(body, "\"hostReports\":true"), "a registered screen is reported");
+    check::isTrue(contains(body, "\"shown\":true"), "as being on the display");
+    check::isTrue(contains(body, "\"state\":\"rejected\""), "with what it is waiting for");
+    // The denominator: a player who chose nothing and a player whose choice
+    // was refused both leave the screen up.
+    check::isTrue(contains(body, "\"selectionsOffered\":2"), "and how much it was handed");
+
+    fixture.channel.setSetupStatus(nullptr);
+    check::isTrue(contains(fixture.channel.setupJson(), "\"hostReports\":false"),
+                  "and a screen that closed is no longer reported as one");
+}
+
 void anUnstartedChannelIsNotRunning() {
     Fixture fixture;
     check::isTrue(!fixture.channel.running(), "a channel nobody started is off");
@@ -121,6 +165,8 @@ void runControlTests() {
     theCountersFollowTheRecorder();
     aSearchThatFoundNothingStillSaysWhatItLookedAt();
     aFoundTransformIsReportedWithItsValues();
+    aChannelWithNoSetupScreenSaysSoRatherThanReportingAClosedOne();
+    aShownSetupScreenReportsWhatItIsWaitingFor();
     anUnstartedChannelIsNotRunning();
 }
 

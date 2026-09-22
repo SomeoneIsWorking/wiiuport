@@ -221,6 +221,42 @@ def read_controllers(port: int = DEFAULT_PORT, timeout: float = 2.0) -> Controll
     )
 
 
+@dataclass(frozen=True)
+class SetupStatus:
+    """What the host reports about its first-run setup screen."""
+
+    hostReports: bool
+    shown: bool
+    state: str
+    selectionsOffered: int
+
+    def render(self) -> str:
+        if not self.hostReports:
+            return "no host reported a setup screen; this run is past it or shows none"
+        where = "on the display" if self.shown else "not shown"
+        return (
+            f"the setup screen is {where}, waiting at {self.state!r}, "
+            f"handed {self.selectionsOffered} selections"
+        )
+
+
+def read_setup(port: int = DEFAULT_PORT, timeout: float = 2.0) -> SetupStatus:
+    """Read /setup, refusing by reason rather than returning empty."""
+    payload = _get("/setup", port, timeout)
+    _require(
+        f"http://127.0.0.1:{port}/setup",
+        payload,
+        SetupStatus.__annotations__,
+        "a setup status",
+    )
+    return SetupStatus(
+        hostReports=bool(payload["hostReports"]),
+        shown=bool(payload["shown"]),
+        state=str(payload["state"]),
+        selectionsOffered=int(payload["selectionsOffered"]),
+    )
+
+
 def read_transforms(port: int = DEFAULT_PORT, timeout: float = 5.0) -> TransformReport:
     """Read /transforms, refusing by reason rather than returning empty."""
     url = f"http://127.0.0.1:{port}/transforms"
