@@ -52,6 +52,14 @@ void RecordingObserver::OnPresent(const LatteFrameHooks::PresentArguments& prese
     }
 }
 
+void RecordingObserver::OnGuestDraw(bool fromCommandBuffer) {
+    if (fromCommandBuffer) {
+        ++m_guestDrawsFromCommandBuffers;
+        return;
+    }
+    ++m_guestDrawsFromRing;
+}
+
 void RecordingObserver::OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) {
     ++m_runtimeSubmissions;
     m_runtimePacketsProcessed += summary.packetsProcessed;

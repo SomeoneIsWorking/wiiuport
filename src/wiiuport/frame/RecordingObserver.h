@@ -53,6 +53,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void OnUniformAssembly(const LatteFrameHooks::UniformAssembly& assembly) override;
     void OnPresent(const LatteFrameHooks::PresentArguments& present) override;
     void OnFrameEnd() override;
+    void OnGuestDraw(bool fromCommandBuffer) override;
     void OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) override;
 
     // Empty by default, so a build that installs no listener behaves as a
@@ -128,6 +129,17 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
         return m_nestedListsSeen;
     }
 
+    // How much of a frame a recording can hold: draws the title issued from a
+    // command buffer, against draws it issued straight from the ring, which
+    // no recording of buffers can reach.
+    uint64_t guestDrawsFromCommandBuffers() const {
+        return m_guestDrawsFromCommandBuffers;
+    }
+
+    uint64_t guestDrawsFromRing() const {
+        return m_guestDrawsFromRing;
+    }
+
     uint64_t runtimeSubmissions() const {
         return m_runtimeSubmissions;
     }
@@ -153,6 +165,8 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     uint64_t m_displayListsFromRuntime{0};
     uint64_t m_uniformAssembliesFromRuntime{0};
     uint64_t m_nestedListsSeen{0};
+    uint64_t m_guestDrawsFromCommandBuffers{0};
+    uint64_t m_guestDrawsFromRing{0};
     uint64_t m_runtimeSubmissions{0};
     uint64_t m_runtimePacketsProcessed{0};
     uint64_t m_runtimeDrawsIssued{0};

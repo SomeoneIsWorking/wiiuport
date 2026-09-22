@@ -53,6 +53,8 @@ class Counters:
     presentsRefusedBySubmit: int
     nullDiffsCompleted: int
     nestedListsSeen: int
+    guestDrawsFromCommandBuffers: int
+    guestDrawsFromRing: int
     runtimeSubmissions: int
     runtimePacketsProcessed: int
     runtimeDrawsIssued: int
@@ -77,7 +79,9 @@ class Counters:
             f"{self.uniformAssembliesFromRuntime} assemblies); last frame held "
             f"{self.lastFrameDisplayLists} lists and "
             f"{self.lastFrameUniformAssemblies} assemblies in {self.lastFrameBytes} bytes; "
-            f"nested lists {self.nestedListsSeen}; "
+            f"nested lists {self.nestedListsSeen}; the title drew "
+            f"{self.guestDrawsFromCommandBuffers} times from command buffers and "
+            f"{self.guestDrawsFromRing} straight from the ring; "
             f"replays {self.replaysRun} submitting {self.replayListsSubmitted} lists "
             f"({self.replayListsRefused} refused) in {self.runtimeSubmissions} submissions "
             f"the command processor walked {self.runtimePacketsProcessed} packets of, "
@@ -141,12 +145,14 @@ class TransformReport:
     rejectedRotation: int
     candidatesFound: int
     sharedAndMoving: int
+    shadersInLastFrame: int
     candidates: tuple[TransformCandidate, ...]
 
     def render(self) -> str:
         totals = (
             f"{self.candidatesFound} candidates ({self.sharedAndMoving} shared and moving) "
             f"from {self.spansExamined} spans examined across {self.shadersTracked} shaders "
+            f"({self.shadersInLastFrame} of them drawing in the last frame) "
             f"over {self.framesObserved} frames"
         )
         rejected = (
@@ -373,5 +379,6 @@ def read_transforms(port: int = DEFAULT_PORT, timeout: float = 5.0) -> Transform
         rejectedRotation=int(payload["rejectedRotation"]),
         candidatesFound=int(payload["candidatesFound"]),
         sharedAndMoving=int(payload["sharedAndMoving"]),
+        shadersInLastFrame=int(payload["shadersInLastFrame"]),
         candidates=tuple(candidates),
     )

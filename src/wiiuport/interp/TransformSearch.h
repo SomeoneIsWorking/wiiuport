@@ -68,6 +68,10 @@ struct SearchReport {
     // distinguishes a view from an object's transform, so the count of
     // candidates meeting both is the number worth gating on.
     size_t sharedAndMoving{0};
+    // How many tracked shaders drew in the most recent frame. The denominator
+    // for "the view is carried by 65 shaders": if none of them is in this
+    // number, nothing can be substituted into the frame that will be replayed.
+    size_t shadersInLastFrame{0};
 };
 
 // Finds the title's view transform by watching what its values do, never from
@@ -104,9 +108,12 @@ class TransformSearch {
     SearchReport search() const;
 
     // Every slot carrying the view the search ranks first, with its last two
-    // values. Empty when no candidate is both shared and moving, or when only
-    // one frame's values are known: a blend between a value and itself is not
-    // a blend, and returning it would look like interpolation that ran.
+    // values, restricted to shaders that drew in the most recent frame --
+    // which is the frame a replay re-issues. Empty when no candidate is both
+    // shared and moving, when the shaders carrying it did not draw in that
+    // frame, or when only one frame's values are known: a blend between a
+    // value and itself is not a blend, and returning it would look like
+    // interpolation that ran.
     std::vector<ViewSlot> viewSlots() const;
 
     uint32_t framesObserved() const {
@@ -136,8 +143,16 @@ class TransformSearch {
         // endpoints a blend needs would otherwise both be the same frame.
         bool hasFrameBeforeLast{false};
         std::vector<float> frameBeforeLast;
+        // Which frame this shader last drew in. A shader's state survives
+        // every frame after it stops drawing, so without this a blend can be
+        // armed for shaders the frame about to be replayed never reaches --
+        // measured on Wind Waker HD as 65 armed shaders against 12 the replay
+        // actually used, with no overlap.
+        uint32_t lastFrame{0};
+        bool everDrew{false};
     };
 
+    bool drewInLastFrame(const ShaderState& state) const;
     void narrowTo(ShaderState& state, size_t width);
     void closeFrame(ShaderState& state);
     uint32_t countShadersSharing(const ShaderKey& exclude, const float* values) const;

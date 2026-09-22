@@ -94,6 +94,26 @@ void aViewCarriedByTwoShadersIsFoundAtEachOffset() {
     check::equal(wide->after.translation().x, 10.0f, "and the last frame as the other");
 }
 
+void aViewNoShaderStillDrawsIsNotOfferedForSubstitution() {
+    // The failure this exists to stop, measured on the real title: a blend
+    // armed for 65 shaders that carried the view in some earlier frame, and a
+    // replay of a frame that draws 12 other shaders. A shader's last values
+    // outlive the frame it stopped drawing in, so without this the search
+    // hands out slots no replay will ever reach.
+    TransformSearch search;
+    observeTwoFrames(search, viewAt(0, 0, 0), viewAt(10, 20, 30));
+    check::equal(search.viewSlots().size(), size_t{2}, "the view is offered while it is drawn");
+
+    FrameRecording later;
+    addAssembly(later, 0xcccc, bufferWithView(0, viewAt(1, 2, 3)));
+    addAssembly(later, 0xdddd, bufferWithView(0, viewAt(1, 2, 3)));
+    search.observe(later);
+    check::equal(search.viewSlots().size(), size_t{0},
+                 "and not offered once the shaders carrying it have stopped drawing");
+    check::equal(search.search().shadersInLastFrame, size_t{2},
+                 "with the last frame's own shaders reported as the denominator");
+}
+
 void aViewOnlyOneShaderCarriesIsNotOfferedForSubstitution() {
     // An object's own transform reaches the shaders that draw that object. A
     // camera reaches every pass that draws the world, and that difference is
@@ -272,6 +292,7 @@ void runSubstitutionTests() {
     oneFrameGivesNoEndpointsToBlendBetween();
     aViewCarriedByTwoShadersIsFoundAtEachOffset();
     aViewOnlyOneShaderCarriesIsNotOfferedForSubstitution();
+    aViewNoShaderStillDrawsIsNotOfferedForSubstitution();
     aBlendIsWrittenIntoTheDrawTheRuntimeReplayed();
     theEndpointsAreExactSoANonBlendCannotLookLikeOne();
     anUnarmedSubstitutionWritesNothingAndSaysSo();

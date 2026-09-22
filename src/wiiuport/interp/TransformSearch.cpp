@@ -104,6 +104,8 @@ void TransformSearch::observe(const frame::FrameRecording& recording) {
         auto& state = m_shaders[key];
         narrowTo(state, assembly.data.size());
         state.draws += 1;
+        state.lastFrame = m_framesObserved;
+        state.everDrew = true;
         auto first = !seenThisFrame[key];
         if (first) {
             seenThisFrame[key] = true;
@@ -137,6 +139,10 @@ uint32_t TransformSearch::countShadersSharing(const ShaderKey& exclude, const fl
     return count;
 }
 
+bool TransformSearch::drewInLastFrame(const ShaderState& state) const {
+    return state.everDrew && m_framesObserved > 0 && state.lastFrame == m_framesObserved - 1;
+}
+
 std::vector<ViewSlot> TransformSearch::viewSlots() const {
     SearchReport report = search();
     const TransformCandidate* view = nullptr;
@@ -152,7 +158,10 @@ std::vector<ViewSlot> TransformSearch::viewSlots() const {
     const std::array<float, Transform3x4::kFloats>& values = view->latest.values();
     std::vector<ViewSlot> slots;
     for (const auto& [key, state] : m_shaders) {
-        if (!state.hasFrameBeforeLast) {
+        if (!state.hasFrameBeforeLast || !drewInLastFrame(state)) {
+            // Its values are from some earlier frame. Writing a blend into a
+            // shader the replay never reaches is a substitution that reports
+            // itself as armed and changes nothing.
             continue;
         }
         size_t offset = findSpan(state.currentFrame.data(), state.width, values.data());
@@ -216,6 +225,11 @@ SearchReport TransformSearch::search() const {
     for (const auto& candidate : report.candidates) {
         if (candidate.isShared() && candidate.meanTranslationStep > 0.0f) {
             report.sharedAndMoving += 1;
+        }
+    }
+    for (const auto& [key, state] : m_shaders) {
+        if (drewInLastFrame(state)) {
+            report.shadersInLastFrame += 1;
         }
     }
     std::sort(report.candidates.begin(), report.candidates.end(),
