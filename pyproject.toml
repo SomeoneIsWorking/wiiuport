@@ -3,7 +3,9 @@ name = "wiiuport-tools"
 version = "0.1.0"
 description = "Maintainer tooling for the wiiuport Wii U runtime"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "evdev",
+]
 
 [dependency-groups]
 dev = [

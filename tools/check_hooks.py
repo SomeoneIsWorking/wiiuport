@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     layout = find_layout()
-    binary = layout.cemu_binary
+    binary = layout.shell_binary
     if not binary.is_file():
         print(f"refused: no runtime at {binary}. Build it first.", file=sys.stderr)
         return 2

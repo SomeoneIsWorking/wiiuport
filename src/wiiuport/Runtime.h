@@ -1,5 +1,7 @@
 #pragma once
 
+#include <mutex>
+
 #include "wiiuport/control/ControlChannel.h"
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FramePresenter.h"
@@ -25,6 +27,11 @@ class Runtime {
     Runtime(const Runtime&) = delete;
     Runtime& operator=(const Runtime&) = delete;
 
+    // The process-wide instance. Never destroyed, and leaked on purpose: a
+    // static destroyed at exit leaves the hook registry pointing at a dead
+    // object and the control channel's server torn down underneath its own
+    // thread, which ends a failed run in std::terminate rather than with the
+    // exit code that says what went wrong.
     static Runtime& instance();
 
     // Idempotent: installing twice is a programming error at the call site,
@@ -68,6 +75,9 @@ class Runtime {
     }
 
   private:
+    inline static Runtime* s_instance{nullptr};
+    inline static std::once_flag s_created;
+
     frame::RecordingObserver m_recorder;
     frame::FrameReplayer m_replayer;
     frame::FramePresenter m_presenter;

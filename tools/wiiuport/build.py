@@ -62,7 +62,7 @@ class BuildConfig:
 
     @property
     def binary(self) -> Path:
-        return Layout(root=self.layout.root, build_type=self.build_type).cemu_binary
+        return Layout(root=self.layout.root, build_type=self.build_type).shell_binary
 
 
 def _cmake_cache_value(build_dir: Path, key: str) -> str | None:

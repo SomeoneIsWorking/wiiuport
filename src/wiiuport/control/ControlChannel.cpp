@@ -16,7 +16,8 @@ lucent::http::Response notFound() {
     return lucent::http::Response::text(
         404, "Not Found",
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
-        "POST /replay, POST /capture, POST /present, POST /nulldiff and POST /input.\n");
+        "GET /controllers, POST /replay, POST /capture, POST /present, POST /nulldiff and "
+        "POST /input.\n");
 }
 
 // One `key=value` pair at a time out of a query string. Returns false at the
@@ -83,6 +84,25 @@ ControlChannel::ControlChannel(const frame::RecordingObserver& recorder,
 }
 
 ControlChannel::~ControlChannel() = default;
+
+void ControlChannel::setControllerStatus(const ControllerStatusSource* status) {
+    m_controllerStatus = status;
+}
+
+std::string ControlChannel::controllersJson() const {
+    if (m_controllerStatus == nullptr) {
+        // Not the same as "no pad": this build has no host that attaches one.
+        return "{\"hostReports\":false,\"attachedDevice\":\"\",\"devicesAttached\":0,"
+               "\"devicesLost\":0,\"bindings\":0}";
+    }
+    std::string body = "{\"hostReports\":true";
+    body += ",\"attachedDevice\":\"" + m_controllerStatus->attachedDevice() + "\"";
+    body += ",\"devicesAttached\":" + std::to_string(m_controllerStatus->devicesAttached());
+    body += ",\"devicesLost\":" + std::to_string(m_controllerStatus->devicesLost());
+    body += ",\"bindings\":" + std::to_string(m_controllerStatus->bindingCount());
+    body += "}";
+    return body;
+}
 
 std::string ControlChannel::countersJson() const {
     const frame::FrameRecording& last = m_recorder.lastCompleteFrame();
@@ -321,6 +341,9 @@ bool ControlChannel::start(uint16_t port) {
             }
             if (request.method != "GET") {
                 return notFound();
+            }
+            if (request.path() == "/controllers") {
+                return lucent::http::Response::json(200, "OK", controllersJson());
             }
             if (request.path() == "/counters") {
                 return lucent::http::Response::json(200, "OK", countersJson());
