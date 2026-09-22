@@ -100,6 +100,10 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
     ),
     Requirement("GTK 3", ("gtk3-devel",), files=("/usr/include/gtk-3.0/gtk/gtk.h",)),
     Requirement("glm", ("glm-devel",), files=("/usr/include/glm/glm.hpp",)),
+    # The setup screen's font engine. setup-ui refuses without it rather than
+    # drawing a screen with no text, and the refusal is easier to act on here,
+    # before a build that takes hours.
+    Requirement("freetype", ("freetype-devel",), files=("/usr/include/freetype2/ft2build.h",)),
     # cairo is the fourth of Cemu's empty Linux overlay ports (with gtk3, glm and
     # libpng), so vcpkg deliberately takes it from the distribution. It arrives as a
     # GTK 3 dependency on both Fedora and Debian, which is exactly why an undeclared

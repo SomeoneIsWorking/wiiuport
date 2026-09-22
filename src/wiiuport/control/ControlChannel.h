@@ -1,6 +1,7 @@
 #pragma once
 
 #include "wiiuport/control/ControllerStatus.h"
+#include "wiiuport/control/SetupStatus.h"
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameReplayer.h"
@@ -54,6 +55,14 @@ class ControlChannel {
     // What is attached now, or an explicit statement that no host reported.
     std::string controllersJson() const;
 
+    // The host registers the first-run screen while it is up. Absent until it
+    // does, and GET /setup then says so rather than reporting a screen that
+    // is merely not shown.
+    void setSetupStatus(const SetupStatusSource* status);
+
+    // What the setup screen is waiting for, or that no host reported one.
+    std::string setupJson() const;
+
     // False when the listener could not bind, which is reported and not fatal:
     // a busy port must not stop the product running.
     bool start(uint16_t port);
@@ -88,6 +97,7 @@ class ControlChannel {
     frame::FrameCapture& m_capture;
     frame::FramePresenter& m_presenter;
     const ControllerStatusSource* m_controllerStatus{nullptr};
+    const SetupStatusSource* m_setupStatus{nullptr};
     frame::ReplayScheduler& m_scheduler;
     std::unique_ptr<lucent::http::Server> m_server;
 };

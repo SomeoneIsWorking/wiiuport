@@ -85,7 +85,7 @@ jobs:
             cmake ninja-build clang libgtk-3-dev libglm-dev libgcrypt20-dev \
             libsecret-1-dev libsystemd-dev libudev-dev libpulse-dev libbluetooth-dev \
             libusb-1.0-0-dev freeglut3-dev nasm libtool zlib1g-dev \
-            libpng-dev libcairo2-dev wayland-protocols pkg-config
+            libpng-dev libcairo2-dev wayland-protocols pkg-config libfreetype-dev
 
       # An accelerator only. The job must remain correct with an empty cache,
       # so nothing here is allowed to be a build input the cold path lacks.

@@ -1,6 +1,7 @@
 #include "wiiuport/shell/ShellHost.h"
 
 #include "wiiuport/Runtime.h"
+#include "wiiuport/shell/SetupScreen.h"
 
 #include "Boot/SystemBringup.h"
 #include "Cafe/CafeSystem.h"
@@ -27,6 +28,20 @@ namespace {
 // the core alone between them.
 constexpr std::chrono::milliseconds kEventPollInterval{4};
 
+// What makes a file a title this system can mount. One owner, because the
+// setup screen and the launch path must agree: a file the screen accepted and
+// the launcher then refused would be a dead end the player cannot escape.
+std::string describeTitleProblem(const std::filesystem::path& path) {
+    if (!std::filesystem::is_regular_file(path)) {
+        return path.string() + " is not a file";
+    }
+    TitleInfo title(path);
+    if (!title.IsValid()) {
+        return path.string() + " is not a title this system can mount";
+    }
+    return {};
+}
+
 } // namespace
 
 int ShellHost::run(const Options& options) {
@@ -34,6 +49,17 @@ int ShellHost::run(const Options& options) {
     if (!bringUpSystem()) {
         lucent::error("shell", "{}", m_failure);
         return 1;
+    }
+    std::filesystem::path title = resolveTitle(options);
+    if (title.empty()) {
+        if (!m_failure.empty()) {
+            lucent::error("shell", "{}", m_failure);
+            shutdown();
+            return 1;
+        }
+        lucent::info("shell", "the player chose no title; nothing to run");
+        shutdown();
+        return 0;
     }
     if (!m_window.open(options.window)) {
         lucent::error("shell", "{}", m_window.lastError());
@@ -45,7 +71,7 @@ int ShellHost::run(const Options& options) {
         shutdown();
         return 1;
     }
-    if (!launchTitle(options.title)) {
+    if (!launchTitle(title)) {
         lucent::error("shell", "{}", m_failure);
         shutdown();
         return 1;
@@ -54,7 +80,7 @@ int ShellHost::run(const Options& options) {
     // while nothing is.
     Runtime::instance().control().setControllerStatus(&m_controllers);
     m_controllers.start();
-    lucent::info("shell", "running {}", options.title.string());
+    lucent::info("shell", "running {}", title.string());
     while (m_window.pumpEvents(*this)) {
         std::this_thread::sleep_for(kEventPollInterval);
     }
@@ -91,6 +117,37 @@ bool ShellHost::bringUpSystem() {
     return true;
 }
 
+std::filesystem::path ShellHost::resolveTitle(const Options& options) {
+    TitleSelection selection(ActiveSettings::GetConfigPath(), describeTitleProblem);
+    if (!options.title.empty()) {
+        // An explicitly given title is still the player's answer, so it is
+        // remembered; a refusal to keep it is reported but does not stop this
+        // run, which can still launch what was asked for.
+        if (!selection.remember(options.title)) {
+            lucent::warn("shell", "{}", selection.lastError());
+        }
+        return options.title;
+    }
+    std::filesystem::path remembered = selection.remembered();
+    if (!remembered.empty()) {
+        return remembered;
+    }
+    lucent::info("shell", "{}", selection.lastError());
+    SetupScreen screen(selection);
+    SetupScreen::Options screenOptions;
+    screenOptions.stagingRoot = ActiveSettings::GetCachePath("setup");
+    screenOptions.hidden = options.window.hidden;
+    // The screen blocks this thread until the player answers, so an agent
+    // asks the channel what it is waiting for rather than watching a window.
+    Runtime::instance().control().setSetupStatus(&screen);
+    std::filesystem::path chosen = screen.run(screenOptions);
+    Runtime::instance().control().setSetupStatus(nullptr);
+    if (chosen.empty() && !screen.lastError().empty()) {
+        m_failure = screen.lastError();
+    }
+    return chosen;
+}
+
 bool ShellHost::bringUpRenderer() {
     // The window's native handle is already published, which is the only
     // thing the renderer needs from a front end.
@@ -115,16 +172,13 @@ bool ShellHost::bringUpRenderer() {
 }
 
 bool ShellHost::launchTitle(const std::filesystem::path& path) {
-    if (!std::filesystem::is_regular_file(path)) {
-        m_failure = path.string() + " is not a file";
+    std::string problem = describeTitleProblem(path);
+    if (!problem.empty()) {
+        m_failure = problem;
         return false;
     }
     CafeTitleList::AddTitleFromPath(path);
     TitleInfo title(path);
-    if (!title.IsValid()) {
-        m_failure = path.string() + " is not a title this system can mount";
-        return false;
-    }
     TitleId baseTitleId;
     if (!CafeTitleList::FindBaseTitleId(title.GetAppTitleId(), baseTitleId)) {
         m_failure = path.string() + " has no base title; an update or DLC cannot be launched alone";

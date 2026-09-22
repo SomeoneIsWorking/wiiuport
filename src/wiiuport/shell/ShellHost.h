@@ -3,6 +3,7 @@
 #include "wiiuport/shell/ControllerAutoMap.h"
 #include "wiiuport/shell/HostPaths.h"
 #include "wiiuport/shell/ShellWindow.h"
+#include "wiiuport/shell/TitleSelection.h"
 
 #include <filesystem>
 #include <string>
@@ -21,6 +22,8 @@ class ShellHost final : public HostEventObserver {
         // The running executable, as the host invoked it: the data shipped
         // beside it and portable mode are both found relative to it.
         std::filesystem::path executable;
+        // Which title to run. Empty asks the remembered one, and then the
+        // player: a packaged product has no command line.
         std::filesystem::path title;
         ShellWindow::Options window;
     };
@@ -35,6 +38,10 @@ class ShellHost final : public HostEventObserver {
 
   private:
     bool bringUpSystem();
+    // The title to launch: the one asked for, the one remembered, or the one
+    // the player chooses on the setup screen. Empty when the player asked for
+    // none; m_failure is set only when something failed.
+    std::filesystem::path resolveTitle(const Options& options);
     bool bringUpRenderer();
     bool launchTitle(const std::filesystem::path& path);
     void shutdown();

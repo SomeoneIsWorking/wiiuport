@@ -74,16 +74,45 @@ add_library(wiiuport::wiiuport ALIAS wiiuport)
 if(TARGET CemuCafe)
   find_package(SDL3 REQUIRED CONFIG)
 
+  # setup-ui is the shared first-run setup screen: RmlUi markup drawn into
+  # the product's own SDL3 window. It is consumed, never vendored, and it
+  # resolves RmlUi from a checkout beside itself -- which is why RmlUi is a
+  # submodule here rather than something setup-ui carries.
+  set(WIIUPORT_SETUP_UI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/setup-ui"
+      CACHE PATH "The setup-ui checkout the host's first-run screen uses")
+  if(NOT TARGET setup_ui::setup_ui)
+    if(NOT EXISTS "${WIIUPORT_SETUP_UI_DIR}/CMakeLists.txt")
+      message(FATAL_ERROR
+        "setup-ui is not at ${WIIUPORT_SETUP_UI_DIR}. It owns the first-run "
+        "screen this host shows when no title is configured, and is not "
+        "vendored. Check out the submodules: git submodule update --init "
+        "--depth 1 external/setup-ui external/RmlUi")
+    endif()
+    set(SETUP_UI_RMLUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/RmlUi"
+        CACHE PATH "The RmlUi checkout setup-ui renders through")
+    if(NOT EXISTS "${SETUP_UI_RMLUI_DIR}/CMakeLists.txt")
+      message(FATAL_ERROR
+        "RmlUi is not at ${SETUP_UI_RMLUI_DIR}, and setup-ui cannot render "
+        "without it. Check out the submodule: git submodule update --init "
+        "--depth 1 external/RmlUi")
+    endif()
+    add_subdirectory("${WIIUPORT_SETUP_UI_DIR}" setup_ui EXCLUDE_FROM_ALL)
+  endif()
+
   add_executable(wiiuport_shell
     shell/Main.cpp
     shell/ControllerAutoMap.cpp
     shell/ControllerAutoMap.h
     shell/HostPaths.cpp
     shell/HostPaths.h
+    shell/SetupScreen.cpp
+    shell/SetupScreen.h
     shell/ShellHost.cpp
     shell/ShellHost.h
     shell/ShellWindow.cpp
     shell/ShellWindow.h
+    shell/TitleSelection.cpp
+    shell/TitleSelection.h
     shell/WindowSystemBridge.cpp
   )
   target_link_libraries(wiiuport_shell PRIVATE
@@ -98,6 +127,7 @@ if(TARGET CemuCafe)
     CemuInput
     CemuUtil
     SDL3::SDL3
+    setup_ui::setup_ui
   )
   target_include_directories(wiiuport_shell PRIVATE "${WIIUPORT_FORK_INCLUDE_DIR}")
   # Cemu's headers are written against its precompiled header, which is where

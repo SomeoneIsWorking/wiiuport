@@ -16,7 +16,8 @@ lucent::http::Response notFound() {
     return lucent::http::Response::text(
         404, "Not Found",
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
-        "GET /controllers, POST /replay, POST /capture, POST /present, POST /nulldiff and "
+        "GET /controllers, GET /setup, POST /replay, POST /capture, POST /present, POST /nulldiff "
+        "and "
         "POST /input.\n");
 }
 
@@ -100,6 +101,24 @@ std::string ControlChannel::controllersJson() const {
     body += ",\"devicesAttached\":" + std::to_string(m_controllerStatus->devicesAttached());
     body += ",\"devicesLost\":" + std::to_string(m_controllerStatus->devicesLost());
     body += ",\"bindings\":" + std::to_string(m_controllerStatus->bindingCount());
+    body += "}";
+    return body;
+}
+
+void ControlChannel::setSetupStatus(const SetupStatusSource* status) {
+    m_setupStatus = status;
+}
+
+std::string ControlChannel::setupJson() const {
+    if (m_setupStatus == nullptr) {
+        // Not the same as a screen that is closed: nothing in this process
+        // is in a position to show one.
+        return "{\"hostReports\":false,\"shown\":false,\"state\":\"\",\"selectionsOffered\":0}";
+    }
+    std::string body = "{\"hostReports\":true";
+    body += ",\"shown\":" + std::string(m_setupStatus->setupShown() ? "true" : "false");
+    body += ",\"state\":\"" + m_setupStatus->setupState() + "\"";
+    body += ",\"selectionsOffered\":" + std::to_string(m_setupStatus->setupSelectionsOffered());
     body += "}";
     return body;
 }
@@ -344,6 +363,9 @@ bool ControlChannel::start(uint16_t port) {
             }
             if (request.path() == "/controllers") {
                 return lucent::http::Response::json(200, "OK", controllersJson());
+            }
+            if (request.path() == "/setup") {
+                return lucent::http::Response::json(200, "OK", setupJson());
             }
             if (request.path() == "/counters") {
                 return lucent::http::Response::json(200, "OK", countersJson());

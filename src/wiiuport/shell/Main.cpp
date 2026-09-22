@@ -1,8 +1,9 @@
 // The product's entry point.
 //
-// A player runs this; Cemu's own front end is not built. It takes one
-// argument -- the disc image -- because a shell that guesses which game to
-// run is a shell that silently runs the wrong one.
+// A player runs this; Cemu's own front end is not built. The disc image is an
+// optional argument: given one, that is what runs, and given none the product
+// runs what the player chose last time, or asks them on its setup screen. It
+// never guesses which game to run.
 
 #include "wiiuport/Runtime.h"
 #include "wiiuport/shell/ShellHost.h"
@@ -16,7 +17,7 @@
 namespace {
 
 void printUsage(const char* program) {
-    lucent::error("shell", "usage: {} <disc image> [--hidden] [--width N] [--height N]", program);
+    lucent::error("shell", "usage: {} [disc image] [--hidden] [--width N] [--height N]", program);
 }
 
 } // namespace
@@ -50,10 +51,6 @@ int main(int argc, char* argv[]) {
             return 2;
         }
         options.title = argument;
-    }
-    if (options.title.empty()) {
-        printUsage(argv[0]);
-        return 2;
     }
 
     // Installed before the system exists, so the first frame the guest
