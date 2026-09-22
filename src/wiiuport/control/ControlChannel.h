@@ -8,6 +8,7 @@
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/input/InputDriver.h"
+#include "wiiuport/interp/FrameInterpolator.h"
 #include "wiiuport/interp/TransformSearch.h"
 
 #include <cstddef>
@@ -41,7 +42,7 @@ class ControlChannel {
     ControlChannel(const frame::RecordingObserver& recorder, frame::FrameReplayer& replayer,
                    const interp::TransformSearch& search, input::InputDriver& input,
                    frame::FrameCapture& capture, frame::FramePresenter& presenter,
-                   frame::ReplayScheduler& scheduler);
+                   frame::ReplayScheduler& scheduler, interp::FrameInterpolator& interpolator);
     ~ControlChannel();
 
     ControlChannel(const ControlChannel&) = delete;
@@ -78,8 +79,19 @@ class ControlChannel {
     // describe the whole search.
     std::string transformsJson(size_t limit) const;
 
+    // The two shader key sets an interpolated frame depends on agreeing:
+    // what the blend was armed for, and what the replay actually offered.
+    // Reported together because "none of them carried the view" is a
+    // statement about both and neither alone can show it.
+    std::string substitutionJson() const;
+
     // Which capture slot a query names, defaulting to the first.
     static size_t requestedSlot(const std::string& query);
+
+    // Where between the last two frames an interpolated frame stands. An
+    // unparseable value is refused by the interpolator's range check rather
+    // than read as the default, so a typo cannot quietly ask for t=0.
+    static float requestedBlend(const std::string& query, float fallback);
 
     // A boolean query parameter, defaulting when it is absent.
     static bool requestedFlag(const std::string& query, std::string_view name, bool fallback);
@@ -99,6 +111,7 @@ class ControlChannel {
     const ControllerStatusSource* m_controllerStatus{nullptr};
     const SetupStatusSource* m_setupStatus{nullptr};
     frame::ReplayScheduler& m_scheduler;
+    interp::FrameInterpolator& m_interpolator;
     std::unique_ptr<lucent::http::Server> m_server;
 };
 

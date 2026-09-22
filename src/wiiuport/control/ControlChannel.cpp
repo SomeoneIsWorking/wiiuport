@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace wiiuport::control {
 namespace {
@@ -16,9 +17,9 @@ lucent::http::Response notFound() {
     return lucent::http::Response::text(
         404, "Not Found",
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
-        "GET /controllers, GET /setup, POST /replay, POST /capture, POST /present, POST /nulldiff "
-        "and "
-        "POST /input.\n");
+        "GET /controllers, GET /setup, GET /substitution, POST /replay, POST /capture, POST "
+        "/present, "
+        "POST /nulldiff, POST /interpolate and POST /input.\n");
 }
 
 // One `key=value` pair at a time out of a query string. Returns false at the
@@ -79,9 +80,11 @@ ControlChannel::ControlChannel(const frame::RecordingObserver& recorder,
                                frame::FrameReplayer& replayer,
                                const interp::TransformSearch& search, input::InputDriver& input,
                                frame::FrameCapture& capture, frame::FramePresenter& presenter,
-                               frame::ReplayScheduler& scheduler)
+                               frame::ReplayScheduler& scheduler,
+                               interp::FrameInterpolator& interpolator)
     : m_recorder(recorder), m_replayer(replayer), m_search(search), m_input(input),
-      m_capture(capture), m_presenter(presenter), m_scheduler(scheduler) {
+      m_capture(capture), m_presenter(presenter), m_scheduler(scheduler),
+      m_interpolator(interpolator) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -155,6 +158,19 @@ std::string ControlChannel::countersJson() const {
     body += ",\"nullDiffsCompleted\":" + std::to_string(m_scheduler.nullDiffsCompleted());
     body += ",\"nullDiffPending\":" + std::string(m_scheduler.nullDiffPending() ? "true" : "false");
     body += ",\"presentsRefusedBySubmit\":" + std::to_string(m_presenter.presentsRefusedBySubmit());
+    body += ",\"nestedListsSeen\":" + std::to_string(m_recorder.nestedListsSeen());
+    body += ",\"runtimeSubmissions\":" + std::to_string(m_recorder.runtimeSubmissions());
+    body += ",\"runtimePacketsProcessed\":" + std::to_string(m_recorder.runtimePacketsProcessed());
+    body += ",\"runtimeDrawsIssued\":" + std::to_string(m_recorder.runtimeDrawsIssued());
+    const interp::TransformSubstitution& substitution = m_interpolator.substitution();
+    body += ",\"interpolatedFramesArmed\":" + std::to_string(m_interpolator.framesArmed());
+    body += ",\"interpolatedFramesRefused\":" + std::to_string(m_interpolator.framesRefused());
+    body += ",\"assembliesOffered\":" + std::to_string(substitution.assembliesOffered());
+    body += ",\"assembliesSubstituted\":" + std::to_string(substitution.assembliesSubstituted());
+    body += ",\"assembliesUnarmed\":" + std::to_string(substitution.assembliesUnarmed());
+    body +=
+        ",\"assembliesUnknownShader\":" + std::to_string(substitution.assembliesUnknownShader());
+    body += ",\"assembliesTooShort\":" + std::to_string(substitution.assembliesTooShort());
     body += "}\n";
     return body;
 }
@@ -179,6 +195,44 @@ std::string ControlChannel::transformsJson(size_t limit) const {
     }
     body += "]}\n";
     return body;
+}
+
+namespace {
+
+std::string shaderJson(const interp::TransformSubstitution::OfferedShader& shader) {
+    std::string body = "{";
+    body += "\"stageIndex\":" + std::to_string(shader.shader.stageIndex);
+    body += ",\"baseHash\":" + std::to_string(shader.shader.baseHash);
+    body += ",\"auxHash\":" + std::to_string(shader.shader.auxHash);
+    body += ",\"floats\":" + std::to_string(shader.floats);
+    body += ",\"times\":" + std::to_string(shader.times);
+    body += ",\"substituted\":" + std::string(shader.substituted ? "true" : "false");
+    return body + "}";
+}
+
+std::string shaderArrayJson(const std::vector<interp::TransformSubstitution::OfferedShader>& set) {
+    std::string body = "[";
+    for (size_t i = 0; i < set.size(); ++i) {
+        if (i != 0) {
+            body += ",";
+        }
+        body += shaderJson(set[i]);
+    }
+    return body + "]";
+}
+
+} // namespace
+
+std::string ControlChannel::substitutionJson() const {
+    const interp::TransformSubstitution& substitution = m_interpolator.substitution();
+    std::string body = "{";
+    body += "\"armed\":" + std::string(substitution.isArmed() ? "true" : "false");
+    body += ",\"blendPoint\":" + floatText(substitution.blendPoint());
+    body += ",\"assembliesOffered\":" + std::to_string(substitution.assembliesOffered());
+    body += ",\"assembliesSubstituted\":" + std::to_string(substitution.assembliesSubstituted());
+    body += ",\"slots\":" + shaderArrayJson(substitution.armedSlots());
+    body += ",\"offered\":" + shaderArrayJson(substitution.offeredShaders());
+    return body + "}\n";
 }
 
 // The slot a capture route is talking about. Out of range is refused by the
@@ -206,6 +260,26 @@ bool ControlChannel::requestedFlag(const std::string& query, std::string_view na
     while (nextParameter(rest, key, value)) {
         if (key == name) {
             return !(value == "0" || value == "false");
+        }
+    }
+    return fallback;
+}
+
+float ControlChannel::requestedBlend(const std::string& query, float fallback) {
+    std::string_view rest(query);
+    std::string_view key;
+    std::string_view value;
+    while (nextParameter(rest, key, value)) {
+        if (key == "t") {
+            char* end = nullptr;
+            std::string text(value);
+            float parsed = std::strtof(text.c_str(), &end);
+            if (end == text.c_str() || *end != '\0') {
+                // Out of range on purpose: the interpolator refuses it and
+                // says so, which a caller can read.
+                return -1.0f;
+            }
+            return parsed;
         }
     }
     return fallback;
@@ -329,6 +403,22 @@ bool ControlChannel::start(uint16_t port) {
                         std::to_string(m_scheduler.nullDiffsCompleted()) + "}");
             }
 
+            // One frame between two the title drew: the last frame's
+            // geometry, replayed with the view blended between where the
+            // camera stood in each. Captured as a null diff is, so the pair
+            // that must differ is the title's frame and this one.
+            if (request.method == "POST" && request.path() == "/interpolate") {
+                float t = requestedBlend(std::string(request.query()), 0.5f);
+                if (!m_interpolator.armOnce(t)) {
+                    return lucent::http::Response::text(409, "Conflict",
+                                                        m_interpolator.lastRefusal() + "\n");
+                }
+                return lucent::http::Response::json(
+                    200, "OK",
+                    "{\"armed\":true,\"t\":" + floatText(t) + ",\"slots\":" +
+                        std::to_string(m_interpolator.substitution().slotCount()) + "}\n");
+            }
+
             // A present the runtime owns, so a replay's output can be seen
             // instead of being overdrawn by the guest's next frame. Refused
             // when the title has not presented yet, because the arguments
@@ -389,6 +479,9 @@ bool ControlChannel::start(uint16_t port) {
                 }
                 return lucent::http::Response::binary(200, "OK", "application/octet-stream",
                                                       m_capture.lastImageFramed(slot));
+            }
+            if (request.path() == "/substitution") {
+                return lucent::http::Response::json(200, "OK", substitutionJson());
             }
             if (request.path() == "/transforms") {
                 return lucent::http::Response::json(200, "OK",

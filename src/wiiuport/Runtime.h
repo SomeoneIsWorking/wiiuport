@@ -9,7 +9,9 @@
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/frame/SearchFeed.h"
 #include "wiiuport/input/InputDriver.h"
+#include "wiiuport/interp/FrameInterpolator.h"
 #include "wiiuport/interp/TransformSearch.h"
+#include "wiiuport/interp/TransformSubstitution.h"
 
 namespace wiiuport {
 
@@ -74,6 +76,10 @@ class Runtime {
         return m_scheduler;
     }
 
+    interp::FrameInterpolator& interpolator() {
+        return m_interpolator;
+    }
+
   private:
     inline static Runtime* s_instance{nullptr};
     inline static std::once_flag s_created;
@@ -85,9 +91,11 @@ class Runtime {
     frame::ReplayScheduler m_scheduler{m_replayer, m_presenter, m_capture};
     interp::TransformSearch m_search;
     frame::SearchFeed m_searchFeed{m_search};
+    interp::TransformSubstitution m_substitution;
+    interp::FrameInterpolator m_interpolator{m_search, m_substitution, m_scheduler};
     input::InputDriver m_input;
-    control::ControlChannel m_control{m_recorder, m_replayer,  m_search,   m_input,
-                                      m_capture,  m_presenter, m_scheduler};
+    control::ControlChannel m_control{m_recorder, m_replayer,  m_search,    m_input,
+                                      m_capture,  m_presenter, m_scheduler, m_interpolator};
     bool m_hooksInstalled{false};
 };
 

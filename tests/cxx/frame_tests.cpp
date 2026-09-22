@@ -90,6 +90,7 @@ LatteFrameHooks::DisplayList listOf(uint32_t address, const void* data, uint32_t
     list.physicalAddress = address;
     list.data = data;
     list.sizeInBytes = size;
+    list.topLevel = true;
     return list;
 }
 
@@ -230,6 +231,41 @@ void anOversizedSourceListIsCappedNotTrusted() {
                  "the read stops at the interface's own cap");
 }
 
+void whatASubmissionReachedIsSummedRatherThanOverwritten() {
+    // The question this answers is the one a replayed frame cannot: a
+    // submission that walked no packets and one that drew every triangle
+    // leave the same colour buffer behind.
+    RecordingObserver recorder;
+    recorder.OnRuntimeSubmission({0, 0});
+    check::equal(recorder.runtimeSubmissions(), uint64_t{1}, "an empty submission still counts");
+    check::equal(recorder.runtimePacketsProcessed(), uint64_t{0},
+                 "with zero packets reported as zero, not as absence");
+    recorder.OnRuntimeSubmission({470, 96});
+    check::equal(recorder.runtimeSubmissions(), uint64_t{2}, "a second submission is counted");
+    check::equal(recorder.runtimePacketsProcessed(), uint64_t{470}, "and its packets added");
+    check::equal(recorder.runtimeDrawsIssued(), uint64_t{96}, "and its draws");
+}
+
+void aNestedBufferIsCountedAndNotRecordedTwice() {
+    // The buffer a frame's draws live in references others. Replaying the
+    // outer one walks into them, so recording them as well would issue their
+    // contents a second time -- and recording only them, as this did before
+    // the top-level buffers were hooked, replays a frame with no draws in it
+    // at all.
+    std::array<uint32_t, 4> guest{1, 2, 3, 4};
+    RecordingObserver observer;
+    auto nested = listOf(0x30000000, guest.data(), 16);
+    nested.topLevel = false;
+    observer.OnDisplayList(nested);
+    observer.OnDisplayList(listOf(0x30001000, guest.data(), 16));
+    observer.OnFrameEnd();
+
+    check::equal(observer.lastCompleteFrame().displayLists().size(), size_t{1},
+                 "only the buffer the command queue submitted is recorded");
+    check::equal(observer.nestedListsSeen(), uint64_t{1}, "and the nested one is counted");
+    check::equal(observer.displayListsSeen(), uint64_t{2}, "against everything seen");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -246,6 +282,8 @@ void runFrameTests() {
     onlyTheRuntimesOwnAssembliesReachTheFilter();
     aUniformAssemblyCrossesTheHookIntact();
     anOversizedSourceListIsCappedNotTrusted();
+    whatASubmissionReachedIsSummedRatherThanOverwritten();
+    aNestedBufferIsCountedAndNotRecordedTwice();
 }
 
 } // namespace wiiuport::tests

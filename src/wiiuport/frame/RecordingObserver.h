@@ -53,6 +53,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void OnUniformAssembly(const LatteFrameHooks::UniformAssembly& assembly) override;
     void OnPresent(const LatteFrameHooks::PresentArguments& present) override;
     void OnFrameEnd() override;
+    void OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) override;
 
     // Empty by default, so a build that installs no listener behaves as a
     // pure recorder. More than one thing acts on a published frame -- replay
@@ -115,6 +116,30 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
         return m_uniformAssembliesFromRuntime;
     }
 
+    // How far a submitted buffer got: the packets the command processor walked
+    // in it and the draws it issued from them. Zero packets means the buffer
+    // was never read; packets without draws means it carried state and no
+    // geometry; draws without a uniform assembly means the renderer dropped
+    // them before a shader ran.
+    // Buffers referenced from inside a recorded one. They are not recorded,
+    // because walking the buffer that references them reaches them; counting
+    // them is what shows the frame is more than the lists held.
+    uint64_t nestedListsSeen() const {
+        return m_nestedListsSeen;
+    }
+
+    uint64_t runtimeSubmissions() const {
+        return m_runtimeSubmissions;
+    }
+
+    uint64_t runtimePacketsProcessed() const {
+        return m_runtimePacketsProcessed;
+    }
+
+    uint64_t runtimeDrawsIssued() const {
+        return m_runtimeDrawsIssued;
+    }
+
   private:
     std::vector<FrameEndListener*> m_listeners;
     std::vector<PresentListener*> m_presentListeners;
@@ -127,6 +152,10 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     uint64_t m_presentsSeen{0};
     uint64_t m_displayListsFromRuntime{0};
     uint64_t m_uniformAssembliesFromRuntime{0};
+    uint64_t m_nestedListsSeen{0};
+    uint64_t m_runtimeSubmissions{0};
+    uint64_t m_runtimePacketsProcessed{0};
+    uint64_t m_runtimeDrawsIssued{0};
     AssemblyFilter* m_assemblyFilter{nullptr};
 };
 

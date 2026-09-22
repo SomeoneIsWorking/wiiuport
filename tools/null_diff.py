@@ -36,67 +36,19 @@ from pathlib import Path
 
 from wiiuport.drive import press, release
 from wiiuport.headless import HeadlessSession
-from wiiuport.image import Image, arm_capture, arm_null_diff, read_capture
+from wiiuport.image import (
+    arm_capture,
+    arm_null_diff,
+    bounding_box,
+    compare,
+    read_capture,
+)
 from wiiuport.paths import find_layout
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
 from wiiuport.control import DEFAULT_PORT, ControlUnavailable, read_counters, read_transforms
 
 ENV_CONTROL_PORT = "WIIUPORT_CONTROL_PORT"
-
-
-def bounding_box(before: Image, after: Image) -> str:
-    """Where the differing pixels are. A difference spread over the whole
-    frame and one confined to a small box are different faults, and the
-    numbers alone cannot tell them apart."""
-    width = before.width
-    stride = width * 3
-    minx = miny = None
-    maxx = maxy = -1
-    touched = 0
-    for y in range(before.height):
-        row_a = before.rgb[y * stride : (y + 1) * stride]
-        row_b = after.rgb[y * stride : (y + 1) * stride]
-        if row_a == row_b:
-            continue
-        touched += 1
-        for x in range(width):
-            i = x * 3
-            if row_a[i : i + 3] != row_b[i : i + 3]:
-                minx = x if minx is None else min(minx, x)
-                maxx = max(maxx, x)
-                miny = y if miny is None else min(miny, y)
-                maxy = max(maxy, y)
-    if minx is None:
-        return "nowhere"
-    return (
-        f"x {minx}..{maxx}, y {miny}..{maxy} ({maxx - minx + 1}x{maxy - miny + 1}), "
-        f"{touched} rows touched"
-    )
-
-
-def compare(before: Image, after: Image) -> tuple[int, int, float]:
-    """Differing bytes, the largest single difference, and the mean.
-
-    Reported together because one changed pixel and a different image are
-    both "not identical" and nothing else distinguishes them.
-    """
-    if (before.width, before.height) != (after.width, after.height):
-        raise ControlUnavailable(
-            f"the two captures are {before.width}x{before.height} and "
-            f"{after.width}x{after.height}; a replay that changed the resolution is a "
-            "finding in itself and they cannot be compared byte for byte"
-        )
-    differing = 0
-    largest = 0
-    total = 0
-    for a, b in zip(before.rgb, after.rgb, strict=True):
-        delta = abs(a - b)
-        if delta:
-            differing += 1
-            total += delta
-            largest = max(largest, delta)
-    return differing, largest, total / len(before.rgb)
 
 
 def main(argv: list[str] | None = None) -> int:

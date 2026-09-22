@@ -42,6 +42,18 @@ struct TransformCandidate {
     }
 };
 
+// One slot that carries the shared view, with the two values a blend needs.
+//
+// The offset differs per shader -- the same view sits at different places in
+// different buffers -- so a substitution has to be told where, shader by
+// shader, rather than writing one offset everywhere.
+struct ViewSlot {
+    ShaderKey shader;
+    uint32_t floatOffset{0};
+    Transform3x4 before; // the frame before last
+    Transform3x4 after;  // the last frame
+};
+
 // Everything one search looked at, not only what it found.
 struct SearchReport {
     std::vector<TransformCandidate> candidates;
@@ -91,6 +103,12 @@ class TransformSearch {
     // search would report most convincingly and least usefully.
     SearchReport search() const;
 
+    // Every slot carrying the view the search ranks first, with its last two
+    // values. Empty when no candidate is both shared and moving, or when only
+    // one frame's values are known: a blend between a value and itself is not
+    // a blend, and returning it would look like interpolation that ran.
+    std::vector<ViewSlot> viewSlots() const;
+
     uint32_t framesObserved() const {
         return m_framesObserved;
     }
@@ -113,6 +131,11 @@ class TransformSearch {
         uint32_t draws{0};
         bool hasPreviousFrame{false};
         std::vector<float> previousFrame;
+        // The frame before that. Kept because closeFrame leaves previousFrame
+        // equal to currentFrame, so by the time a frame is published the two
+        // endpoints a blend needs would otherwise both be the same frame.
+        bool hasFrameBeforeLast{false};
+        std::vector<float> frameBeforeLast;
     };
 
     void narrowTo(ShaderState& state, size_t width);

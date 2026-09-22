@@ -13,6 +13,13 @@ void RecordingObserver::OnDisplayList(const LatteFrameHooks::DisplayList& list) 
         ++m_displayListsFromRuntime;
         return;
     }
+    if (!list.topLevel) {
+        // Reached by walking the buffer that referenced it, so replaying the
+        // top-level buffer draws it again. Recording it as well would issue
+        // its contents twice.
+        ++m_nestedListsSeen;
+        return;
+    }
     m_inFlight.addDisplayList(list.physicalAddress, list.data, list.sizeInBytes);
 }
 
@@ -43,6 +50,12 @@ void RecordingObserver::OnPresent(const LatteFrameHooks::PresentArguments& prese
     for (PresentListener* listener : m_presentListeners) {
         listener->onPresentObserved(present);
     }
+}
+
+void RecordingObserver::OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) {
+    ++m_runtimeSubmissions;
+    m_runtimePacketsProcessed += summary.packetsProcessed;
+    m_runtimeDrawsIssued += summary.drawsIssued;
 }
 
 void RecordingObserver::OnFrameEnd() {
