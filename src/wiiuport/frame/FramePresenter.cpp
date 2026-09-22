@@ -6,8 +6,16 @@ FramePresenter::FramePresenter(Submit submit) : m_submit(submit) {
 }
 
 void FramePresenter::onPresentObserved(const LatteFrameHooks::PresentArguments& present) {
-    m_lastPresent = present;
     ++m_presentsObserved;
+    if (present.targetsDrc) {
+        ++m_presentsObservedDrc;
+    }
+    // A copy can carry both bits, and then it is the TV's as well.
+    if (!present.targetsTv) {
+        return;
+    }
+    m_lastTvPresent = present;
+    ++m_presentsObservedTv;
 }
 
 bool FramePresenter::presentIfArmed() {
@@ -23,7 +31,7 @@ bool FramePresenter::presentNow() {
         ++m_presentsRefusedUnobserved;
         return false;
     }
-    if (!m_submit(m_lastPresent)) {
+    if (!m_submit(m_lastTvPresent)) {
         ++m_presentsRefusedBySubmit;
         return false;
     }

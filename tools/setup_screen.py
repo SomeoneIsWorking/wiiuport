@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 from wiiuport.headless import HeadlessError, HeadlessSession
-from wiiuport.paths import find_layout
+from wiiuport.paths import Layout, find_layout
 from wiiuport.screenshot import ScreenshotUnavailable, capture_display, spread
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
@@ -77,12 +77,13 @@ def photograph(session: HeadlessSession) -> int:
     return 0
 
 
-def show_the_screen(session: HeadlessSession, binary: Path, port: int, seconds: int) -> int:
+def show_the_screen(session: HeadlessSession, layout: Layout, port: int, seconds: int) -> int:
     """With nothing remembered, the player must be asked."""
     record = session.config_home / "Cemu" / RECORD_NAME
     if record.exists():
         record.unlink()
-    with session.launch([str(binary)]) as running:
+    # No argument at all: the packaged product's own path.
+    with session.launch(layout.shell_command()) as running:
 
         def asked():
             status = read_setup(port)
@@ -110,13 +111,13 @@ def show_the_screen(session: HeadlessSession, binary: Path, port: int, seconds: 
 
 
 def start_from_the_record(
-    session: HeadlessSession, binary: Path, game: Path, port: int, seconds: int
+    session: HeadlessSession, layout: Layout, game: Path, port: int, seconds: int
 ) -> int:
     """With a title remembered, the player must not be asked again."""
     record = session.config_home / "Cemu" / RECORD_NAME
     record.parent.mkdir(parents=True, exist_ok=True)
     record.write_text(f"{game}\n")
-    with session.launch([str(binary)]) as running:
+    with session.launch(layout.shell_command()) as running:
 
         def started():
             if read_counters(port).framesObserved > 0:
@@ -173,10 +174,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with session:
             session.prepare(keys_source=keys)
-            failed = show_the_screen(session, binary, args.port, args.ask)
+            failed = show_the_screen(session, layout, args.port, args.ask)
             if failed:
                 return failed
-            return start_from_the_record(session, binary, game, args.port, args.boot)
+            return start_from_the_record(session, layout, game, args.port, args.boot)
     except HeadlessError as unavailable:
         print(f"refused: {unavailable}", file=sys.stderr)
         return 2

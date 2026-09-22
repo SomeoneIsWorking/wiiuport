@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     report = None
     with session:
         session.prepare(keys_source=keys)
-        with session.launch([str(binary), "--game", str(game)]) as running:
+        with session.launch(layout.shell_command(game)) as running:
             deadline = time.monotonic() + args.settle
             while time.monotonic() < deadline and running.poll() is None:
                 time.sleep(10)

@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     with session:
         session.prepare(keys_source=keys)
-        with session.launch([str(binary), "--game", str(game)]) as running:
+        with session.launch(layout.shell_command(game)) as running:
             deadline = time.monotonic() + args.boot
             ready = False
             while time.monotonic() < deadline and not ready:
@@ -226,7 +226,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(
             f"  runtime presents submitted {control_counters.presentsSubmitted}, "
-            f"observed {control_counters.presentsObserved}, images received "
+            f"observed {control_counters.presentsObserved} "
+            f"({control_counters.presentsObservedTv} TV, "
+            f"{control_counters.presentsObservedDrc} GamePad), images received "
             f"{control_counters.imagesReceived}",
             file=sys.stderr,
         )

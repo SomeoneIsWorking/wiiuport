@@ -44,3 +44,22 @@ def test_the_binary_name_does_not_depend_on_the_build_type(tmp_path: Path) -> No
     """One product, one name: a tool that finds no binary must be looking at
     the build, not at a name it guessed from a configuration."""
     assert Layout(root=tmp_path, build_type="Debug").shell_binary.name == "wiiuport"
+
+
+def test_the_product_takes_its_title_as_a_positional_argument(tmp_path: Path) -> None:
+    """The product refuses an unknown option, so a flag here fails at launch.
+
+    This is the shape five maintainer tools got wrong at once when the shell
+    replaced Cemu's front end: each kept passing ``--game`` and each exited
+    with a code that read as the title failing to load.
+    """
+    layout = Layout(root=tmp_path)
+    command = layout.shell_command(Path("/games/title.wux"))
+    assert command == [str(layout.shell_binary), "/games/title.wux"]
+    assert not any(argument.startswith("-") for argument in command[1:])
+
+
+def test_the_product_launches_with_no_arguments_at_all(tmp_path: Path) -> None:
+    """A packaged player runs it with nothing; that path has to be reachable."""
+    layout = Layout(root=tmp_path)
+    assert layout.shell_command() == [str(layout.shell_binary)]
