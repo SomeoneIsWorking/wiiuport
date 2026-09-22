@@ -26,6 +26,19 @@ class PresentListener {
     virtual void onPresentObserved(const LatteFrameHooks::PresentArguments& present) = 0;
 };
 
+// Something that may edit a uniform buffer the runtime is about to upload.
+// Only the runtime's own replayed draws are offered: editing the guest's
+// frame would change what the title is showing rather than what the runtime
+// is interpolating.
+class AssemblyFilter {
+  public:
+    virtual ~AssemblyFilter() = default;
+
+    // Returns whether it wrote anything, which the recorder counts. The
+    // buffer is the renderer's, and this is the last moment before upload.
+    virtual bool onRuntimeAssembly(const LatteFrameHooks::UniformAssembly& assembly) = 0;
+};
+
 // Fills a FrameRecording from the fork's hooks, and nothing else.
 //
 // Kept separate from FrameRecording so the recording stays testable without
@@ -57,6 +70,12 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
         }
     }
 
+    // At most one, because two things editing the same buffer would each be
+    // overwriting the other without either being able to report it.
+    void setAssemblyFilter(AssemblyFilter* filter) {
+        m_assemblyFilter = filter;
+    }
+
     uint64_t presentsSeen() const {
         return m_presentsSeen;
     }
@@ -85,6 +104,17 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
         return m_uniformAssembliesSeen;
     }
 
+    // What came back out of the runtime's own submissions rather than the
+    // guest's frame. Recording these would put a replay of frame N into the
+    // recording of frame N+1, so they are counted and set aside.
+    uint64_t displayListsFromRuntime() const {
+        return m_displayListsFromRuntime;
+    }
+
+    uint64_t uniformAssembliesFromRuntime() const {
+        return m_uniformAssembliesFromRuntime;
+    }
+
   private:
     std::vector<FrameEndListener*> m_listeners;
     std::vector<PresentListener*> m_presentListeners;
@@ -95,6 +125,9 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     uint64_t m_displayListsSeen{0};
     uint64_t m_uniformAssembliesSeen{0};
     uint64_t m_presentsSeen{0};
+    uint64_t m_displayListsFromRuntime{0};
+    uint64_t m_uniformAssembliesFromRuntime{0};
+    AssemblyFilter* m_assemblyFilter{nullptr};
 };
 
 } // namespace wiiuport::frame

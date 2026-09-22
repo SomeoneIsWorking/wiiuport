@@ -130,6 +130,9 @@ std::string ControlChannel::countersJson() const {
     body += ",\"framesRefusedIncomplete\":" + std::to_string(m_recorder.framesRefusedIncomplete());
     body += ",\"displayListsSeen\":" + std::to_string(m_recorder.displayListsSeen());
     body += ",\"uniformAssembliesSeen\":" + std::to_string(m_recorder.uniformAssembliesSeen());
+    body += ",\"displayListsFromRuntime\":" + std::to_string(m_recorder.displayListsFromRuntime());
+    body += ",\"uniformAssembliesFromRuntime\":" +
+            std::to_string(m_recorder.uniformAssembliesFromRuntime());
     body += ",\"lastFrameDisplayLists\":" + std::to_string(last.displayLists().size());
     body += ",\"lastFrameUniformAssemblies\":" + std::to_string(last.uniformAssemblies().size());
     body += ",\"lastFrameBytes\":" + std::to_string(last.byteCount());

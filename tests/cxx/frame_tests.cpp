@@ -124,6 +124,68 @@ void theNextFrameDoesNotAccumulateOntoTheLast() {
     check::equal(observer.displayListsSeen(), uint64_t{3}, "while the total seen still counts all");
 }
 
+// A filter that records what it was offered, so "never called" is visible.
+struct RecordingFilter final : public wiiuport::frame::AssemblyFilter {
+    std::vector<uint64_t> offered;
+
+    bool onRuntimeAssembly(const LatteFrameHooks::UniformAssembly& assembly) override {
+        offered.push_back(assembly.shaderBaseHash);
+        return true;
+    }
+};
+
+void aReplaysOwnDrawsAreNotRecordedAsTheNextFrame() {
+    // The runtime replays inside the frame end, so its draws arrive while the
+    // next frame is being recorded. Recording them would make every frame a
+    // copy of the one before with the replay folded in, and the error would
+    // compound once a replay runs every frame.
+    std::array<uint32_t, 4> guest{1, 2, 3, 4};
+    RecordingObserver observer;
+    observer.OnFrameEnd();
+
+    LatteFrameHooks::DisplayList replayed = listOf(0x50000000, guest.data(), 16);
+    replayed.fromRuntime = true;
+    observer.OnDisplayList(replayed);
+    observer.OnDisplayList(listOf(0x60000000, guest.data(), 16));
+    observer.OnFrameEnd();
+
+    check::equal(observer.lastCompleteFrame().displayLists().size(), size_t{1},
+                 "the frame holds the guest's list alone");
+    check::equal(observer.lastCompleteFrame().displayLists()[0].physicalAddress,
+                 uint32_t{0x60000000}, "and it is the guest's");
+    check::equal(observer.displayListsFromRuntime(), uint64_t{1},
+                 "the replay's list is counted rather than silently dropped");
+    check::equal(observer.displayListsSeen(), uint64_t{2}, "with both still in the total");
+}
+
+void onlyTheRuntimesOwnAssembliesReachTheFilter() {
+    // A blend edits the runtime's replay. Editing the guest's own draw would
+    // change what the title is showing, which is not interpolation.
+    std::array<float, 12> values{};
+    LatteFrameHooks::UniformAssembly guestDraw{};
+    guestDraw.shaderBaseHash = 0x1111;
+    guestDraw.data = values.data();
+    guestDraw.sizeInBytes = static_cast<uint32_t>(values.size() * sizeof(float));
+
+    LatteFrameHooks::UniformAssembly replayedDraw = guestDraw;
+    replayedDraw.shaderBaseHash = 0x2222;
+    replayedDraw.fromRuntime = true;
+
+    RecordingFilter filter;
+    RecordingObserver observer;
+    observer.setAssemblyFilter(&filter);
+    observer.OnUniformAssembly(guestDraw);
+    observer.OnUniformAssembly(replayedDraw);
+    observer.OnFrameEnd();
+
+    check::equal(filter.offered.size(), size_t{1}, "one assembly was offered to the filter");
+    check::equal(filter.offered.front(), uint64_t{0x2222}, "and it is the runtime's own");
+    check::equal(observer.lastCompleteFrame().uniformAssemblies().size(), size_t{1},
+                 "only the guest's assembly is recorded");
+    check::equal(observer.uniformAssembliesFromRuntime(), uint64_t{1},
+                 "and the runtime's is counted");
+}
+
 void aUniformAssemblyCrossesTheHookIntact() {
     std::array<float, 12> values{1, 0, 0, 10, 0, 1, 0, 20, 0, 0, 1, 30};
     std::array<uint32_t, 2> sources{4, 0xf4000000};
@@ -180,6 +242,8 @@ void runFrameTests() {
     clearingReturnsTheRecordingToEmpty();
     aFrameIsOnlyPublishedWhenItEnds();
     theNextFrameDoesNotAccumulateOntoTheLast();
+    aReplaysOwnDrawsAreNotRecordedAsTheNextFrame();
+    onlyTheRuntimesOwnAssembliesReachTheFilter();
     aUniformAssemblyCrossesTheHookIntact();
     anOversizedSourceListIsCappedNotTrusted();
 }
