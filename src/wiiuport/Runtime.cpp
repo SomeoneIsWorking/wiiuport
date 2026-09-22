@@ -28,8 +28,14 @@ Runtime::Runtime()
     : m_replayer(&submitToCommandProcessor), m_presenter(&submitPresent),
       m_capture(&requestFrameCapture) {
     m_recorder.addFrameEndListener(&m_scheduler);
+    // After the scheduler, so the frame end that runs the replay has already
+    // run it by the time the blend is taken down.
+    m_recorder.addFrameEndListener(&m_interpolator);
     m_recorder.addFrameEndListener(&m_searchFeed);
     m_recorder.addPresentListener(&m_presenter);
+    // The substitution only ever sees the runtime's own replayed draws; the
+    // recorder is what keeps the guest's frames out of its reach.
+    m_recorder.setAssemblyFilter(&m_substitution);
 }
 
 Runtime& Runtime::instance() {

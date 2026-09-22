@@ -52,6 +52,17 @@ class Counters:
     presentsRefusedUnobserved: int
     presentsRefusedBySubmit: int
     nullDiffsCompleted: int
+    nestedListsSeen: int
+    runtimeSubmissions: int
+    runtimePacketsProcessed: int
+    runtimeDrawsIssued: int
+    interpolatedFramesArmed: int
+    interpolatedFramesRefused: int
+    assembliesOffered: int
+    assembliesSubstituted: int
+    assembliesUnarmed: int
+    assembliesUnknownShader: int
+    assembliesTooShort: int
 
     @property
     def recorded_anything(self) -> bool:
@@ -66,13 +77,21 @@ class Counters:
             f"{self.uniformAssembliesFromRuntime} assemblies); last frame held "
             f"{self.lastFrameDisplayLists} lists and "
             f"{self.lastFrameUniformAssemblies} assemblies in {self.lastFrameBytes} bytes; "
+            f"nested lists {self.nestedListsSeen}; "
             f"replays {self.replaysRun} submitting {self.replayListsSubmitted} lists "
-            f"({self.replayListsRefused} refused); presents observed "
+            f"({self.replayListsRefused} refused) in {self.runtimeSubmissions} submissions "
+            f"the command processor walked {self.runtimePacketsProcessed} packets of, "
+            f"issuing {self.runtimeDrawsIssued} draws; presents observed "
             f"{self.presentsObserved} ({self.presentsObservedTv} TV, "
             f"{self.presentsObservedDrc} GamePad), submitted {self.presentsSubmitted} "
             f"({self.presentsRefusedUnobserved} with nothing to send, "
             f"{self.presentsRefusedBySubmit} refused); null diffs "
-            f"{self.nullDiffsCompleted}"
+            f"{self.nullDiffsCompleted}; interpolated frames "
+            f"{self.interpolatedFramesArmed} armed ({self.interpolatedFramesRefused} refused) "
+            f"substituting the view into {self.assembliesSubstituted} of "
+            f"{self.assembliesOffered} replayed assemblies ({self.assembliesUnarmed} with "
+            f"nothing armed, {self.assembliesUnknownShader} not carrying it, "
+            f"{self.assembliesTooShort} too short)"
         )
 
 
@@ -188,6 +207,66 @@ def read_counters(port: int = DEFAULT_PORT, timeout: float = 2.0) -> Counters:
         f"http://127.0.0.1:{port}/counters", payload, Counters.__annotations__, "a counter set"
     )
     return Counters(**{field: int(payload[field]) for field in Counters.__annotations__})
+
+
+@dataclass(frozen=True)
+class OfferedShader:
+    """One shader the blend was armed for, or one a replayed draw used."""
+
+    stageIndex: int
+    baseHash: int
+    auxHash: int
+    floats: int
+    times: int
+    substituted: bool
+
+    def render(self) -> str:
+        where = f"float {self.floats} long" if self.times else f"view at float {self.floats}"
+        seen = f", {self.times} draws" if self.times else ""
+        return (
+            f"stage {self.stageIndex} shader {self.baseHash:016x}:{self.auxHash:016x} "
+            f"({where}{seen})"
+        )
+
+
+@dataclass(frozen=True)
+class Substitution:
+    """The two key sets an interpolated frame needs to agree on."""
+
+    armed: bool
+    blendPoint: float
+    assembliesOffered: int
+    assembliesSubstituted: int
+    slots: tuple[OfferedShader, ...]
+    offered: tuple[OfferedShader, ...]
+
+    def render(self) -> str:
+        headline = (
+            f"armed {self.armed} at t={self.blendPoint}, {self.assembliesSubstituted} of "
+            f"{self.assembliesOffered} replayed assemblies substituted"
+        )
+        lines = [headline, f"  armed for {len(self.slots)} shaders:"]
+        lines += [f"    {slot.render()}" for slot in self.slots[:8]]
+        lines.append(f"  the replay offered {len(self.offered)} distinct shaders:")
+        lines += [f"    {shader.render()}" for shader in self.offered[:8]]
+        if not self.offered:
+            lines.append("    (none: no replayed draw reached a shader at all)")
+        return "\n".join(lines)
+
+
+def read_substitution(port: int = DEFAULT_PORT, timeout: float = 2.0) -> Substitution:
+    """Read /substitution, refusing by reason rather than returning empty."""
+    payload = _get("/substitution", port, timeout)
+    url = f"http://127.0.0.1:{port}/substitution"
+    _require(url, payload, Substitution.__annotations__, "a substitution report")
+    return Substitution(
+        armed=bool(payload["armed"]),
+        blendPoint=float(payload["blendPoint"]),
+        assembliesOffered=int(payload["assembliesOffered"]),
+        assembliesSubstituted=int(payload["assembliesSubstituted"]),
+        slots=tuple(OfferedShader(**shader) for shader in payload["slots"]),
+        offered=tuple(OfferedShader(**shader) for shader in payload["offered"]),
+    )
 
 
 @dataclass(frozen=True)

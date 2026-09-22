@@ -9,6 +9,7 @@ below.
 
 from __future__ import annotations
 
+import json
 import struct
 import urllib.error
 import urllib.request
@@ -117,6 +118,25 @@ def arm_capture(port: int = DEFAULT_PORT, timeout: float = 5.0, slot: int = 0) -
         raise ControlUnavailable(f"{url} did not answer ({unreachable.reason})") from unreachable
 
 
+def arm_interpolated_frame(port: int = DEFAULT_PORT, t: float = 0.5, timeout: float = 5.0) -> int:
+    """Ask the runtime for one frame between the last two: the last frame's
+    geometry replayed with the view blended at `t`. Captured into the same two
+    slots a null diff uses, so slot 0 is the title's frame and slot 1 the
+    interpolated one. Returns how many shaders the blend was written into,
+    which is zero only if the runtime armed without finding the view -- and it
+    refuses rather than doing that."""
+    url = f"http://127.0.0.1:{port}/interpolate?t={t}"
+    request = urllib.request.Request(url, method="POST", data=b"")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return int(json.loads(response.read().decode("utf-8"))["slots"])
+    except urllib.error.HTTPError as refused:
+        body = refused.read().decode("utf-8", "replace").strip()
+        raise ControlUnavailable(f"{url} refused ({refused.code}): {body}") from refused
+    except urllib.error.URLError as unreachable:
+        raise ControlUnavailable(f"{url} did not answer ({unreachable.reason})") from unreachable
+
+
 def arm_null_diff(port: int = DEFAULT_PORT, timeout: float = 5.0, redraw: bool = True) -> bool:
     """Ask the runtime to capture one frame twice: as the title presented it
     and as a replay of that same frame redrew it. Both halves are armed around
@@ -132,3 +152,57 @@ def arm_null_diff(port: int = DEFAULT_PORT, timeout: float = 5.0, redraw: bool =
         raise ControlUnavailable(f"{url} refused ({refused.code}): {body}") from refused
     except urllib.error.URLError as unreachable:
         raise ControlUnavailable(f"{url} did not answer ({unreachable.reason})") from unreachable
+
+
+def bounding_box(before: Image, after: Image) -> str:
+    """Where the differing pixels are. A difference spread over the whole
+    frame and one confined to a small box are different faults, and the
+    numbers alone cannot tell them apart."""
+    width = before.width
+    stride = width * 3
+    minx = miny = None
+    maxx = maxy = -1
+    touched = 0
+    for y in range(before.height):
+        row_a = before.rgb[y * stride : (y + 1) * stride]
+        row_b = after.rgb[y * stride : (y + 1) * stride]
+        if row_a == row_b:
+            continue
+        touched += 1
+        for x in range(width):
+            i = x * 3
+            if row_a[i : i + 3] != row_b[i : i + 3]:
+                minx = x if minx is None else min(minx, x)
+                maxx = max(maxx, x)
+                miny = y if miny is None else min(miny, y)
+                maxy = max(maxy, y)
+    if minx is None:
+        return "nowhere"
+    return (
+        f"x {minx}..{maxx}, y {miny}..{maxy} ({maxx - minx + 1}x{maxy - miny + 1}), "
+        f"{touched} rows touched"
+    )
+
+
+def compare(before: Image, after: Image) -> tuple[int, int, float]:
+    """Differing bytes, the largest single difference, and the mean.
+
+    Reported together because one changed pixel and a different image are
+    both "not identical" and nothing else distinguishes them.
+    """
+    if (before.width, before.height) != (after.width, after.height):
+        raise ControlUnavailable(
+            f"the two captures are {before.width}x{before.height} and "
+            f"{after.width}x{after.height}; a replay that changed the resolution is a "
+            "finding in itself and they cannot be compared byte for byte"
+        )
+    differing = 0
+    largest = 0
+    total = 0
+    for a, b in zip(before.rgb, after.rgb, strict=True):
+        delta = abs(a - b)
+        if delta:
+            differing += 1
+            total += delta
+            largest = max(largest, delta)
+    return differing, largest, total / len(before.rgb)

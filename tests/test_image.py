@@ -6,7 +6,7 @@ import struct
 import zlib
 
 import pytest
-from wiiuport.image import HEADER_BYTES, MAGIC, Image, decode
+from wiiuport.image import HEADER_BYTES, MAGIC, Image, bounding_box, compare, decode
 
 from wiiuport.control import ControlUnavailable
 
@@ -59,3 +59,33 @@ def test_the_png_is_a_png_that_decodes_to_the_same_pixels():
 
 def test_the_header_length_is_the_one_the_runtime_writes():
     assert HEADER_BYTES == 16
+
+
+def solid(width: int, height: int, value: int) -> Image:
+    return Image(width=width, height=height, rgb=bytes([value]) * (width * height * 3))
+
+
+def test_two_identical_images_differ_nowhere():
+    # The measurement a null diff turns on: "no difference" has to be
+    # distinguishable from "never compared", so the box says nowhere rather
+    # than printing an empty range.
+    first = solid(4, 3, 7)
+    second = solid(4, 3, 7)
+    assert compare(first, second) == (0, 0, 0.0)
+    assert bounding_box(first, second) == "nowhere"
+
+
+def test_one_changed_pixel_is_located_and_not_lost_in_the_mean():
+    before = solid(4, 3, 10)
+    after = bytearray(before.rgb)
+    after[(1 * 4 + 2) * 3] = 250
+    changed = Image(width=4, height=3, rgb=bytes(after))
+    differing, largest, mean = compare(before, changed)
+    assert (differing, largest) == (1, 240)
+    assert mean == pytest.approx(240 / 36)
+    assert bounding_box(before, changed) == "x 2..2, y 1..1 (1x1), 1 rows touched"
+
+
+def test_images_of_different_sizes_are_refused_rather_than_zipped_short():
+    with pytest.raises(ControlUnavailable, match="cannot be compared byte for byte"):
+        compare(solid(4, 3, 0), solid(4, 2, 0))

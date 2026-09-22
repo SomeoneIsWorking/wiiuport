@@ -1,6 +1,7 @@
 #include "wiiuport/interp/TransformSearch.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace wiiuport::interp {
@@ -18,9 +19,13 @@ float distanceBetween(const Vec3& a, const Vec3& b) {
     return std::sqrt((dx * dx) + (dy * dy) + (dz * dz));
 }
 
-bool spanMatches(const float* haystack, size_t width, const float* needle) {
+// Where the span sits, or npos. One owner for both questions asked of it:
+// how many shaders carry this value, and where each of them carries it.
+constexpr size_t kNoSpan = static_cast<size_t>(-1);
+
+size_t findSpan(const float* haystack, size_t width, const float* needle) {
     if (width < static_cast<size_t>(Transform3x4::kFloats)) {
-        return false;
+        return kNoSpan;
     }
     for (size_t offset = 0; offset + Transform3x4::kFloats <= width; ++offset) {
         auto same = true;
@@ -31,10 +36,10 @@ bool spanMatches(const float* haystack, size_t width, const float* needle) {
             }
         }
         if (same) {
-            return true;
+            return offset;
         }
     }
-    return false;
+    return kNoSpan;
 }
 
 } // namespace
@@ -55,6 +60,7 @@ void TransformSearch::narrowTo(ShaderState& state, size_t width) {
     state.translationStepSum.resize(width, 0.0);
     state.currentFrame.resize(width, 0.0f);
     state.previousFrame.resize(width, 0.0f);
+    state.frameBeforeLast.resize(width, 0.0f);
 }
 
 void TransformSearch::closeFrame(ShaderState& state) {
@@ -72,6 +78,10 @@ void TransformSearch::closeFrame(ShaderState& state) {
                 distanceBetween(translationAt(&state.currentFrame[offset]),
                                 translationAt(&state.previousFrame[offset]));
         }
+    }
+    if (state.hasPreviousFrame) {
+        state.frameBeforeLast = state.previousFrame;
+        state.hasFrameBeforeLast = true;
     }
     state.previousFrame = state.currentFrame;
     state.hasPreviousFrame = true;
@@ -120,11 +130,40 @@ uint32_t TransformSearch::countShadersSharing(const ShaderKey& exclude, const fl
         if (key == exclude || state.frames == 0) {
             continue;
         }
-        if (spanMatches(state.currentFrame.data(), state.width, values)) {
+        if (findSpan(state.currentFrame.data(), state.width, values) != kNoSpan) {
             count += 1;
         }
     }
     return count;
+}
+
+std::vector<ViewSlot> TransformSearch::viewSlots() const {
+    SearchReport report = search();
+    const TransformCandidate* view = nullptr;
+    for (const auto& candidate : report.candidates) {
+        if (candidate.isShared() && candidate.meanTranslationStep > 0.0f) {
+            view = &candidate;
+            break;
+        }
+    }
+    if (view == nullptr) {
+        return {};
+    }
+    const std::array<float, Transform3x4::kFloats>& values = view->latest.values();
+    std::vector<ViewSlot> slots;
+    for (const auto& [key, state] : m_shaders) {
+        if (!state.hasFrameBeforeLast) {
+            continue;
+        }
+        size_t offset = findSpan(state.currentFrame.data(), state.width, values.data());
+        if (offset == kNoSpan) {
+            continue;
+        }
+        slots.push_back(ViewSlot{key, static_cast<uint32_t>(offset),
+                                 Transform3x4::fromRowMajor(&state.frameBeforeLast[offset]),
+                                 Transform3x4::fromRowMajor(&state.currentFrame[offset])});
+    }
+    return slots;
 }
 
 SearchReport TransformSearch::search() const {

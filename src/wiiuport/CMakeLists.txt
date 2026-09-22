@@ -56,6 +56,10 @@ add_library(wiiuport STATIC
   interp/Transform3x4.h
   interp/TransformSearch.cpp
   interp/TransformSearch.h
+  interp/FrameInterpolator.cpp
+  interp/FrameInterpolator.h
+  interp/TransformSubstitution.cpp
+  interp/TransformSubstitution.h
 )
 
 target_include_directories(wiiuport PUBLIC

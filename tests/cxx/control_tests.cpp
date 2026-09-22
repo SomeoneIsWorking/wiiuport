@@ -40,7 +40,10 @@ struct Fixture {
     wiiuport::frame::FrameCapture capture{&refuseCapture};
     wiiuport::frame::FramePresenter presenter{&refusePresent};
     wiiuport::frame::ReplayScheduler scheduler{replayer, presenter, capture};
-    ControlChannel channel{recorder, replayer, search, input, capture, presenter, scheduler};
+    wiiuport::interp::TransformSubstitution substitution;
+    wiiuport::interp::FrameInterpolator interpolator{search, substitution, scheduler};
+    ControlChannel channel{recorder, replayer,  search,    input,
+                           capture,  presenter, scheduler, interpolator};
 };
 
 bool contains(const std::string& haystack, const std::string& needle) {
@@ -66,6 +69,7 @@ void theCountersFollowTheRecorder() {
     list.physicalAddress = 0x40000000;
     list.data = guest.data();
     list.sizeInBytes = 16;
+    list.topLevel = true;
 
     Fixture fixture;
     fixture.recorder.OnDisplayList(list);
