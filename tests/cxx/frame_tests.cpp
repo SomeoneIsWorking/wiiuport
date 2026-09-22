@@ -266,6 +266,20 @@ void aNestedBufferIsCountedAndNotRecordedTwice() {
     check::equal(observer.displayListsSeen(), uint64_t{2}, "against everything seen");
 }
 
+void aDrawTheRingIssuedIsCountedApartFromOneACommandBufferDid() {
+    // What a recording can hold and what a frame contains are not the same
+    // number, and a replay that reproduces every buffer it was given can
+    // still be a fraction of the frame.
+    RecordingObserver observer;
+    observer.OnGuestDraw(true);
+    observer.OnGuestDraw(false);
+    observer.OnGuestDraw(true);
+    check::equal(observer.guestDrawsFromCommandBuffers(), uint64_t{2},
+                 "draws from a buffer a recording holds are counted");
+    check::equal(observer.guestDrawsFromRing(), uint64_t{1},
+                 "and the ones no recording of buffers can reach are counted apart");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -284,6 +298,7 @@ void runFrameTests() {
     anOversizedSourceListIsCappedNotTrusted();
     whatASubmissionReachedIsSummedRatherThanOverwritten();
     aNestedBufferIsCountedAndNotRecordedTwice();
+    aDrawTheRingIssuedIsCountedApartFromOneACommandBufferDid();
 }
 
 } // namespace wiiuport::tests

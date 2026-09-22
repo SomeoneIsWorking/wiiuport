@@ -159,6 +159,9 @@ std::string ControlChannel::countersJson() const {
     body += ",\"nullDiffPending\":" + std::string(m_scheduler.nullDiffPending() ? "true" : "false");
     body += ",\"presentsRefusedBySubmit\":" + std::to_string(m_presenter.presentsRefusedBySubmit());
     body += ",\"nestedListsSeen\":" + std::to_string(m_recorder.nestedListsSeen());
+    body += ",\"guestDrawsFromCommandBuffers\":" +
+            std::to_string(m_recorder.guestDrawsFromCommandBuffers());
+    body += ",\"guestDrawsFromRing\":" + std::to_string(m_recorder.guestDrawsFromRing());
     body += ",\"runtimeSubmissions\":" + std::to_string(m_recorder.runtimeSubmissions());
     body += ",\"runtimePacketsProcessed\":" + std::to_string(m_recorder.runtimePacketsProcessed());
     body += ",\"runtimeDrawsIssued\":" + std::to_string(m_recorder.runtimeDrawsIssued());
@@ -186,6 +189,7 @@ std::string ControlChannel::transformsJson(size_t limit) const {
     body += ",\"rejectedRotation\":" + std::to_string(report.rejectedRotation);
     body += ",\"candidatesFound\":" + std::to_string(report.candidates.size());
     body += ",\"sharedAndMoving\":" + std::to_string(report.sharedAndMoving);
+    body += ",\"shadersInLastFrame\":" + std::to_string(report.shadersInLastFrame);
     body += ",\"candidates\":[";
     for (size_t i = 0; i < report.candidates.size() && i < limit; ++i) {
         if (i != 0) {

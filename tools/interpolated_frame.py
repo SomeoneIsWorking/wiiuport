@@ -97,7 +97,16 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 report = read_transforms(args.port)
                 before = read_counters(args.port)
-                slots = arm_interpolated_frame(args.port, t=args.t)
+                try:
+                    slots = arm_interpolated_frame(args.port, t=args.t)
+                except ControlUnavailable as refused:
+                    # Printed after the measurements below, not instead of
+                    # them: a refusal without the state it was made in cannot
+                    # be acted on.
+                    print(report.render())
+                    print(read_counters(args.port).render())
+                    print(f"refused: {refused}", file=sys.stderr)
+                    return 1
                 time.sleep(args.settle)
                 after = read_counters(args.port)
                 substitution = read_substitution(args.port)

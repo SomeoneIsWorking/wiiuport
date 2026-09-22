@@ -47,17 +47,34 @@ state with no geometry in it: 36 lists, 532 packets walked, **0 draws issued**. 
 top-level path hooked and nested buffers counted instead of recorded (recording both would
 issue their contents twice), the same replay walks 1,408 packets and issues 36 draws.
 
+## What has been settled since
+
+**The arm no longer hands out stale shaders.** A shader's last values outlive the frame it
+stopped drawing in, so `TransformSearch::viewSlots()` was offering 65 shaders that had carried
+the view at some point. It now offers only shaders that drew in the most recent frame -- the
+frame a replay re-issues -- and `GET /transforms` reports how many that is. The tool's answer
+changed from a silent identical image to `no view transform found yet`, which is the same
+finding stated honestly.
+
+**No draw escapes the recorder's reach.** Every guest draw is now counted by origin, and the
+measurement is unambiguous: **152,215 draws from command buffers, 0 straight from the ring**,
+over 2,290 frames. So the missing pass is not in a path the recorder cannot see; it is in a
+frame window the recorder does not attribute to the frame being replayed.
+
 ## Next discriminator
 
-Two candidates, in order:
+Whether `OnFrameEnd` is at the right boundary, which is now the only candidate left. The
+numbers to explain:
 
-1. Whether `OnFrameEnd` is at the right boundary. 2,511 frames against 5,027 presents is one
-   frame end per swap, but only ~16 top-level buffers land in each, against 62 display lists
-   per frame overall.
-2. Whether the arm should pick a view slot present in the frame that will actually be
-   replayed, rather than the search's global best candidate. `TransformSearch::viewSlots()`
-   currently picks the first shared-and-moving candidate with no reference to the recording
-   the replay will use.
+- 2,290 frame ends against 4,582 presents: one frame end per swap, two scan-buffer copies per
+  frame (TV and GamePad), as expected.
+- 66 draws per frame issued by the title, against 36 in the frame the replay reproduces.
+- 211 shaders tracked, **12 of them drawing in the last frame**, and that 12 is the same small
+  set every time it has been looked at -- not a rotating sample.
 
-Neither is a reason to weaken the gate: `tools/interpolated_frame.py` refuses by naming which
-of the four stages failed, and it is the instrument that found both of these.
+The measurement to make: poll `GET /transforms` across consecutive frames and see whether
+`shadersInLastFrame` alternates between a large and a small set. If it does, the recorder is
+publishing half a frame at a boundary the title does not treat as one.
+
+None of this is a reason to weaken the gate: `tools/interpolated_frame.py` refuses by naming
+which stage failed, and it is the instrument that found every one of these.
