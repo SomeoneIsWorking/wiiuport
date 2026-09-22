@@ -1,6 +1,7 @@
 #include "check.h"
 #include "suites.h"
 #include "wiiuport/frame/FrameRecording.h"
+#include "wiiuport/frame/FrameShapeLog.h"
 #include "wiiuport/frame/RecordingObserver.h"
 
 #include <array>
@@ -280,6 +281,32 @@ void aDrawTheRingIssuedIsCountedApartFromOneACommandBufferDid() {
                  "and the ones no recording of buffers can reach are counted apart");
 }
 
+void theShapeOfEachPublishedFrameIsKeptAndTheOldestDropped() {
+    // A frame's own totals cannot say whether the recorder publishes whole
+    // frames or halves of them. A run of consecutive frames can, which is why
+    // this keeps a window rather than a latest.
+    wiiuport::frame::FrameShapeLog log{2};
+    check::equal(log.shapes().size(), size_t{0}, "nothing published is an empty window");
+
+    for (uint64_t index = 0; index < 3; ++index) {
+        FrameRecording frame;
+        RecordedUniformAssembly one;
+        one.shaderBaseHash = index;
+        one.data = {1.0f};
+        frame.addUniformAssembly(one);
+        RecordedUniformAssembly again = one;
+        frame.addUniformAssembly(again);
+        log.onFrameRecorded(frame);
+    }
+
+    check::equal(log.framesLogged(), uint64_t{3}, "every published frame is counted");
+    check::equal(log.shapes().size(), size_t{2}, "and the window holds the depth asked for");
+    check::equal(log.shapes().front().frameIndex, uint64_t{1}, "oldest first, the oldest dropped");
+    check::equal(log.shapes().back().uniformAssemblies, size_t{2}, "with the draws it held");
+    check::equal(log.shapes().back().distinctShaders, size_t{1},
+                 "and the shaders behind them, which is the number a replay is judged on");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -299,6 +326,7 @@ void runFrameTests() {
     whatASubmissionReachedIsSummedRatherThanOverwritten();
     aNestedBufferIsCountedAndNotRecordedTwice();
     aDrawTheRingIssuedIsCountedApartFromOneACommandBufferDid();
+    theShapeOfEachPublishedFrameIsKeptAndTheOldestDropped();
 }
 
 } // namespace wiiuport::tests

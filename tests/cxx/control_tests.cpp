@@ -42,8 +42,9 @@ struct Fixture {
     wiiuport::frame::ReplayScheduler scheduler{replayer, presenter, capture};
     wiiuport::interp::TransformSubstitution substitution;
     wiiuport::interp::FrameInterpolator interpolator{search, substitution, scheduler};
-    ControlChannel channel{recorder, replayer,  search,    input,
-                           capture,  presenter, scheduler, interpolator};
+    wiiuport::frame::FrameShapeLog shapeLog;
+    ControlChannel channel{recorder,  replayer,  search,       input,   capture,
+                           presenter, scheduler, interpolator, shapeLog};
 };
 
 bool contains(const std::string& haystack, const std::string& needle) {

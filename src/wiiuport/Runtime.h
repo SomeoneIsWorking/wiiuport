@@ -5,6 +5,7 @@
 #include "wiiuport/control/ControlChannel.h"
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FramePresenter.h"
+#include "wiiuport/frame/FrameShapeLog.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/frame/SearchFeed.h"
@@ -72,6 +73,10 @@ class Runtime {
         return m_presenter;
     }
 
+    const frame::FrameShapeLog& shapeLog() const {
+        return m_shapeLog;
+    }
+
     frame::ReplayScheduler& scheduler() {
         return m_scheduler;
     }
@@ -91,11 +96,13 @@ class Runtime {
     frame::ReplayScheduler m_scheduler{m_replayer, m_presenter, m_capture};
     interp::TransformSearch m_search;
     frame::SearchFeed m_searchFeed{m_search};
+    frame::FrameShapeLog m_shapeLog;
     interp::TransformSubstitution m_substitution;
     interp::FrameInterpolator m_interpolator{m_search, m_substitution, m_scheduler};
     input::InputDriver m_input;
-    control::ControlChannel m_control{m_recorder, m_replayer,  m_search,    m_input,
-                                      m_capture,  m_presenter, m_scheduler, m_interpolator};
+    control::ControlChannel m_control{m_recorder,  m_replayer,     m_search,
+                                      m_input,     m_capture,      m_presenter,
+                                      m_scheduler, m_interpolator, m_shapeLog};
     bool m_hooksInstalled{false};
 };
 
