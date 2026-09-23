@@ -312,19 +312,36 @@ std::string ControlChannel::framesJson() const {
 
 namespace {
 
+std::string countsJson(const frame::VertexChanges::Counts& counts) {
+    std::string body = ",\"draws\":" + std::to_string(counts.draws);
+    body += ",\"compared\":" + std::to_string(counts.compared);
+    body += ",\"changed\":" + std::to_string(counts.changed);
+    return body + ",\"bytesHashed\":" + std::to_string(counts.bytesHashed);
+}
+
+std::string shaderJson(const frame::VertexChanges::VertexShader& shader) {
+    return "\"baseHash\":" + std::to_string(shader.baseHash) +
+           ",\"auxHash\":" + std::to_string(shader.auxHash);
+}
+
 std::string vertexChangesJson(
     const std::map<frame::VertexChanges::VertexShader, frame::VertexChanges::Counts>& byShader) {
     std::string body = "[";
-    auto first = true;
     for (const auto& [shader, counts] : byShader) {
-        body += first ? "{" : ",{";
-        first = false;
-        body += "\"baseHash\":" + std::to_string(shader.baseHash);
-        body += ",\"auxHash\":" + std::to_string(shader.auxHash);
-        body += ",\"draws\":" + std::to_string(counts.draws);
-        body += ",\"compared\":" + std::to_string(counts.compared);
-        body += ",\"changed\":" + std::to_string(counts.changed);
-        body += ",\"bytesHashed\":" + std::to_string(counts.bytesHashed) + "}";
+        body += body.size() == 1 ? "{" : ",{";
+        body += shaderJson(shader) + countsJson(counts) + "}";
+    }
+    return body + "]";
+}
+
+std::string attributeChangesJson(
+    const std::map<frame::VertexChanges::Attribute, frame::VertexChanges::Counts>& byAttribute) {
+    std::string body = "[";
+    for (const auto& [attribute, counts] : byAttribute) {
+        body += body.size() == 1 ? "{" : ",{";
+        body += shaderJson(attribute.shader);
+        body += ",\"semanticId\":" + std::to_string(attribute.semanticId);
+        body += ",\"format\":" + std::to_string(attribute.format) + countsJson(counts) + "}";
     }
     return body + "]";
 }
@@ -338,6 +355,7 @@ std::string ControlChannel::drawsJson() const {
     body += ",\"census\":{\"framesAsked\":" + std::to_string(census.framesAsked);
     body += ",\"framesTaken\":" + std::to_string(census.framesTaken);
     body += ",\"withVertexUniforms\":" + vertexChangesJson(census.byShader);
+    body += ",\"attributes\":" + attributeChangesJson(census.byAttribute);
     return body + "}}\n";
 }
 

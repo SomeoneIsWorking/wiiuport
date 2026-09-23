@@ -33,6 +33,7 @@ def _payload(
             "framesAsked": asked,
             "framesTaken": taken,
             "withVertexUniforms": _rows(census_rows),
+            "attributes": [{**row, "semanticId": 0, "format": 0x30} for row in _rows(census_rows)],
         },
     }
 
@@ -77,15 +78,19 @@ def test_a_finished_census_names_what_changed() -> None:
     rendered = census.render()
     assert "over 16 frames, 50 of 300 compared draws that read uniforms (16.7%)" in rendered
     assert "  0000000000000003/0000000000000000: 50 of 200 compared draws changed" in rendered
+    assert (
+        "  0000000000000003/0000000000000000 semantic 0 32_32_32_FLOAT: "
+        "50 of 200 compared draws changed"
+    ) in rendered
 
 
 def test_an_unfinished_census_is_refused() -> None:
     with pytest.raises(ControlUnavailable, match="took 3 of 16 frames"):
-        VertexCensus(16, 3, {}).render()
+        VertexCensus(16, 3, {}, {}).render()
     with pytest.raises(ControlUnavailable, match="took 0 of 0 frames"):
-        VertexCensus(0, 0, {}).render()
+        VertexCensus(0, 0, {}, {}).render()
 
 
 def test_a_census_that_compared_nothing_is_refused() -> None:
     with pytest.raises(ControlUnavailable, match="compared no draw"):
-        VertexCensus(2, 2, {}).render()
+        VertexCensus(2, 2, {}, {}).render()

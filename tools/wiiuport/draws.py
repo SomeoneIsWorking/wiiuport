@@ -24,6 +24,30 @@ from wiiuport.control import DEFAULT_PORT, ControlUnavailable, request_bytes, re
 RANKED_SHADERS = 8
 
 Shader = tuple[int, int]
+# (base hash, aux hash, semantic id, Latte data format).
+Attribute = tuple[int, int, int, int]
+
+# Latte's vertex data formats (LatteReg.h), by the value the fork reports.
+FORMAT_NAMES = {
+    0x01: "8",
+    0x05: "16",
+    0x06: "16_FLOAT",
+    0x07: "8_8",
+    0x0D: "32",
+    0x0E: "32_FLOAT",
+    0x0F: "16_16",
+    0x10: "16_16_FLOAT",
+    0x19: "2_10_10_10",
+    0x1A: "8_8_8_8",
+    0x1D: "32_32",
+    0x1E: "32_32_FLOAT",
+    0x1F: "16_16_16_16",
+    0x20: "16_16_16_16_FLOAT",
+    0x22: "32_32_32_32",
+    0x23: "32_32_32_32_FLOAT",
+    0x2F: "32_32_32",
+    0x30: "32_32_32_FLOAT",
+}
 
 
 @dataclass(frozen=True)
@@ -47,19 +71,39 @@ class ShaderDraws:
 NO_DRAWS = ShaderDraws(0, 0, 0, 0)
 
 
+COUNT_FIELDS = ("baseHash", "auxHash", "draws", "compared", "changed", "bytesHashed")
+
+
+def _parse_counts(row: dict) -> ShaderDraws:
+    return ShaderDraws(
+        int(row["draws"]), int(row["compared"]), int(row["changed"]), int(row["bytesHashed"])
+    )
+
+
 def _parse_shaders(url: str, rows: list) -> dict[Shader, ShaderDraws]:
     by_shader = {}
     for row in rows:
-        require_fields(
-            url,
-            row,
-            ("baseHash", "auxHash", "draws", "compared", "changed", "bytesHashed"),
-            "a shader's draws",
-        )
-        by_shader[(int(row["baseHash"]), int(row["auxHash"]))] = ShaderDraws(
-            int(row["draws"]), int(row["compared"]), int(row["changed"]), int(row["bytesHashed"])
-        )
+        require_fields(url, row, COUNT_FIELDS, "a shader's draws")
+        by_shader[(int(row["baseHash"]), int(row["auxHash"]))] = _parse_counts(row)
     return by_shader
+
+
+def _parse_attributes(url: str, rows: list) -> dict[Attribute, ShaderDraws]:
+    by_attribute = {}
+    for row in rows:
+        require_fields(url, row, (*COUNT_FIELDS, "semanticId", "format"), "an attribute's draws")
+        key = (
+            int(row["baseHash"]),
+            int(row["auxHash"]),
+            int(row["semanticId"]),
+            int(row["format"]),
+        )
+        by_attribute[key] = _parse_counts(row)
+    return by_attribute
+
+
+def _format_name(format_id: int) -> str:
+    return FORMAT_NAMES.get(format_id, f"format 0x{format_id:02x}")
 
 
 def _render_shaders(by_shader: dict[Shader, ShaderDraws]) -> list[str]:
@@ -95,6 +139,8 @@ class VertexCensus:
     framesAsked: int
     framesTaken: int
     byShader: dict[Shader, ShaderDraws]
+    # The same draws by attribute: which of their values were rewritten.
+    byAttribute: dict[Attribute, ShaderDraws]
 
     @property
     def complete(self) -> bool:
@@ -119,7 +165,16 @@ class VertexCensus:
                 f"{len(self.byShader)} vertex shaders:"
             )
         ]
-        return "\n".join(lines + _render_shaders(self.byShader))
+        lines += _render_shaders(self.byShader)
+        changing = sorted(self.byAttribute.items(), key=lambda row: row[1].changed, reverse=True)
+        changing = [row for row in changing if row[1].changed > 0]
+        lines.append("attributes most changed:" if changing else "attributes most changed: (none)")
+        lines += [
+            f"  {base:016x}/{aux:016x} semantic {semantic} {_format_name(format_id)}: "
+            f"{draws.changed} of {draws.compared} compared draws changed"
+            for (base, aux, semantic, format_id), draws in changing[:RANKED_SHADERS]
+        ]
+        return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -137,7 +192,10 @@ class Draws:
         )
         census = payload["census"]
         require_fields(
-            url, census, ("framesAsked", "framesTaken", "withVertexUniforms"), "a vertex census"
+            url,
+            census,
+            ("framesAsked", "framesTaken", "withVertexUniforms", "attributes"),
+            "a vertex census",
         )
         return cls(
             int(payload["guestDrawsPrepared"]),
@@ -146,6 +204,7 @@ class Draws:
                 int(census["framesAsked"]),
                 int(census["framesTaken"]),
                 _parse_shaders(url, census["withVertexUniforms"]),
+                _parse_attributes(url, census["attributes"]),
             ),
         )
 
