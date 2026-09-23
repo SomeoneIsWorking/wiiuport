@@ -136,6 +136,7 @@ FrameState ObjectPlanner::frameState(const ShaderKey& shader) const {
 
 void ObjectPlanner::Plan::clear() {
     blendedAt.clear();
+    partnerAt.clear();
     floats.clear();
     outcomeOf.clear();
     outcomes = {};
@@ -147,6 +148,7 @@ void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
     // two back.
     size_t entry = m_building.add(assembly, m_framesHeld >= 2 ? &m_frames[1] : nullptr);
     m_buildingPlan.blendedAt.push_back(kNotBlended);
+    m_buildingPlan.partnerAt.push_back(kNotBlended);
     // Planned only against two whole frames; before that the frame is kept
     // as history, and its entries read as unmatched in a plan never ready.
     Outcome outcome = m_framesHeld >= 2 ? plan(entry) : Outcome::Unmatched;
@@ -425,7 +427,19 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     m_valuesNotBlended += notBlended;
     m_valuesAlternating += alternating;
     m_buildingPlan.blendedAt[entry] = static_cast<uint32_t>(start);
+    m_buildingPlan.partnerAt[entry] = static_cast<uint32_t>(*found->partner);
     return Outcome::Blended;
+}
+
+std::optional<size_t> ObjectPlanner::partnerOf(size_t entry) const {
+    if (entry >= m_plan.partnerAt.size()) {
+        return std::nullopt;
+    }
+    uint32_t at = m_plan.partnerAt[entry];
+    if (at == kNotBlended) {
+        return std::nullopt;
+    }
+    return at;
 }
 
 std::span<const float> ObjectPlanner::blendOf(size_t entry) const {

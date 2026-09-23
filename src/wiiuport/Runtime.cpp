@@ -42,12 +42,16 @@ Runtime::Runtime()
     // frame first, and the continuous interpolator last, because it needs the
     // view tracker and the object blend to have taken this frame in.
     m_recorder.addAssemblyRecordedListener(&m_objectBlend);
+    m_recorder.addAssemblyRecordedListener(&m_vertexBlend);
+    m_recorder.addDrawRecordedListener(&m_vertexBlend);
     m_recorder.addDisplayedListener(&m_pacing);
     m_recorder.addFrameEndListener(&m_searchFeed);
     m_recorder.addFrameEndListener(&m_shapeLog);
     m_recorder.addFrameEndListener(&m_viewTracker);
     m_recorder.addFrameEndListener(&m_snapshot);
     m_recorder.addFrameEndListener(&m_objectBlend);
+    // After the object blend, whose frame count dates the vertices kept.
+    m_recorder.addFrameEndListener(&m_vertexBlend);
     m_recorder.addFrameEndListener(&m_continuous);
     // Frame shown, after the guest's swap: the one-shots.
     m_recorder.addFrameShownListener(&m_scheduler);
@@ -58,6 +62,7 @@ Runtime::Runtime()
     // The blends only ever see the runtime's own replayed draws; the recorder
     // is what keeps the guest's frames out of their reach.
     m_recorder.setAssemblyFilter(&m_replayBlend);
+    m_recorder.setVertexFilter(&m_vertexBlend);
 }
 
 Runtime& Runtime::instance() {

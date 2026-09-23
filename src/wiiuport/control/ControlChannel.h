@@ -17,6 +17,7 @@
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/RestoreCheck.h"
 #include "wiiuport/interp/TransformSearch.h"
+#include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
 
 #include <cstddef>
@@ -64,6 +65,7 @@ class ControlChannel {
         interp::ContinuousInterpolator& continuous;
         interp::RestoreCheck& restoreCheck;
         interp::ObjectBlend& objects;
+        const interp::VertexBlend& vertices;
         frame::RecordingSnapshot& snapshot;
         frame::PresentPacing& pacing;
         frame::VertexChanges& vertexChanges;
@@ -125,6 +127,10 @@ class ControlChannel {
     // not, why -- with the tracker, phase-time and withheld-packet counts beside
     // it, so a run that never interpolated says so in numbers.
     std::string interpolationJson() const;
+    // interpolationJson's fields for the replayed draws whose vertices the
+    // title rewrote: by what blending them came to, over the runtime's draws
+    // that could take new vertices, with what keeping and blending cost.
+    std::string verticesJson() const;
 
     // Which capture slot a query names, defaulting to the first.
     static size_t requestedSlot(const std::string& query);
@@ -162,6 +168,7 @@ class ControlChannel {
     interp::ContinuousInterpolator& m_continuous;
     interp::RestoreCheck& m_restoreCheck;
     interp::ObjectBlend& m_objects;
+    const interp::VertexBlend& m_vertices;
     frame::RecordingSnapshot& m_snapshot;
     frame::PresentPacing& m_pacing;
     frame::VertexChanges& m_vertexChanges;

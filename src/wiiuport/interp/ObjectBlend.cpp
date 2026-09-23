@@ -107,6 +107,7 @@ bool ObjectBlend::armOnce() {
         m_outcomes[outcome] += planned[outcome];
     }
     m_replayCursor = 0;
+    ++m_armings;
     m_armed = true;
     return true;
 }

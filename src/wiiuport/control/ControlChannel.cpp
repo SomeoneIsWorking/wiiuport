@@ -111,8 +111,8 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_scheduler(sources.scheduler), m_interpolator(sources.interpolator),
       m_shapeLog(sources.shapeLog), m_viewTracker(sources.viewTracker),
       m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
-      m_objects(sources.objects), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
-      m_vertexChanges(sources.vertexChanges) {
+      m_objects(sources.objects), m_vertices(sources.vertices), m_snapshot(sources.snapshot),
+      m_pacing(sources.pacing), m_vertexChanges(sources.vertexChanges) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -359,6 +359,26 @@ std::string ControlChannel::drawsJson() const {
     return body + "}}\n";
 }
 
+std::string ControlChannel::verticesJson() const {
+    std::string body = ",\"vertexDraws\":{";
+    for (size_t index = 0; index < interp::kVertexOutcomeCount; ++index) {
+        auto outcome = static_cast<interp::VertexOutcome>(index);
+        body += index == 0 ? "\"" : ",\"";
+        body += std::string(interp::vertexOutcomeName(outcome)) +
+                "\":" + std::to_string(m_vertices.draws(outcome));
+    }
+    body += "}";
+    body += ",\"runtimeDrawsReplaceable\":" + std::to_string(m_recorder.runtimeDrawsReplaceable());
+    body += ",\"runtimeDrawsReplaced\":" + std::to_string(m_recorder.runtimeDrawsReplaced());
+    body += ",\"vertexReplaysDiverged\":" + std::to_string(m_vertices.replaysDiverged());
+    body += ",\"vertexReplaysUnaligned\":" + std::to_string(m_vertices.replaysUnaligned());
+    body += ",\"vertexBytesCopied\":" + std::to_string(m_vertices.bytesCopied());
+    body += ",\"vertexCopyingNanoseconds\":" + std::to_string(m_vertices.copying().count());
+    body += ",\"vertexBlendingNanoseconds\":" + std::to_string(m_vertices.blending().count());
+    body += ",\"vertexWaitingNanoseconds\":" + std::to_string(m_vertices.waiting().count());
+    return body;
+}
+
 std::string ControlChannel::interpolationJson() const {
     using Skip = interp::ContinuousInterpolator::Skip;
     std::string body = "{";
@@ -413,6 +433,7 @@ std::string ControlChannel::interpolationJson() const {
     body += ",\"objectPlanningBusyNanoseconds\":" + std::to_string(objects.planningBusy().count());
     body += ",\"objectFrameEndPlanningNanoseconds\":" +
             std::to_string(objects.frameEndPlanning().count());
+    body += verticesJson();
     frame::PresentPacing::Summary pacing = m_pacing.summary();
     body += ",\"pacing\":{\"guestFrames\":" + std::to_string(pacing.guestFrames);
     body += ",\"runtimeFrames\":" + std::to_string(pacing.runtimeFrames);

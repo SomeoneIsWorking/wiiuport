@@ -293,13 +293,20 @@ LatteFrameHooks::DrawPrepared preparedDraw(uint64_t vertexShader, bool vertexUni
     return draw;
 }
 
+// Hands a draw to the observer as the fork does, with nowhere for new
+// vertices to go.
+void prepare(RecordingObserver& observer, const LatteFrameHooks::DrawPrepared& draw) {
+    LatteFrameHooks::VertexReplacements replacements;
+    observer.OnDrawPrepared(draw, replacements);
+}
+
 void aDrawWhoseVertexShaderReadsNoUniformsIsCountedAsOneNoBlendMoves() {
     RecordingObserver observer;
-    observer.OnDrawPrepared(preparedDraw(0x1, true, false));
-    observer.OnDrawPrepared(preparedDraw(0x2, false, false));
+    prepare(observer, preparedDraw(0x1, true, false));
+    prepare(observer, preparedDraw(0x2, false, false));
     // The runtime's own replay draws the same frame again; it is not the
     // title's.
-    observer.OnDrawPrepared(preparedDraw(0x2, false, true));
+    prepare(observer, preparedDraw(0x2, false, true));
     check::equal(observer.guestDrawsPrepared(), uint64_t{2}, "the title's draws are counted");
     check::equal(observer.guestDrawsWithoutVertexUniforms(), uint64_t{1},
                  "and the one placed by vertex data alone apart");
@@ -313,7 +320,7 @@ void drawVertices(RecordingObserver& observer, uint64_t shader, bool vertexUnifo
     LatteFrameHooks::DrawPrepared prepared = preparedDraw(shader, vertexUniforms, false);
     prepared.vertexBuffers[0] = {vertices.data(), sizeof(vertices)};
     prepared.vertexBufferCount = 1;
-    observer.OnDrawPrepared(prepared);
+    prepare(observer, prepared);
 }
 
 void aDrawWhoseVertexBytesTheTitleRewroteIsCountedAsChanged() {
@@ -387,7 +394,7 @@ void aCensusNamesTheAttributeTheTitleRewrote() {
         prepared.vertexAttributes[0] = {0, 0, 12, 0x30, 2, 0, false};
         prepared.vertexAttributes[1] = {0, 12, 4, 0x1A, 2, 1, false};
         prepared.vertexAttributeCount = 2;
-        observer.OnDrawPrepared(prepared);
+        prepare(observer, prepared);
         observer.OnFrameComplete();
     }
     auto byAttribute = observer.vertexChanges().census().byAttribute;
