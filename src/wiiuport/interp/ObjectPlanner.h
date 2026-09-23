@@ -92,16 +92,6 @@ class ObjectPlanner {
         return m_frames[0];
     }
 
-    // N-1, the frame partners are drawn in.
-    const KeyedFrame& previous() const {
-        return m_frames[1];
-    }
-
-    // N-2, the frame that checks the partners.
-    const KeyedFrame& twoBack() const {
-        return m_frames[2];
-    }
-
     // The values N's entry is drawn with in the in-between frame; empty when
     // it is drawn as the title drew it.
     std::span<const float> blendOf(size_t entry) const;

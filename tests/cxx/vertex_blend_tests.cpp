@@ -372,6 +372,8 @@ void anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore() {
 // frame's parity, as the title double-buffers it.
 constexpr uint32_t kSkyBlock = 0xf4003000;
 constexpr uint32_t kSkyBlockB = 0xf4083000;
+// A block of the frame before that no other frame sources.
+constexpr uint32_t kOtherBlock = 0xf4005000;
 
 void cloudsTheTitleReordersAreBlendedFromTheCloudTheyPassed() {
     // Two clouds drawn with the same uniforms from the same double-buffered
@@ -395,6 +397,30 @@ void cloudsTheTitleReordersAreBlendedFromTheCloudTheyPassed() {
     check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{2}, "both blended");
     check::equal(blends.vertices.partnersFoundByVertices(), uint64_t{2},
                  "each partner found by its vertices");
+}
+
+void aMeshTheTitleDrewUnderOtherBlocksAFrameBeforeIsBlendedFromThere() {
+    // Two meshes drawn with the same uniforms from the same double-buffered
+    // block, told apart only by their place. A frame before, the draws that
+    // block names hold other meshes far off, and the title drew these two
+    // later under a block of their own, as it drew a world-space mesh a
+    // frame before at the pier.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    blends.record(GuestFrame({{kSkyBlock, {1.0f}, {90.0f}}, {kSkyBlock, {1.0f}, {490.0f}}}));
+    blends.record(GuestFrame({{kSkyBlockB, {2.0f}, {95.0f}}, {kSkyBlockB, {2.0f}, {495.0f}}}));
+    blends.record(GuestFrame({{kSkyBlock, {3.0f}, {100.0f}}, {kSkyBlock, {3.0f}, {500.0f}}}));
+    blends.record(GuestFrame({{kSkyBlockB, {3.0f}, {900.0f}},
+                              {kSkyBlockB, {3.0f}, {1300.0f}},
+                              {kOtherBlock, {3.0f}, {101.0f}},
+                              {kOtherBlock, {3.0f}, {501.0f}}}));
+    GuestFrame latest({{kSkyBlock, {3.0f}, {102.0f}}, {kSkyBlock, {3.0f}, {502.0f}}});
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 101.5f,
+                 "the first mesh is drawn from its draw under the other block");
+    check::equal(drawn[1][0], 501.5f, "and the second");
+    check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{2}, "both blended");
 }
 
 void cloudsReorderedSinceTwoFramesBackAreBlendedFromTheirOwn() {
@@ -548,6 +574,7 @@ void runVertexBlendTests() {
     anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore();
     cloudsTheTitleReordersAreBlendedFromTheCloudTheyPassed();
     cloudsReorderedSinceTwoFramesBackAreBlendedFromTheirOwn();
+    aMeshTheTitleDrewUnderOtherBlocksAFrameBeforeIsBlendedFromThere();
     aCloudIsToldFromOneBesideItByWhatItKeeps();
     aCloudThatHappensToStandHalfWayIsNotTakenForAnother();
     aCloudNoSiblingPassedIsDrawnAsTheTitleDrewIt();
