@@ -324,33 +324,34 @@ void VertexBlend::startBlending() {
     }
     // The plan is the latest frame's until the next frame ends: read here,
     // not on the blending thread, which the next frame's end does not wait
-    // for before planning goes on.
+    // for before planning goes on. A mesh is drawn alike by every draw that
+    // reads it, the first with a partner deciding for all: passes over one
+    // mesh drawn differently tear it, as a shadow volume's passes did.
+    std::map<std::pair<std::vector<size_t>, VertexLayout>, Job> meshes;
     for (size_t index = 0; index < m_latest.draws.size(); ++index) {
         const Draw& drawn = m_latest.draws[index];
         if (!drawn.vertexEntry.has_value()) {
             continue;
         }
-        std::optional<size_t> partnerEntry = m_objects.planner().partnerOf(*drawn.vertexEntry);
-        if (!partnerEntry.has_value()) {
-            m_drawBlends[index] = PairBlend{VertexOutcome::NoPartner, 0};
+        std::variant<Job, VertexOutcome> planned = planDraw(index);
+        if (const Job* job = std::get_if<Job>(&planned)) {
+            meshes.try_emplace({drawn.bufferStarts, drawn.layout}, *job);
+        } else {
+            m_drawBlends[index] = PairBlend{std::get<VertexOutcome>(planned), 0};
+        }
+    }
+    for (size_t index = 0; index < m_latest.draws.size(); ++index) {
+        const Draw& drawn = m_latest.draws[index];
+        if (!drawn.vertexEntry.has_value()) {
             continue;
         }
-        // A partner is planned only with the object's entry two frames back.
-        std::optional<size_t> earlierEntry = m_objects.planner().earlierOf(*drawn.vertexEntry);
-        std::optional<size_t> partner = drawOf(m_previous, *partnerEntry, drawn);
-        std::optional<size_t> earlier;
-        if (earlierEntry.has_value()) {
-            earlier = drawOf(m_twoBack, *earlierEntry, drawn);
+        auto mesh = meshes.find({drawn.bufferStarts, drawn.layout});
+        if (mesh != meshes.end()) {
+            Job job = mesh->second;
+            job.draw = index;
+            m_jobs.push_back(job);
+            m_drawBlends[index].reset();
         }
-        if (!partner.has_value() || !earlier.has_value()) {
-            m_drawBlends[index] = PairBlend{VertexOutcome::ShapeDiffers, 0};
-            continue;
-        }
-        const ObjectPlanner& planner = m_objects.planner();
-        PartnerIdentity identity = planner.latest().sharesKey(*drawn.vertexEntry)
-                                       ? PartnerIdentity::ByPlace
-                                       : PartnerIdentity::ByBlocks;
-        m_jobs.push_back({index, *partner, *earlier, identity});
     }
     if (m_jobs.empty()) {
         m_blendedThrough.store(m_latest.draws.size(), std::memory_order_release);
@@ -360,6 +361,29 @@ void VertexBlend::startBlending() {
     std::lock_guard lock(m_mutex);
     m_jobHandedOver = true;
     m_handedOver.notify_one();
+}
+
+std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index) const {
+    const Draw& drawn = m_latest.draws[index];
+    const ObjectPlanner& planner = m_objects.planner();
+    std::optional<size_t> partnerEntry = planner.partnerOf(*drawn.vertexEntry);
+    if (!partnerEntry.has_value()) {
+        return VertexOutcome::NoPartner;
+    }
+    // A partner is planned only with the object's entry two frames back.
+    std::optional<size_t> earlierEntry = planner.earlierOf(*drawn.vertexEntry);
+    std::optional<size_t> partner = drawOf(m_previous, *partnerEntry, drawn);
+    std::optional<size_t> earlier;
+    if (earlierEntry.has_value()) {
+        earlier = drawOf(m_twoBack, *earlierEntry, drawn);
+    }
+    if (!partner.has_value() || !earlier.has_value()) {
+        return VertexOutcome::ShapeDiffers;
+    }
+    PartnerIdentity identity = planner.latest().sharesKey(*drawn.vertexEntry)
+                                   ? PartnerIdentity::ByPlace
+                                   : PartnerIdentity::ByBlocks;
+    return Job{index, *partner, *earlier, identity};
 }
 
 std::optional<size_t> VertexBlend::drawOf(const Frame& frame, size_t entry, const Draw& drawn) {

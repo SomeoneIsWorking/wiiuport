@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -226,6 +227,9 @@ struct ActorDraw {
     uint32_t block;
     std::vector<float> uniforms;
     std::vector<float> mesh;
+    // The earlier draw of the frame whose buffer it reads, as a second pass
+    // over one mesh does; its own `mesh` is then that draw's.
+    std::optional<size_t> passOver{};
 };
 
 // Where a guest's draw keeps its mesh: each frame's vertices in their own
@@ -243,6 +247,11 @@ struct GuestFrame {
             }
             meshes.push_back(std::move(bytes));
         }
+    }
+
+    // The buffer the draw at `index` reads.
+    const std::vector<std::byte>& meshOf(size_t index) const {
+        return meshes[draws[index].passOver.value_or(index)];
     }
 };
 
@@ -278,7 +287,7 @@ struct Blends {
             RecordedUniformAssembly assembly = assemblyOf(frame.draws[index]);
             objects.onAssemblyRecorded(assembly);
             vertices.onAssemblyRecorded(assembly);
-            vertices.onDrawRecorded(preparedOf(frame.meshes[index], false));
+            vertices.onDrawRecorded(preparedOf(frame.meshOf(index), false));
             recording.addUniformAssembly(assembly);
         }
         objects.onFrameRecorded(recording);
@@ -303,10 +312,10 @@ struct Blends {
             assembly.fromRuntime = true;
             objects.apply(assembly);
             LatteFrameHooks::VertexReplacements replacements;
-            vertices.onRuntimeDraw(preparedOf(frame.meshes[index], true), replacements);
+            vertices.onRuntimeDraw(preparedOf(frame.meshOf(index), true), replacements);
             const auto* bytes = static_cast<const std::byte*>(replacements.data[0] != nullptr
                                                                   ? replacements.data[0]
-                                                                  : frame.meshes[index].data());
+                                                                  : frame.meshOf(index).data());
             std::vector<float> mesh(draw.mesh.size());
             for (size_t value = 0; value < mesh.size(); ++value) {
                 mesh[value] =
@@ -348,6 +357,24 @@ void aWalkingActorsMeshIsDrawnBetweenItsPartnersAndItsOwn() {
     check::equal(byShader[0].draws[static_cast<size_t>(VertexOutcome::NoPartner)], uint64_t{1},
                  "and the one with no partner");
     check::equal(blends.vertices.replaysDiverged(), uint64_t{0}, "the replay kept in step");
+}
+
+void everyPassOverAMeshDrawsItAlike() {
+    // The walker's mesh is drawn twice at N, the second pass from uniforms
+    // of its own that no frame before drew, so it has no partner. Drawing
+    // that pass at N beside the first pass half way tore the mesh: a shadow
+    // volume's passes disagreeing drew a shadow on the water that neither
+    // of the title's frames had.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    blends.record(GuestFrame({{kBlockA, {0.0f, 7.0f}, {10.0f}}}));
+    blends.record(GuestFrame({{kBlockB, {1.0f, 7.0f}, {12.0f}}}));
+    GuestFrame latest({{kBlockA, {2.0f, 7.0f}, {14.0f}}, {kOtherA, {9.0f}, {14.0f}, 0}});
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 13.0f, "the first pass draws the mesh half way");
+    check::equal(drawn[1][0], 13.0f, "and so does the pass with no partner of its own");
+    check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{2}, "both blended");
 }
 
 void anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore() {
@@ -572,6 +599,7 @@ void runVertexBlendTests() {
     aMeshBackWhereItStoodTwoFramesAgoIsHeld();
     aWalkingActorsMeshIsDrawnBetweenItsPartnersAndItsOwn();
     anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore();
+    everyPassOverAMeshDrawsItAlike();
     cloudsTheTitleReordersAreBlendedFromTheCloudTheyPassed();
     cloudsReorderedSinceTwoFramesBackAreBlendedFromTheirOwn();
     aMeshTheTitleDrewUnderOtherBlocksAFrameBeforeIsBlendedFromThere();
