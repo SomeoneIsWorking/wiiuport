@@ -284,19 +284,65 @@ void aDrawTheRingIssuedIsCountedApartFromOneACommandBufferDid() {
                  "and the ones no recording of buffers can reach are counted apart");
 }
 
+LatteFrameHooks::DrawPrepared preparedDraw(uint64_t vertexShader, bool vertexUniforms,
+                                           bool fromRuntime) {
+    LatteFrameHooks::DrawPrepared draw{};
+    draw.vertexShaderBaseHash = vertexShader;
+    draw.vertexUniforms = vertexUniforms;
+    draw.fromRuntime = fromRuntime;
+    return draw;
+}
+
 void aDrawWhoseVertexShaderReadsNoUniformsIsCountedAsOneNoBlendMoves() {
     RecordingObserver observer;
-    observer.OnDrawPrepared({0x1, 0, true, false});
-    observer.OnDrawPrepared({0x2, 0, false, false});
+    observer.OnDrawPrepared(preparedDraw(0x1, true, false));
+    observer.OnDrawPrepared(preparedDraw(0x2, false, false));
     // The runtime's own replay draws the same frame again; it is not the
     // title's.
-    observer.OnDrawPrepared({0x2, 0, false, true});
+    observer.OnDrawPrepared(preparedDraw(0x2, false, true));
     check::equal(observer.guestDrawsPrepared(), uint64_t{2}, "the title's draws are counted");
     check::equal(observer.guestDrawsWithoutVertexUniforms(), uint64_t{1},
                  "and the one placed by vertex data alone apart");
-    auto byShader = observer.guestDrawsWithoutVertexUniformsByShader();
+    auto byShader = observer.uniformlessDraws().byShader();
     check::equal(byShader.size(), size_t{1}, "under its own vertex shader");
-    check::equal(byShader[{0x2, 0}], uint64_t{1}, "once");
+    check::equal(byShader[{0x2, 0}].draws, uint64_t{1}, "once");
+}
+
+void aUniformlessDrawWhoseVertexBytesChangeIsCountedAsMoving() {
+    RecordingObserver observer;
+    // Two shaders drawing twice a frame: one's second draw is rewritten each
+    // frame, the other's are the same bytes every frame.
+    std::array<float, 4> still{1.0f, 2.0f, 3.0f, 4.0f};
+    std::array<float, 4> moving{1.0f, 2.0f, 3.0f, 4.0f};
+    auto draw = [&observer](uint64_t shader, const std::array<float, 4>& vertices) {
+        LatteFrameHooks::DrawPrepared prepared = preparedDraw(shader, false, false);
+        prepared.vertexBuffers[0] = {vertices.data(), sizeof(vertices)};
+        prepared.vertexBufferCount = 1;
+        observer.OnDrawPrepared(prepared);
+    };
+    for (int frame = 0; frame < 3; ++frame) {
+        moving[0] = static_cast<float>(frame);
+        draw(0x1, still);
+        draw(0x1, moving);
+        draw(0x2, still);
+        draw(0x2, still);
+        // The same bytes a third time, in a frame the shader draws once more.
+        if (frame == 2) {
+            draw(0x2, still);
+        }
+        observer.OnFrameComplete();
+    }
+    auto byShader = observer.uniformlessDraws().byShader();
+    check::equal(byShader[{0x1, 0}].draws, uint64_t{6}, "every draw is counted");
+    check::equal(byShader[{0x1, 0}].changed, uint64_t{2},
+                 "the rewritten draw changed in each frame after the first");
+    check::equal(byShader[{0x1, 0}].unmatched, uint64_t{2},
+                 "the first frame has nothing before it");
+    check::equal(byShader[{0x2, 0}].changed, uint64_t{0}, "the same bytes are not a change");
+    check::equal(byShader[{0x2, 0}].unmatched, uint64_t{3},
+                 "and a draw with no same draw a frame before is not compared with another");
+    check::equal(byShader[{0x2, 0}].bytesHashed, uint64_t{7 * sizeof(still)},
+                 "what telling cost is the bytes read");
 }
 
 void theShapeOfEachPublishedFrameIsKeptAndTheOldestDropped() {
@@ -345,6 +391,7 @@ void runFrameTests() {
     aNestedBufferIsCountedAndNotRecordedTwice();
     aDrawTheRingIssuedIsCountedApartFromOneACommandBufferDid();
     aDrawWhoseVertexShaderReadsNoUniformsIsCountedAsOneNoBlendMoves();
+    aUniformlessDrawWhoseVertexBytesChangeIsCountedAsMoving();
     theShapeOfEachPublishedFrameIsKeptAndTheOldestDropped();
 }
 
