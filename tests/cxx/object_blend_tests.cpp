@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -35,6 +36,15 @@ struct Draw {
     uint32_t block;
     std::vector<float> values;
     uint64_t shader{kActorShader};
+    // A second block at an address the title allocated for this frame alone.
+    uint32_t freshBlock{0};
+
+    std::vector<uint32_t> sources() const {
+        if (freshBlock == 0) {
+            return {1, block};
+        }
+        return {1, block, 2, freshBlock};
+    }
 };
 
 FrameRecording frameOf(const std::vector<Draw>& draws) {
@@ -42,7 +52,7 @@ FrameRecording frameOf(const std::vector<Draw>& draws) {
     for (const Draw& draw : draws) {
         RecordedUniformAssembly assembly;
         assembly.shaderBaseHash = draw.shader;
-        assembly.blockSources = {1, draw.block};
+        assembly.blockSources = draw.sources();
         assembly.data = draw.values;
         frame.addUniformAssembly(assembly);
     }
@@ -52,16 +62,16 @@ FrameRecording frameOf(const std::vector<Draw>& draws) {
 // One replayed draw as the renderer hands it over: its own buffer, sourced
 // from the block the guest's frame N drew it from.
 struct ReplayedDraw {
-    std::array<uint32_t, 2> sources;
+    std::vector<uint32_t> sources;
     std::vector<float> values;
     LatteFrameHooks::UniformAssembly assembly{};
 
-    explicit ReplayedDraw(const Draw& draw) : sources{1, draw.block}, values(draw.values) {
+    explicit ReplayedDraw(const Draw& draw) : sources(draw.sources()), values(draw.values) {
         assembly.shaderBaseHash = draw.shader;
         assembly.data = values.data();
         assembly.sizeInBytes = static_cast<uint32_t>(values.size() * sizeof(float));
         assembly.blockAddresses = sources.data();
-        assembly.blockAddressCount = 1;
+        assembly.blockAddressCount = static_cast<uint32_t>(sources.size() / 2);
         assembly.fromRuntime = true;
     }
 };
@@ -302,16 +312,71 @@ void aFrameOfManyDrawsIsPlannedWhileItIsDrawn() {
                  "the last one handed over too");
 }
 
-void aBlendThatWouldNotLieBetweenItsNeighboursIsNotDrawn() {
-    // The partner lands exactly at the tolerance, three quarters of the way
-    // along: the blend at 0.75 of N-2..N is then the partner itself, which is
-    // N-1 again and not a frame between N-1 and N.
-    std::vector<Draw> latest{{kBlockA, {2.0f, 7.0f}}};
+void aBlendIsTakenFromItsPartnerNotAssumedSteady() {
+    // Slowing down: two thirds of the way by N-1. Its midpoint lands within
+    // the tolerance, and half way from N-1 to N is 2.5, not the 2.25 that
+    // steady motion from N-2 would put it at.
+    std::vector<Draw> latest{{kBlockA, {3.0f, 7.0f}}};
     ObjectBlend blend{kHalfway};
-    armAfter(blend, {{kBlockA, {0.0f, 7.0f}}}, {{kBlockB, {1.5f, 7.0f}}}, latest);
+    armAfter(blend, {{kBlockA, {0.0f, 7.0f}}}, {{kBlockB, {2.0f, 7.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "it is blended");
+    check::equal(uploaded[0][0], 2.5f, "half way between its N-1 and N");
+}
+
+void aBlockAllocatedAfreshEveryFrameDoesNotHideItsObject() {
+    // Its own blocks alternate A and B; a third block is new every frame.
+    // Keyed by that address, it would never be seen again. The first frames
+    // are keyed with nothing two back to tell fresh blocks by.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    std::vector<std::vector<Draw>> frames;
+    for (uint32_t frame = 0; frame < 5; ++frame) {
+        uint32_t own = frame % 2 == 0 ? kBlockA : kBlockB;
+        frames.push_back(
+            {{own, {static_cast<float>(frame), 7.0f}, kActorShader, 0xf4900000 + (frame * 0x100)}});
+        record(blend, frames.back());
+    }
+    blend.armOnce();
+    auto uploaded = replay(blend, frames.back());
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "it is blended");
+    check::equal(uploaded[0][0], 3.5f, "half way between its N-1 and N");
+    check::equal(blend.replaysDiverged(), uint64_t{0},
+                 "and its replay, at the fresh block's real address, is in step");
+}
+
+void aValueFlippingEveryFrameIsNotAveraged() {
+    // The second value is a flag the title flips each frame; the first moves.
+    std::vector<Draw> latest{{kBlockA, {20.0f, 1.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {0.0f, 1.0f}}}, {{kBlockB, {10.0f, 0.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(uploaded[0][0], 15.0f, "what moves is blended");
+    check::equal(uploaded[0][1], 1.0f, "what flips is drawn as the title drew it");
+    check::equal(blend.planner().valuesAlternating(), uint64_t{1}, "and counted");
+}
+
+void aMoveTooSmallToHalveIsNotDrawnBetween() {
+    // One ulp from N-1 to N: half way rounds back onto N-1, which is not a
+    // frame between the two.
+    float one = 1.0f;
+    float up = std::nextafter(one, 2.0f);
+    float down = one - (up - one);
+    std::vector<Draw> latest{{kBlockA, {up, 7.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {down, 7.0f}}}, {{kBlockB, {one, 7.0f}}}, latest);
     auto uploaded = replay(blend, latest);
     check::equal(blend.objects(Outcome::Outside), uint64_t{1}, "it is counted as outside");
-    check::equal(uploaded[0][0], 2.0f, "and drawn as the title drew it");
+    check::equal(uploaded[0][0], up, "and drawn as the title drew it");
+}
+
+void aPartnerWhoseMovingValuesAreNotNumbersIsNoPartner() {
+    std::vector<Draw> latest{{kBlockA, {2.0f, 7.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {0.0f, 7.0f}}}, {{kBlockB, {std::nanf(""), 7.0f}}}, latest);
+    replay(blend, latest);
+    check::equal(blend.objects(Outcome::Unverified), uint64_t{1},
+                 "nothing it moved in can be checked, so it is unverified");
 }
 
 void anObjectThatStoppedAtNMinusOneIsDrawnWhereItStopped() {
@@ -386,6 +451,60 @@ void turningPlanningOffForgetsTheFramesItHeld() {
     check::isTrue(blend.armOnce(), "three new frames are");
 }
 
+// Frame N as the census sees it: the walker blended, the stander held, and
+// two outline draws that are new.
+const std::vector<Draw> kCensusLatest{{kBlockA, {2.0f, 7.0f}},
+                                      {kOtherA, {5.0f, 5.0f}},
+                                      {0xf4005000, {1.0f, 2.0f, 3.0f}, kOutline},
+                                      {0xf4006000, {4.0f}, kOutline}};
+
+void aCensusGroupsTheFramesObjectsByShaderMostUnblendedFirst() {
+    ObjectBlend blend{kHalfway};
+    blend.requestCensus(1);
+    armAfter(blend, kWalkTwoBack, kWalkOneBack, kCensusLatest);
+    auto census = blend.census();
+    check::isTrue(census.has_value(), "a requested census is taken once a frame is planned");
+    check::equal(census->frames, uint64_t{1}, "of the one frame asked for");
+    check::equal(census->objects, uint64_t{4}, "of every object in the frame");
+    check::equal(census->shaders, uint64_t{2}, "under the shaders that drew them");
+    check::equal(census->rows[0].shader.baseHash, kOutline, "the un-blended shader first");
+    check::equal(census->rows[0].unblended(), uint64_t{2}, "with both its draws unmatched");
+    check::equal(census->rows[0].mostValues, uint64_t{3}, "and its widest draw's values");
+    const auto& actor = census->rows[1].outcomes;
+    check::equal(actor[static_cast<size_t>(Outcome::Blended)], uint64_t{1}, "the walker");
+    check::equal(actor[static_cast<size_t>(Outcome::Held)], uint64_t{1}, "and the stander");
+    check::equal(census->outcomes[static_cast<size_t>(Outcome::Unmatched)], uint64_t{2},
+                 "and the totals agree with the rows");
+}
+
+void aCensusAddsUpTheFramesAskedForAndNoMore() {
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, kWalkTwoBack, kWalkOneBack, kWalkLatest);
+    check::isTrue(!blend.census().has_value(), "no census nobody asked for");
+    blend.requestCensus(2);
+    record(blend, kWalkTwoBack);
+    check::isTrue(!blend.census().has_value(), "none after one of the two frames");
+    record(blend, kWalkOneBack);
+    auto census = blend.census();
+    check::isTrue(census.has_value(), "one after both");
+    check::equal(census->frames, uint64_t{2}, "counting both frames");
+    check::equal(census->objects, uint64_t{4}, "and both frames' objects");
+    record(blend, kWalkLatest);
+    check::equal(blend.census()->frames, uint64_t{2}, "and nothing after");
+}
+
+void aCensusOfAnUnplannedFrameIsRefused() {
+    wiiuport::interp::ObjectPlanner planner{kHalfway};
+    wiiuport::interp::CensusTally tally;
+    bool refused = false;
+    try {
+        tally.add(planner);
+    } catch (const std::logic_error&) {
+        refused = true;
+    }
+    check::isTrue(refused, "a frame never planned would read as all unmatched");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -406,10 +525,17 @@ void runObjectBlendTests() {
     aPartnerIsFoundAmongManyDrawsOfItsShader();
     aPartnerWithNoNumberWhereItsShaderIsOrderedIsStillFound();
     aFrameOfManyDrawsIsPlannedWhileItIsDrawn();
-    aBlendThatWouldNotLieBetweenItsNeighboursIsNotDrawn();
+    aBlendIsTakenFromItsPartnerNotAssumedSteady();
+    aBlockAllocatedAfreshEveryFrameDoesNotHideItsObject();
+    aValueFlippingEveryFrameIsNotAveraged();
+    aMoveTooSmallToHalveIsNotDrawnBetween();
+    aPartnerWhoseMovingValuesAreNotNumbersIsNoPartner();
     anObjectThatStoppedAtNMinusOneIsDrawnWhereItStopped();
     aHeldStillWorldReplaysByteIdenticalToTheTitlesFrame();
     turningPlanningOffForgetsTheFramesItHeld();
+    aCensusGroupsTheFramesObjectsByShaderMostUnblendedFirst();
+    aCensusAddsUpTheFramesAskedForAndNoMore();
+    aCensusOfAnUnplannedFrameIsRefused();
 }
 
 } // namespace wiiuport::tests

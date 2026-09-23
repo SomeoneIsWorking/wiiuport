@@ -65,17 +65,20 @@ void KeyedFrame::begin() {
     m_occurrences.reset();
 }
 
-size_t KeyedFrame::add(const frame::RecordedUniformAssembly& assembly) {
+size_t KeyedFrame::add(const frame::RecordedUniformAssembly& assembly, const KeyedFrame* twoBack) {
     auto entry = static_cast<uint32_t>(m_keys.size());
     ShaderKey shader{assembly.shaderBaseHash, assembly.shaderAuxHash, assembly.stageIndex};
-    m_keys.emplace_back(shader, assembly.blockSources);
-    m_keys.back().occurrence = m_occurrences.next(m_keys, entry);
+    AssemblyKey& key = m_keys.emplace_back(shader, assembly.blockSources);
+    for (size_t word = 1; word < key.sourceCount; word += 2) {
+        m_addresses.push_back(key.sources[word]);
+        if (twoBack != nullptr && !twoBack->sourced(key.sources[word])) {
+            key.sources[word] = AssemblyKey::kFreshBlock;
+        }
+    }
+    key.occurrence = m_occurrences.next(m_keys, entry);
     m_spans.emplace_back(static_cast<uint32_t>(m_floats.size()),
                          static_cast<uint32_t>(assembly.data.size()));
     m_floats.insert(m_floats.end(), assembly.data.begin(), assembly.data.end());
-    for (size_t word = 1; word < m_keys.back().sourceCount; word += 2) {
-        m_addresses.push_back(m_keys.back().sources[word]);
-    }
     return entry;
 }
 

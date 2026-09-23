@@ -36,8 +36,12 @@ Distances measure(std::span<const float> before, std::span<const float> after,
     return {std::sqrt(squared.step), std::sqrt(squared.residual)};
 }
 
+// A candidate is only a partner if the object moved in values it can be
+// checked on: one whose every moving value is not a number in the candidate
+// would land on anything.
 bool landsOn(const Distances& distances) {
-    return distances.residual <= ObjectPlanner::kPartnerTolerance * distances.step;
+    return distances.step > 0.0 &&
+           distances.residual <= ObjectPlanner::kPartnerTolerance * distances.step;
 }
 
 // Whether `blended` lies strictly between the object's two neighbours:
@@ -90,23 +94,26 @@ std::string_view ObjectPlanner::outcomeName(Outcome outcome) {
     return "unknown";
 }
 
-ObjectPlanner::ObjectPlanner(float t) : m_s((1.0f + t) / 2.0f) {
+ObjectPlanner::ObjectPlanner(float t) : m_t(t) {
 }
 
 void ObjectPlanner::Plan::clear() {
     blendedAt.clear();
     floats.clear();
+    outcomeOf.clear();
     outcomes = {};
 }
 
 void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
-    size_t entry = m_building.add(assembly);
+    // Fresh blocks are told from an object's own only against a frame held
+    // two back.
+    size_t entry = m_building.add(assembly, m_framesHeld >= 2 ? &m_frames[1] : nullptr);
     m_buildingPlan.blendedAt.push_back(kNotBlended);
     // Planned only against two whole frames; before that the frame is kept
-    // as history and nothing more.
-    if (m_framesHeld >= 2) {
-        ++m_buildingPlan.outcomes[static_cast<size_t>(plan(entry))];
-    }
+    // as history, and its entries read as unmatched in a plan never ready.
+    Outcome outcome = m_framesHeld >= 2 ? plan(entry) : Outcome::Unmatched;
+    m_buildingPlan.outcomeOf.push_back(outcome);
+    ++m_buildingPlan.outcomes[static_cast<size_t>(outcome)];
 }
 
 void ObjectPlanner::endFrame() {
@@ -140,6 +147,9 @@ std::optional<AssemblyKey> ObjectPlanner::derivedPartner(const AssemblyKey& key)
     AssemblyKey partner = key;
     for (size_t index = 1; index < partner.sourceCount; index += 2) {
         uint32_t address = partner.sources[index];
+        if (address == AssemblyKey::kFreshBlock) {
+            continue;
+        }
         if (auto paired = m_blockPartner.find(address); paired != m_blockPartner.end()) {
             partner.sources[index] = paired->second;
             continue;
@@ -159,6 +169,10 @@ void ObjectPlanner::learn(const AssemblyKey& key, const AssemblyKey& partner) {
         m_blockPartner.clear();
     }
     for (size_t index = 1; index < key.sourceCount; index += 2) {
+        if (key.sources[index] == AssemblyKey::kFreshBlock ||
+            partner.sources[index] == AssemblyKey::kFreshBlock) {
+            continue;
+        }
         // Both ways round: next frame's blocks are this frame's partners.
         m_blockPartner.insert_or_assign(key.sources[index], partner.sources[index]);
         m_blockPartner.insert_or_assign(partner.sources[index], key.sources[index]);
@@ -273,14 +287,27 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     if (!partner.has_value()) {
         return Outcome::Unverified;
     }
+    std::span<const float> oneBack = m_frames[0].values(*partner);
     std::vector<float>& floats = m_buildingPlan.floats;
     size_t start = floats.size();
     uint64_t notBlended = 0;
+    uint64_t alternating = 0;
     for (size_t index = 0; index < after.size(); ++index) {
-        float a = before[index];
+        float a = oneBack[index];
         float b = after[index];
+        // The same at N-2 and N, whatever it was at N-1: not moving, or
+        // flipping every frame as the title's double buffering does -- a
+        // parity flag averaged is a value the title never wrote.
+        if (std::memcmp(&before[index], &b, sizeof(float)) == 0) {
+            if (std::memcmp(&a, &b, sizeof(float)) != 0) {
+                ++alternating;
+            }
+            floats.push_back(b);
+            continue;
+        }
         if (isNumber(a) && isNumber(b)) {
-            floats.push_back(a + ((b - a) * m_s));
+            // Exact where the two agree: a + 0 is a.
+            floats.push_back(a + ((b - a) * m_t));
             continue;
         }
         if (a != b) {
@@ -289,11 +316,12 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
         floats.push_back(b);
     }
     std::span<const float> blended(floats.data() + start, after.size());
-    if (!liesBetween(m_frames[0].values(*partner), blended, after)) {
+    if (!liesBetween(oneBack, blended, after)) {
         floats.resize(start);
         return Outcome::Outside;
     }
     m_valuesNotBlended += notBlended;
+    m_valuesAlternating += alternating;
     m_buildingPlan.blendedAt[entry] = static_cast<uint32_t>(start);
     return Outcome::Blended;
 }

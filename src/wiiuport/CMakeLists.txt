@@ -40,6 +40,8 @@ add_library(wiiuport STATIC
   frame/FrameCapture.h
   frame/FramePresenter.cpp
   frame/FramePresenter.h
+  frame/GuestStateGuard.cpp
+  frame/GuestStateGuard.h
   frame/FrameRecording.cpp
   frame/FrameRecording.h
   frame/FrameShapeLog.cpp
@@ -69,6 +71,10 @@ add_library(wiiuport STATIC
   interp/KeyedFrame.h
   interp/ObjectBlend.cpp
   interp/ObjectBlend.h
+  interp/ObjectCensus.cpp
+  interp/ObjectCensus.h
+  interp/RestoreCheck.cpp
+  interp/RestoreCheck.h
   interp/ObjectPlanner.cpp
   interp/ObjectPlanner.h
   interp/ReplayBlend.h

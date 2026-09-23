@@ -35,8 +35,9 @@ bool submitToCommandProcessor(const void* data, uint32_t sizeInBytes) {
 Runtime::Runtime()
     : m_replayer(&submitToCommandProcessor), m_presenter(&submitPresent, &submitScanBufferCopy),
       m_capture(&requestFrameCapture),
-      m_continuous(m_viewTracker, m_substitution, m_objectBlend, m_replayer, m_presenter,
-                   m_scheduler, &steadyNow) {
+      m_guard(&LatteFrameHooks::GuardGuestState, &LatteFrameHooks::RestoreGuestState),
+      m_continuous(m_viewTracker, m_substitution, m_objectBlend, m_replayer, m_presenter, m_guard,
+                   m_scheduler, m_restoreCheck, &steadyNow) {
     // Frame complete, before the guest's swap: everything that reads the
     // frame first, and the continuous interpolator last, because it needs the
     // view tracker and the object blend to have taken this frame in.

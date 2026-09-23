@@ -24,8 +24,10 @@ class KeyedFrame {
     // Built one assembly at a time as the guest draws, then finished once the
     // frame is: lookups by key or shader are only valid after finish().
     void begin();
-    // Returns the entry the assembly was given.
-    size_t add(const frame::RecordedUniformAssembly& assembly);
+    // Returns the entry the assembly was given. Against `twoBack`, the frame
+    // two before, a block it did not source is keyed as fresh; without one
+    // every block is keyed by its address.
+    size_t add(const frame::RecordedUniformAssembly& assembly, const KeyedFrame* twoBack);
     void finish();
 
     size_t size() const {
@@ -59,7 +61,8 @@ class KeyedFrame {
     // [low, high].
     std::span<const uint32_t> within(const ShaderDraws& draws, double low, double high) const;
 
-    // Whether any draw of the frame sourced a block at this address.
+    // Whether any draw of the frame sourced a block at this address, fresh
+    // or not.
     bool sourced(uint32_t address) const;
 
   private:

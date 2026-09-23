@@ -36,6 +36,30 @@ void ObjectBlend::onFrameRecorded(const frame::FrameRecording& /*recording*/) {
         return;
     }
     m_planner.endFrame();
+    tallyCensus();
+}
+
+void ObjectBlend::tallyCensus() {
+    if (uint32_t requested = m_censusRequested.exchange(0); requested != 0) {
+        m_censusWanted = requested;
+        m_tally = {};
+    }
+    if (m_censusWanted == 0 || !m_planner.ready()) {
+        return;
+    }
+    m_tally.add(m_planner);
+    if (m_tally.frames() < m_censusWanted) {
+        return;
+    }
+    ObjectCensus census = m_tally.census();
+    m_censusWanted = 0;
+    std::lock_guard lock(m_censusMutex);
+    m_census = std::move(census);
+}
+
+std::optional<ObjectCensus> ObjectBlend::census() const {
+    std::lock_guard lock(m_censusMutex);
+    return m_census;
 }
 
 void ObjectBlend::waitUntilPlanned() {
@@ -86,7 +110,7 @@ bool ObjectBlend::apply(const LatteFrameHooks::UniformAssembly& assembly) {
     AssemblyKey drawn(
         ShaderKey{assembly.shaderBaseHash, assembly.shaderAuxHash, assembly.stageIndex},
         frame::sourceWordsOf(assembly));
-    if (m_replayCursor >= latest.size() || !latest.key(m_replayCursor).sameDrawAs(drawn)) {
+    if (m_replayCursor >= latest.size() || !latest.key(m_replayCursor).describes(drawn)) {
         ++m_replaysDiverged;
         m_armed = false;
         return false;
