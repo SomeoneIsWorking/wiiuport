@@ -12,10 +12,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <map>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -46,6 +48,11 @@ struct VertexLayout {
     std::vector<Attribute> attributes;
 
     static VertexLayout of(const LatteFrameHooks::DrawPrepared& draw);
+    // Becomes `of(draw)` in place, keeping its vectors' storage.
+    void assign(const LatteFrameHooks::DrawPrepared& draw);
+    // Whether `of(draw)` would equal this, without building it: asked of
+    // every replayed draw.
+    bool describes(const LatteFrameHooks::DrawPrepared& draw) const;
 
     // Takes in the attributes another reader of the same buffers fetches;
     // false, and unchanged, when it lays the buffers out otherwise.
@@ -212,7 +219,8 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     }
 
     // The same, vertex shader by vertex shader: which meshes step at the
-    // title's rate, and why. Safe from any thread.
+    // title's rate, and why, as of the last frame's end. Safe from any
+    // thread.
     std::vector<ShaderVertexOutcomes> drawsByShader() const;
 
     // Draws told apart only by their place whose draw two frames back or a
@@ -272,18 +280,40 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         uint32_t mesh{0};
     };
 
+    // Hashes a pair of keys, for the per-draw lookups of a frame: the two
+    // hashes combined as boost::hash_combine does.
+    struct PairHash {
+        template <typename First, typename Second>
+        size_t operator()(const std::pair<First, Second>& key) const {
+            size_t first = std::hash<First>{}(key.first);
+            return first ^ (std::hash<Second>{}(key.second) + 0x9e3779b97f4a7c15ull + (first << 6) +
+                            (first >> 2));
+        }
+    };
+
+    // A frame's draws and their copies. Cleared, it keeps its storage: every
+    // kept draw's vectors allocated afresh and freed each frame cost as much
+    // as copying the vertices.
     struct Frame {
-        std::vector<Draw> draws;
+        std::span<const Draw> draws() const {
+            return {drawSlots.data(), drawCount};
+        }
+
+        // The next draw's slot, emptied, its vectors keeping their storage.
+        Draw& appendDraw();
+
+        std::vector<Draw> drawSlots;
+        size_t drawCount{0};
         std::vector<std::byte> bytes;
         // Each buffer copied, by where the guest keeps it: draws sharing a
         // mesh share its copy.
-        std::map<std::pair<const void*, uint32_t>, size_t> copied;
+        std::unordered_map<std::pair<const void*, uint32_t>, size_t, PairHash> copied;
         // The draw of each (vertex entry, ordinal).
-        std::map<std::pair<uint32_t, uint32_t>, size_t> byEntry;
+        std::unordered_map<std::pair<uint32_t, uint32_t>, size_t, PairHash> byEntry;
         // The kept draws of each vertex shader (base, aux hash): an object
         // told apart only by its place may be drawn anywhere among them the
         // frame before, under other blocks.
-        std::map<std::pair<uint64_t, uint64_t>, std::vector<size_t>> byShader;
+        std::unordered_map<std::pair<uint64_t, uint64_t>, std::vector<size_t>, PairHash> byShader;
         // Each mesh's id, by the copies it reads.
         std::map<std::vector<size_t>, uint32_t> meshes;
         // ObjectBlend's frames ended when this one ended.
@@ -372,6 +402,7 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // it, if it was kept and is laid out as `drawn` is.
     static std::optional<size_t> drawOf(const Frame& frame, size_t entry, const Draw& drawn);
     void count(uint64_t shaderBaseHash, VertexOutcome outcome);
+    void publishCounts();
 
     const ObjectBlend& m_objects;
     float m_t;
@@ -412,6 +443,10 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::vector<std::byte> m_before;
     std::vector<std::byte> m_after;
     std::array<uint64_t, kVertexOutcomeCount> m_outcomes{};
+    // Counted on the rendering thread without a lock, and published under
+    // one once a frame: a lock and a map search per replayed draw was a
+    // fifth of the replay's own vertex work.
+    std::unordered_map<uint64_t, std::array<uint64_t, kVertexOutcomeCount>> m_byShaderPending;
     mutable std::mutex m_byShaderMutex;
     std::map<uint64_t, std::array<uint64_t, kVertexOutcomeCount>> m_byShader;
     uint64_t m_replaysDiverged{0};
