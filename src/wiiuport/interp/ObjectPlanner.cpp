@@ -137,6 +137,7 @@ FrameState ObjectPlanner::frameState(const ShaderKey& shader) const {
 void ObjectPlanner::Plan::clear() {
     blendedAt.clear();
     partnerAt.clear();
+    earlierAt.clear();
     floats.clear();
     outcomeOf.clear();
     outcomes = {};
@@ -149,6 +150,7 @@ void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
     size_t entry = m_building.add(assembly, m_framesHeld >= 2 ? &m_frames[1] : nullptr);
     m_buildingPlan.blendedAt.push_back(kNotBlended);
     m_buildingPlan.partnerAt.push_back(kNotBlended);
+    m_buildingPlan.earlierAt.push_back(kNotBlended);
     // Planned only against two whole frames; before that the frame is kept
     // as history, and its entries read as unmatched in a plan never ready.
     Outcome outcome = m_framesHeld >= 2 ? plan(entry) : Outcome::Unmatched;
@@ -161,6 +163,7 @@ void ObjectPlanner::endFrame() {
     // to become N-1 and be searched.
     indexLatest();
     m_building.finish();
+    blendSharedValues();
     ++m_framesPlanned;
     // Swapping keeps every frame's storage, so a steady scene allocates
     // nothing frame to frame.
@@ -391,7 +394,11 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     }
     std::optional<Found> found = findPartner(key, earlier, after);
     if (!found.has_value()) {
-        return earlier.has_value() ? Outcome::Unverified : Outcome::Unmatched;
+        if (!earlier.has_value()) {
+            return Outcome::Unmatched;
+        }
+        m_buildingPlan.earlierAt[entry] = static_cast<uint32_t>(*earlier);
+        return Outcome::Unverified;
     }
     if (!found->partner.has_value()) {
         return Outcome::Held;
@@ -434,7 +441,65 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     m_valuesAlternating += alternating;
     m_buildingPlan.blendedAt[entry] = static_cast<uint32_t>(start);
     m_buildingPlan.partnerAt[entry] = static_cast<uint32_t>(*found->partner);
+    m_buildingPlan.earlierAt[entry] = static_cast<uint32_t>(found->earlier);
     return Outcome::Blended;
+}
+
+void ObjectPlanner::blendSharedValues() {
+    Plan& plan = m_buildingPlan;
+    const KeyedFrame& twoBack = m_frames[1];
+    auto unverified = [&plan](size_t entry) {
+        return plan.outcomeOf[entry] == Outcome::Unverified && plan.earlierAt[entry] != kNotBlended;
+    };
+    m_unverifiedShaders.clear();
+    for (size_t entry = 0; entry < m_building.size(); ++entry) {
+        if (unverified(entry)) {
+            m_unverifiedShaders.push_back(m_building.key(entry).shader);
+        }
+    }
+    if (m_unverifiedShaders.empty()) {
+        return;
+    }
+    std::sort(m_unverifiedShaders.begin(), m_unverifiedShaders.end());
+    m_unverifiedShaders.erase(std::unique(m_unverifiedShaders.begin(), m_unverifiedShaders.end()),
+                              m_unverifiedShaders.end());
+    m_shared.clear();
+    for (size_t entry = 0; entry < m_building.size(); ++entry) {
+        const ShaderKey& shader = m_building.key(entry).shader;
+        if (plan.outcomeOf[entry] != Outcome::Blended ||
+            !std::binary_search(m_unverifiedShaders.begin(), m_unverifiedShaders.end(), shader)) {
+            continue;
+        }
+        std::span<const float> after = m_building.values(entry);
+        m_shared.addBlended(shader, twoBack.values(plan.earlierAt[entry]), after,
+                            {plan.floats.data() + plan.blendedAt[entry], after.size()});
+    }
+    m_shared.index();
+    for (size_t entry = 0; entry < m_building.size(); ++entry) {
+        if (!unverified(entry)) {
+            continue;
+        }
+        const ShaderKey& shader = m_building.key(entry).shader;
+        std::span<const float> before = twoBack.values(plan.earlierAt[entry]);
+        std::span<const float> after = m_building.values(entry);
+        size_t start = plan.floats.size();
+        uint64_t shared = 0;
+        for (size_t index = 0; index < after.size(); ++index) {
+            std::optional<float> blended =
+                m_shared.blendOf(shader, static_cast<uint32_t>(index), before[index], after[index]);
+            if (blended.has_value()) {
+                ++shared;
+            }
+            plan.floats.push_back(blended.value_or(after[index]));
+        }
+        if (shared == 0) {
+            plan.floats.resize(start);
+            continue;
+        }
+        plan.blendedAt[entry] = static_cast<uint32_t>(start);
+        ++m_unverifiedSharingValues;
+        m_valuesShared += shared;
+    }
 }
 
 std::optional<size_t> ObjectPlanner::partnerOf(size_t entry) const {

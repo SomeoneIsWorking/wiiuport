@@ -437,6 +437,9 @@ std::string ControlChannel::interpolationJson() const {
     body += ",\"objectPartnerCandidates\":" + std::to_string(objects.planner().partnerCandidates());
     body += ",\"objectValuesNotBlended\":" + std::to_string(objects.planner().valuesNotBlended());
     body += ",\"objectValuesAlternating\":" + std::to_string(objects.planner().valuesAlternating());
+    body += ",\"objectUnverifiedSharingValues\":" +
+            std::to_string(objects.planner().unverifiedSharingValues());
+    body += ",\"objectValuesShared\":" + std::to_string(objects.planner().valuesShared());
     body += ",\"objectDrawsWritten\":" + std::to_string(objects.drawsWritten());
     body += ",\"objectReplaysDiverged\":" + std::to_string(objects.replaysDiverged());
     body += ",\"objectFramesEnded\":" + std::to_string(objects.framesEnded());
