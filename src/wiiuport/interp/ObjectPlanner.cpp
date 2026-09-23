@@ -453,7 +453,6 @@ void ObjectPlanner::seeUnblendedThroughTheCamera() {
             m_transforms.addBlended(shader, after, blended);
         }
     }
-    m_shared.index();
     m_transforms.index();
     for (size_t entry = 0; entry < m_building.size(); ++entry) {
         if (!drawnAtN(entry)) {

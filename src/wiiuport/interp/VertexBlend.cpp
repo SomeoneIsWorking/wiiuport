@@ -300,6 +300,7 @@ VertexBlend::Draw& VertexBlend::Frame::appendDraw() {
     draw.layout.attributes.clear();
     draw.bufferStarts.clear();
     draw.mesh = 0;
+    draw.nextOfEntry = 0;
     return draw;
 }
 
@@ -307,7 +308,7 @@ void VertexBlend::Frame::clear() {
     drawCount = 0;
     bytes.clear();
     copied.clear();
-    byEntry.clear();
+    entryDraws.clear();
     byShader.clear();
     meshes.clear();
     frameIndex = 0;
@@ -352,14 +353,19 @@ void VertexBlend::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) {
             }
             recorded.bufferStarts.push_back(copy->second);
         }
-        auto [slot, fresh] =
-            m_building.byEntry.try_emplace(std::pair{*recorded.vertexEntry, 0u}, index);
         // Draws sharing one vertex-stage assembly take their place among it.
-        while (!fresh) {
-            ++recorded.ordinal;
-            std::tie(slot, fresh) = m_building.byEntry.try_emplace(
-                std::pair{*recorded.vertexEntry, recorded.ordinal}, index);
+        uint32_t entry = *recorded.vertexEntry;
+        if (m_building.entryDraws.size() <= entry) {
+            m_building.entryDraws.resize(entry + 1);
         }
+        EntryDraws& drawsOfEntry = m_building.entryDraws[entry];
+        recorded.ordinal = drawsOfEntry.count++;
+        if (recorded.ordinal == 0) {
+            drawsOfEntry.first = static_cast<uint32_t>(index);
+        } else {
+            m_building.drawSlots[drawsOfEntry.last].nextOfEntry = static_cast<uint32_t>(index);
+        }
+        drawsOfEntry.last = static_cast<uint32_t>(index);
         m_building.byShader[{draw.vertexShaderBaseHash, draw.vertexShaderAuxHash}].push_back(index);
         recorded.mesh =
             m_building.meshes
@@ -496,11 +502,17 @@ std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index
 }
 
 std::optional<size_t> VertexBlend::drawOf(const Frame& frame, size_t entry, const Draw& drawn) {
-    auto found = frame.byEntry.find({static_cast<uint32_t>(entry), drawn.ordinal});
-    if (found == frame.byEntry.end() || frame.draws()[found->second].layout != drawn.layout) {
+    if (entry >= frame.entryDraws.size() || drawn.ordinal >= frame.entryDraws[entry].count) {
         return std::nullopt;
     }
-    return found->second;
+    size_t found = frame.entryDraws[entry].first;
+    for (uint32_t ordinal = 0; ordinal < drawn.ordinal; ++ordinal) {
+        found = frame.draws()[found].nextOfEntry;
+    }
+    if (frame.draws()[found].layout != drawn.layout) {
+        return std::nullopt;
+    }
+    return found;
 }
 
 void VertexBlend::blendSlot(size_t slot, Scratch& scratch) {

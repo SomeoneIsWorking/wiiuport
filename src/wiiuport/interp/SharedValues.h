@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -41,8 +42,6 @@ class SharedValues {
     // both ends is drawn at N by every draw alike.
     void addBlended(std::span<const float> twoBack, std::span<const float> latest,
                     std::span<const float> blended);
-    // Done adding: sorts what lookups search.
-    void index();
 
     // What the blended draws holding `twoBack` at N-2 and `latest` at N drew
     // there; none when no blended draw held both, or when those that did drew
@@ -50,17 +49,19 @@ class SharedValues {
     std::optional<float> blendOf(float twoBack, float latest) const;
 
   private:
+    // What the blended draws holding a pair of ends drew, and whether they
+    // all drew it.
     struct Held {
-        uint64_t ends;
         uint32_t blended;
-
-        auto operator<=>(const Held&) const = default;
+        bool agreed;
     };
 
     static uint64_t endsOf(float twoBack, float latest);
 
     std::unordered_set<uint64_t> m_wanted;
-    std::vector<Held> m_held;
+    // By their ends: one entry per value however many draws hold it, where
+    // an entry per draw, sorted, was the most of this frame-end work.
+    std::unordered_map<uint64_t, Held> m_held;
 };
 
 } // namespace wiiuport::interp

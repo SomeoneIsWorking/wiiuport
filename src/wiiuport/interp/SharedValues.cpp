@@ -33,26 +33,23 @@ void SharedValues::addBlended(std::span<const float> twoBack, std::span<const fl
             continue;
         }
         uint64_t ends = endsOf(twoBack[position], latest[position]);
-        if (m_wanted.contains(ends)) {
-            m_held.push_back(Held{ends, std::bit_cast<uint32_t>(blended[position])});
+        if (!m_wanted.contains(ends)) {
+            continue;
+        }
+        uint32_t drawn = std::bit_cast<uint32_t>(blended[position]);
+        auto [held, fresh] = m_held.try_emplace(ends, Held{drawn, true});
+        if (!fresh && held->second.blended != drawn) {
+            held->second.agreed = false;
         }
     }
 }
 
-void SharedValues::index() {
-    std::sort(m_held.begin(), m_held.end());
-}
-
 std::optional<float> SharedValues::blendOf(float twoBack, float latest) const {
-    uint64_t ends = endsOf(twoBack, latest);
-    auto first = std::lower_bound(m_held.begin(), m_held.end(), Held{ends, 0});
-    auto last = std::upper_bound(first, m_held.end(), Held{ends, UINT32_MAX});
-    // Sorted by what was drawn, so every holder agrees when the first and
-    // last do.
-    if (first == last || first->blended != std::prev(last)->blended) {
+    auto found = m_held.find(endsOf(twoBack, latest));
+    if (found == m_held.end() || !found->second.agreed) {
         return std::nullopt;
     }
-    return std::bit_cast<float>(first->blended);
+    return std::bit_cast<float>(found->second.blended);
 }
 
 } // namespace wiiuport::interp
