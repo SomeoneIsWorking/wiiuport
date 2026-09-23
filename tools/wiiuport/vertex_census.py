@@ -23,9 +23,10 @@ OUTCOMES = (
     "shapeDiffers",
     "outside",
     "notFloats",
+    "started",
 )
 # Drawn as the title drew it although its vertices may have moved.
-STEPPED = ("unverified", "noPartner", "shapeDiffers", "outside")
+STEPPED = ("unverified", "noPartner", "shapeDiffers", "outside", "started")
 
 
 @dataclass(frozen=True)
