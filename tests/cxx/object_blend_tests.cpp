@@ -515,6 +515,62 @@ void aLoneDrawsValuesAreItsOwn() {
     check::equal(uploaded[0][0], 2.0f, "and drawn as the title drew it");
 }
 
+// Three tiles of the sea drawn in one pass and one in another, each handed
+// its own place and its pass's view: {own, pass view, own}. Two blocks each,
+// as the title double-buffers them.
+constexpr uint32_t kTileA = 0xf4004000;
+constexpr uint32_t kTileB = 0xf4084000;
+constexpr uint32_t kFarA = 0xf4005000;
+constexpr uint32_t kFarB = 0xf4085000;
+
+void anUnverifiedObjectIsSeenThroughTheInBetweenCamera() {
+    // The bobbing tile turned back between frames, so nothing in N-1 is
+    // where it passed through; its pass's view moved as every tile's did.
+    // Its last value is 7 at N as the first tile's is, but not at N-2: that
+    // one is its own.
+    std::vector<Draw> twoBack{{kBlockA, {0.0f, 100.0f, 6.0f}},
+                              {kOtherA, {10.0f, 100.0f, 0.0f}},
+                              {kTileA, {20.0f, 100.0f, 5.0f}},
+                              {kFarA, {30.0f, 200.0f, 0.0f}}};
+    std::vector<Draw> oneBack{{kBlockB, {1.0f, 101.0f, 6.5f}},
+                              {kOtherB, {11.0f, 101.0f, 0.0f}},
+                              {kTileB, {29.0f, 101.0f, 40.0f}},
+                              {kFarB, {31.0f, 201.0f, 0.0f}}};
+    std::vector<Draw> latest{{kBlockA, {2.0f, 102.0f, 7.0f}},
+                             {kOtherA, {12.0f, 102.0f, 0.0f}},
+                             {kTileA, {21.0f, 102.0f, 7.0f}},
+                             {kFarA, {32.0f, 202.0f, 0.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, twoBack, oneBack, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Unverified), uint64_t{1}, "the bobbing tile is unverified");
+    check::equal(uploaded[2][1], 101.5f, "yet drawn with its pass's view half way");
+    check::equal(uploaded[2][0], 21.0f, "at its own place in N");
+    check::equal(uploaded[2][2], 7.0f, "and a value shared in N alone is its own");
+    check::equal(uploaded[3][1], 201.5f, "the other pass's view is its own tile's");
+    check::equal(blend.planner().unverifiedSharingValues(), uint64_t{1}, "counted");
+    check::equal(blend.planner().valuesShared(), uint64_t{1}, "with the values taken");
+}
+
+void aValueBlendedDrawsDisagreeOnIsNotShared() {
+    // Two blended tiles held the unverified tile's view at N-2 and N but
+    // passed through different values in N-1: which of them it shares is
+    // not known, so it is drawn as the title drew it.
+    std::vector<Draw> twoBack{
+        {kBlockA, {0.0f, 100.0f}}, {kOtherA, {10.0f, 100.0f}}, {kTileA, {20.0f, 100.0f}}};
+    std::vector<Draw> oneBack{
+        {kBlockB, {1.0f, 101.0f}}, {kOtherB, {11.0f, 100.8f}}, {kTileB, {29.0f, 101.0f}}};
+    std::vector<Draw> latest{
+        {kBlockA, {2.0f, 102.0f}}, {kOtherA, {12.0f, 102.0f}}, {kTileA, {21.0f, 102.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, twoBack, oneBack, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{2}, "both neighbours are blended");
+    check::equal(blend.objects(Outcome::Unverified), uint64_t{1}, "the tile is unverified");
+    check::isTrue(uploaded[2] == latest[2].values, "and drawn as the title drew it");
+    check::equal(blend.planner().unverifiedSharingValues(), uint64_t{0}, "sharing nothing");
+}
+
 void aMoveTooSmallToHalveIsNotDrawnBetween() {
     // One ulp from N-1 to N: half way rounds back onto N-1, which is not a
     // frame between the two.
@@ -698,6 +754,8 @@ void runObjectBlendTests() {
     aValueEveryDrawHoldsDoesNotDecideThePartner();
     drawsTheFrameAloneMovesAreBlendedWithAnyCandidate();
     aLoneDrawsValuesAreItsOwn();
+    anUnverifiedObjectIsSeenThroughTheInBetweenCamera();
+    aValueBlendedDrawsDisagreeOnIsNotShared();
     aPartnerWhoseMovingValuesAreNotNumbersIsNoPartner();
     anObjectThatStoppedAtNMinusOneIsDrawnWhereItStopped();
     aHeldStillWorldReplaysByteIdenticalToTheTitlesFrame();

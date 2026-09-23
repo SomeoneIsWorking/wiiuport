@@ -66,6 +66,10 @@ class Interpolation:
     objectHeldPartnersDerived: int
     objectValuesNotBlended: int
     objectValuesAlternating: int
+    # Unverified objects drawn in the values they share with blended draws of
+    # their shader -- the pass's view -- and how many values that was.
+    objectUnverifiedSharingValues: int
+    objectValuesShared: int
     objectDrawsWritten: int
     objectReplaysDiverged: int
     # Replayed draws whose vertices the title rewrote, by what blending them
@@ -174,6 +178,9 @@ class Interpolation:
                     f"{self.objectReplaysDiverged} replays out of step with the recording, "
                     f"{self.objectValuesNotBlended} values kept as not numbers, "
                     f"{self.objectValuesAlternating} as flipping between frames; "
+                    f"{self.objectUnverifiedSharingValues} of "
+                    f"{self.objects.get('unverified', 0)} unverified objects drawn in the "
+                    f"{self.objectValuesShared} values they share with blended ones; "
                     f"a frame's end spent {self.frame_end_planning_ms():.2f} ms on planning, "
                     f"and the planning thread {self.planning_busy_ms():.2f} ms a frame before it, "
                     f"over {self.objectFramesEnded} frames"

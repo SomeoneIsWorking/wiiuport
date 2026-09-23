@@ -3,6 +3,7 @@
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/interp/AssemblyKey.h"
 #include "wiiuport/interp/KeyedFrame.h"
+#include "wiiuport/interp/SharedValues.h"
 
 #include <array>
 #include <cstdint>
@@ -51,7 +52,9 @@ struct FrameState {
 // -- A on even frames goes with B on odd -- so one draw's search pairs every draw of that object,
 // and later frames derive the partner rather than search for it. A derived partner is re-checked
 // every frame, so a wrong or stale pairing fails the check rather than passing silently. An object
-// that fails, or has no N-2, is drawn as the title drew it and counted.
+// that fails, or has no N-2, is drawn as the title drew it and counted -- all but what one that
+// fails shares with the blended draws of its shader, such as the pass's view, which it is drawn
+// with as they are: seen through the in-between frame's camera, not N's.
 //
 // Frame state -- a value every draw of the shader held alike in N-1 and N-2,
 // such as the view -- is blended but is no evidence of identity: it sways as
@@ -116,7 +119,9 @@ class ObjectPlanner {
         // whose midpoint lands in N-1: new, or moved beyond telling.
         Unmatched,
         // Moved, but nothing in N-1 is where it passed through, from the draw
-        // its blocks name in N-2 or from the one nearest its values.
+        // its blocks name in N-2 or from the one nearest its values. Drawn at
+        // N in its own values, and in those it held as a blended draw of its
+        // shader did -- the pass's view -- as that draw is (SharedValues).
         Unverified,
         // Its partner was found, but its blend would not lie strictly between
         // N-1 and N: nearer each than they are to each other. An object that
@@ -206,6 +211,17 @@ class ObjectPlanner {
         return m_valuesAlternating;
     }
 
+    // Unverified objects drawn in the values they share with blended draws
+    // of their shader, and how many values that was, over the unverified
+    // objects planned.
+    uint64_t unverifiedSharingValues() const {
+        return m_unverifiedSharingValues;
+    }
+
+    uint64_t valuesShared() const {
+        return m_valuesShared;
+    }
+
   private:
     // Where an entry's blend sits in a plan's floats; none when drawn as is.
     static constexpr uint32_t kNotBlended = UINT32_MAX;
@@ -216,6 +232,9 @@ class ObjectPlanner {
         // The partner's entry in N-1, by entry, blended or held; kNotBlended
         // where none is known.
         std::vector<uint32_t> partnerAt;
+        // The object's entry in N-2, by entry, blended or unverified;
+        // kNotBlended where none is known.
+        std::vector<uint32_t> earlierAt;
         std::vector<float> floats;
         // What each entry came to, by entry.
         std::vector<Outcome> outcomeOf;
@@ -226,6 +245,9 @@ class ObjectPlanner {
 
     // Plans the building frame's entry against N-1 and N-2.
     Outcome plan(size_t entry);
+    // Draws the building frame's unverified objects in the values they
+    // share with its blended ones, once every draw of it is planned.
+    void blendSharedValues();
 
     FrameState frameState(const ShaderKey& shader) const;
 
@@ -284,6 +306,12 @@ class ObjectPlanner {
     std::unordered_map<uint64_t, uint64_t> m_reidentifyAgainAt;
     // Reused by every search: the point searched for.
     std::vector<double> m_point;
+    // Reused every frame: what the blended draws share, and the shaders of
+    // the unverified ones, sorted, which are all that is looked up.
+    SharedValues m_shared;
+    std::vector<ShaderKey> m_unverifiedShaders;
+    uint64_t m_unverifiedSharingValues{0};
+    uint64_t m_valuesShared{0};
     uint64_t m_partnersDerived{0};
     uint64_t m_partnersSearched{0};
     uint64_t m_partnersReidentified{0};
