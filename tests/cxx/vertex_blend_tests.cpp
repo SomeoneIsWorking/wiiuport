@@ -420,6 +420,24 @@ void aMeshTwoShadersFetchOtherwiseIsDrawnAlikeByBoth() {
     check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{2}, "both blended");
 }
 
+void aMeshAnExcludedShaderReadsIsDrawnAsTheTitleDrewIt() {
+    Blends blends;
+    blends.objects.setPlanning(true);
+    blends.vertices.exclude(kActorShader);
+    blends.record(GuestFrame({{kBlockA, {0.0f, 7.0f}, {10.0f}}}));
+    blends.record(GuestFrame({{kBlockB, {1.0f, 7.0f}, {12.0f}}}));
+    GuestFrame latest({{kBlockA, {2.0f, 7.0f}, {14.0f}}});
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 14.0f, "the excluded shader's mesh is drawn as N");
+    check::equal(blends.vertices.draws(VertexOutcome::Excluded), uint64_t{1}, "counted excluded");
+    blends.vertices.exclude(std::nullopt);
+    GuestFrame next({{kBlockB, {3.0f, 7.0f}, {16.0f}}});
+    blends.record(next);
+    drawn = blends.replay(next);
+    check::equal(drawn[0][0], 15.0f, "and blended again once nothing is excluded");
+}
+
 void anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore() {
     Blends blends;
     blends.objects.setPlanning(true);
@@ -646,6 +664,7 @@ void runVertexBlendTests() {
     anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore();
     everyPassOverAMeshDrawsItAlike();
     aMeshTwoShadersFetchOtherwiseIsDrawnAlikeByBoth();
+    aMeshAnExcludedShaderReadsIsDrawnAsTheTitleDrewIt();
     cloudsTheTitleReordersAreBlendedFromTheCloudTheyPassed();
     cloudsReorderedSinceTwoFramesBackAreBlendedFromTheirOwn();
     aMeshTheTitleDrewUnderOtherBlocksAFrameBeforeIsBlendedFromThere();

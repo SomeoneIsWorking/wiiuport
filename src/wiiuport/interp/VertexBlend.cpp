@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstring>
+#include <set>
 #include <tuple>
 
 namespace wiiuport::interp {
@@ -151,6 +152,8 @@ std::string_view vertexOutcomeName(VertexOutcome outcome) {
         return "notFloats";
     case VertexOutcome::Started:
         return "started";
+    case VertexOutcome::Excluded:
+        return "excluded";
     case VertexOutcome::Count:
         break;
     }
@@ -345,7 +348,13 @@ void VertexBlend::startBlending() {
     // reads its buffers, whatever it fetches of them, the first with a
     // partner deciding for all: readers drawn differently tear it, as a
     // shadow volume's did.
+    std::optional<uint64_t> excluded;
+    {
+        std::lock_guard lock(m_excludedMutex);
+        excluded = m_excluded;
+    }
     std::map<std::vector<size_t>, std::optional<VertexLayout>> layouts;
+    std::set<std::vector<size_t>> excludedMeshes;
     for (const Draw& drawn : m_latest.draws) {
         if (!drawn.vertexEntry.has_value()) {
             continue;
@@ -354,11 +363,18 @@ void VertexBlend::startBlending() {
         if (!fresh && layout->second.has_value() && !layout->second->absorb(drawn.layout)) {
             layout->second.reset();
         }
+        if (drawn.vertexShaderBaseHash == excluded) {
+            excludedMeshes.insert(drawn.bufferStarts);
+        }
     }
     std::map<std::vector<size_t>, Job> meshes;
     for (size_t index = 0; index < m_latest.draws.size(); ++index) {
         const Draw& drawn = m_latest.draws[index];
         if (!drawn.vertexEntry.has_value()) {
+            continue;
+        }
+        if (excludedMeshes.contains(drawn.bufferStarts)) {
+            m_drawBlends[index] = PairBlend{VertexOutcome::Excluded, 0};
             continue;
         }
         std::variant<Job, VertexOutcome> planned = planDraw(index);

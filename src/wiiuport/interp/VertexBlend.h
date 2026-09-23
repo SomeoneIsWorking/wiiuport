@@ -86,6 +86,10 @@ enum class VertexOutcome : uint32_t {
     // the sea and placed in the sky was drawn on the water. Drawn as the
     // title drew it.
     Started,
+    // A shader reading its buffers was excluded over the control channel,
+    // to tell which draws a defect in the in-between frame is. Drawn as the
+    // title drew it.
+    Excluded,
     Count
 };
 
@@ -185,6 +189,14 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
 
     bool isBlending() const {
         return m_blendingEnabled.load();
+    }
+
+    // Draws every mesh the vertex shader with this base hash reads as the
+    // title drew it, by all its readers; none excludes nothing. A
+    // maintainer's discriminator, not a setting. Safe from any thread.
+    void exclude(std::optional<uint64_t> shaderBaseHash) {
+        std::lock_guard lock(m_excludedMutex);
+        m_excluded = shaderBaseHash;
     }
 
     void onAssemblyRecorded(const frame::RecordedUniformAssembly& assembly) override;
@@ -401,6 +413,8 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::atomic<int64_t> m_blendingNanoseconds{0};
     std::atomic<uint64_t> m_partnersFoundByVertices{0};
     std::atomic<bool> m_blendingEnabled{true};
+    std::mutex m_excludedMutex;
+    std::optional<uint64_t> m_excluded;
 
     std::mutex m_mutex;
     std::condition_variable_any m_handedOver;
