@@ -499,6 +499,24 @@ void aSnapshotHoldsConsecutiveFramesAsRecorded() {
     float value = 0.0f;
     std::memcpy(&value, framed.data() + firstFloat + (3 * sizeof(float)), sizeof(value));
     check::equal(value, 1.0f, "with the first frame's values first");
+
+    std::vector<RecordingSnapshot::Frame> read = RecordingSnapshot::parse(framed);
+    check::equal(read.size(), size_t{2}, "read back, both frames");
+    FrameRecording second = worldFrame(viewAt(2, 0, 0));
+    const RecordedUniformAssembly& expected = second.uniformAssemblies().front();
+    const RecordedUniformAssembly& actual = read[1].assemblies.front();
+    check::isTrue(read[1].assemblies.size() == second.uniformAssemblies().size() &&
+                      actual.shaderBaseHash == expected.shaderBaseHash &&
+                      actual.stageIndex == expected.stageIndex &&
+                      actual.blockSources == expected.blockSources && actual.data == expected.data,
+                  "each as recorded");
+    bool refused = false;
+    try {
+        RecordingSnapshot::parse(std::string_view(framed).substr(0, framed.size() - 1));
+    } catch (const std::invalid_argument&) {
+        refused = true;
+    }
+    check::isTrue(refused, "and one cut short is refused, not read as far as it goes");
 }
 
 } // namespace

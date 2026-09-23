@@ -2,6 +2,7 @@
 #include "suites.h"
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/interp/ObjectBlend.h"
+#include "wiiuport/interp/PlanReplay.h"
 #include "wiiuport/interp/ReplayBlend.h"
 #include "wiiuport/interp/TransformSubstitution.h"
 
@@ -179,14 +180,18 @@ void oneObjectsBlocksPairEveryShaderDrawingIt() {
     check::equal(blend.objects(Outcome::Blended), uint64_t{2}, "both are blended");
 }
 
-void aShapeThatMovesTheSameButStandsElsewhereIsNotAPartner() {
-    // Moving exactly as the actor would, but at another height: a different
-    // object, told apart by the value that did not move.
+void aValueTheObjectHeldIsDrawnAsItsOwn() {
+    // N-1's draw passes through the middle of the actor's move but holds 40
+    // where the actor held 7: another object, or the actor's value flipping
+    // with the title's double buffering -- three frames cannot tell. Either
+    // way only what moved is taken from it, and that is where the actor
+    // passed through; what the actor held is drawn as the actor's.
+    std::vector<Draw> latest{{kBlockA, {2.0f, 7.0f}}};
     ObjectBlend blend{kHalfway};
-    armAfter(blend, {{kBlockA, {0.0f, 7.0f}}}, {{kBlockB, {1.0f, 40.0f}}},
-             {{kBlockA, {2.0f, 7.0f}}});
-    check::equal(blend.objects(Outcome::Unverified), uint64_t{1},
-                 "a value the object held that its partner does not have fails the match");
+    armAfter(blend, {{kBlockA, {0.0f, 7.0f}}}, {{kBlockB, {1.0f, 40.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(uploaded[0][0], 1.5f, "what moved is blended");
+    check::equal(uploaded[0][1], 7.0f, "and what it held is its own, not the other draw's");
 }
 
 void aTileWhoseBlocksPassedToAnotherIsFoundByItsValues() {
@@ -269,6 +274,21 @@ void aFrameWithNoDrawsStillLeavesTheOneBeforeSearchable() {
     feed({{kBlockB, {2.0f, 7.0f}}});
     check::equal(planner.reidentifyAttempts(), uint64_t{1}, "the actor is looked for by values");
     check::equal(planner.nearestCandidates(), uint64_t{1}, "among the one draw before the gap");
+}
+
+void aKeptSnapshotIsPlannedAgainAsTheProductPlansIt() {
+    std::vector<wiiuport::frame::RecordingSnapshot::Frame> frames;
+    for (const std::vector<Draw>* draws : {&kWalkTwoBack, &kWalkOneBack, &kWalkLatest}) {
+        frames.push_back({true, frameOf(*draws).uniformAssemblies()});
+    }
+    auto report = wiiuport::interp::PlanReplay::run(frames, 3);
+    check::equal(report.frames, uint64_t{3}, "every frame fed");
+    check::equal(report.framesPlanned, uint64_t{1}, "the last planned against the two before");
+    check::equal(report.outcomes[static_cast<size_t>(Outcome::Blended)], uint64_t{1},
+                 "the walker blended");
+    check::equal(report.outcomes[static_cast<size_t>(Outcome::Held)], uint64_t{1},
+                 "and the stander held");
+    check::equal(report.partnersSearched, uint64_t{1}, "counted once, not once a repeat");
 }
 
 void aFailedSearchWaitsBeforeItIsRunAgain() {
@@ -441,6 +461,20 @@ void aValueFlippingEveryFrameIsNotAveraged() {
     check::equal(blend.planner().valuesAlternating(), uint64_t{1}, "and counted");
 }
 
+void aFlippingValueFarLargerThanTheMoveDoesNotHideThePartner() {
+    // Packed data the title writes every other frame, read as floats: 2^97
+    // at N-2 and N, nothing at N-1. Over it the object's move of twenty
+    // units is lost unless only the values it moved in are measured.
+    float packed = std::ldexp(1.0f, 97);
+    std::vector<Draw> latest{{kBlockA, {20.0f, packed}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {0.0f, packed}}}, {{kBlockB, {10.0f, 0.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "its partner is found");
+    check::equal(uploaded[0][0], 15.0f, "what moves is blended");
+    check::equal(uploaded[0][1], packed, "and the packed data drawn as the title wrote it");
+}
+
 void aMoveTooSmallToHalveIsNotDrawnBetween() {
     // One ulp from N-1 to N: half way rounds back onto N-1, which is not a
     // frame between the two.
@@ -601,13 +635,14 @@ void runObjectBlendTests() {
     aNewObjectIsDrawnAsDrawnAndCounted();
     aPartnerFoundOnceIsCarriedAndRechecked();
     oneObjectsBlocksPairEveryShaderDrawingIt();
-    aShapeThatMovesTheSameButStandsElsewhereIsNotAPartner();
+    aValueTheObjectHeldIsDrawnAsItsOwn();
     aTileWhoseBlocksPassedToAnotherIsFoundByItsValues();
     anObjectDrawnFromBlocksNewToItIsFoundByItsValues();
     anObjectFoundStandingStillByItsValuesIsHeld();
     aFailedSearchByValuesDoesNotDelayTheSearchByBlocks();
     aFailedSearchWaitsBeforeItIsRunAgain();
     aFrameWithNoDrawsStillLeavesTheOneBeforeSearchable();
+    aKeptSnapshotIsPlannedAgainAsTheProductPlansIt();
     aValueThatIsNotANumberIsTakenFromTheLaterFrame();
     twoDrawsFromOneBlockAreTwoObjects();
     aReplayOutOfStepWithTheRecordingStopsWriting();
@@ -619,6 +654,7 @@ void runObjectBlendTests() {
     aBlockAllocatedAfreshEveryFrameDoesNotHideItsObject();
     aValueFlippingEveryFrameIsNotAveraged();
     aMoveTooSmallToHalveIsNotDrawnBetween();
+    aFlippingValueFarLargerThanTheMoveDoesNotHideThePartner();
     aPartnerWhoseMovingValuesAreNotNumbersIsNoPartner();
     anObjectThatStoppedAtNMinusOneIsDrawnWhereItStopped();
     aHeldStillWorldReplaysByteIdenticalToTheTitlesFrame();

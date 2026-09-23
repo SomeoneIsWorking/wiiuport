@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace wiiuport::frame {
@@ -27,6 +28,12 @@ class RecordingSnapshot final : public FrameEndListener {
     static constexpr size_t kMaxFrames = 16;
     static constexpr const char* kMagic = "WIIUREC1";
 
+    // One frame of a snapshot, as the recorder published it.
+    struct Frame {
+        bool complete{false};
+        std::vector<RecordedUniformAssembly> assemblies;
+    };
+
     // False when `frames` is zero or above the cap, or a snapshot is already
     // being filled.
     bool arm(size_t frames);
@@ -40,14 +47,15 @@ class RecordingSnapshot final : public FrameEndListener {
     // Empty when no snapshot has completed.
     std::string framed() const;
 
+    // Reads back what framed() wrote, on the host that wrote it, so a
+    // snapshot kept from the title can be planned again offline. Throws
+    // std::invalid_argument naming what is wrong rather than returning the
+    // frames it managed to read.
+    static std::vector<Frame> parse(std::string_view framed);
+
     uint64_t snapshotsCompleted() const;
 
   private:
-    struct Frame {
-        bool complete{false};
-        std::vector<RecordedUniformAssembly> assemblies;
-    };
-
     mutable std::mutex m_mutex;
     size_t m_wanted{0};
     std::vector<Frame> m_filling;

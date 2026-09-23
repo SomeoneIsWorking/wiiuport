@@ -14,6 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_subdirectory(src/wiiuport)
+add_subdirectory(tools/cxx)
 
 if(WIIUPORT_BUILD_TESTS)
   enable_testing()

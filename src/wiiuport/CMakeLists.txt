@@ -79,6 +79,8 @@ add_library(wiiuport STATIC
   interp/RestoreCheck.h
   interp/ObjectPlanner.cpp
   interp/ObjectPlanner.h
+  interp/PlanReplay.cpp
+  interp/PlanReplay.h
   interp/ReplayBlend.h
   interp/Transform3x4.cpp
   interp/Transform3x4.h

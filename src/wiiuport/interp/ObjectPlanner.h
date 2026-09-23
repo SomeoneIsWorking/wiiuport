@@ -219,8 +219,9 @@ class ObjectPlanner {
     std::optional<size_t> nearestEarlier(const AssemblyKey& key, std::span<const float> after,
                                          std::optional<size_t> start);
     // The same shader's draw in N-1 whose values the midpoint lands nearest,
-    // within the tolerance. Both searches are exact, over N-2's and N-1's
-    // trees of their draws (DrawTree).
+    // within the tolerance: first agreeing in the values the object held
+    // too, then, failing that, in the values it moved in alone. Both searches are exact, over N-2's
+    // and N-1's trees of their draws (DrawTree).
     std::optional<size_t> searchPartner(const AssemblyKey& key, std::span<const float> before,
                                         std::span<const float> after);
     void learn(const AssemblyKey& key, const AssemblyKey& partner);

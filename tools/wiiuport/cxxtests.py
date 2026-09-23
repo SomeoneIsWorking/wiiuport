@@ -39,8 +39,9 @@ def _run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=cwd, capture_output=True, text=True, check=False)
 
 
-def build_and_run(layout: Layout) -> CxxTestReport:
-    """Configure, build and run the harness, refusing by name at each step.
+def build_target(layout: Layout, target: str) -> Path:
+    """Configure the first-party build and build one target of it, refusing
+    by name at each step; returns the build tree.
 
     Clang is the agent's verification compiler, so it is named here rather than
     left to whatever happens to be first on PATH. That is this command's own
@@ -49,7 +50,7 @@ def build_and_run(layout: Layout) -> CxxTestReport:
     try:
         check(GATE_REQUIREMENTS)
     except MissingHostPackages as missing:
-        raise CxxTestsUnavailable(f"the C++ tests were never built or run.\n{missing}") from missing
+        raise CxxTestsUnavailable(f"{target} was never built.\n{missing}") from missing
     build = layout.wiiuport_build
     configure = _run(
         [
@@ -68,16 +69,21 @@ def build_and_run(layout: Layout) -> CxxTestReport:
     )
     if configure.returncode != 0:
         raise CxxTestsUnavailable(
-            "cmake could not configure the first-party build, so the C++ tests "
-            f"were never run:\n{(configure.stdout + configure.stderr).strip()}"
+            f"cmake could not configure the first-party build, so {target} was "
+            f"never built:\n{(configure.stdout + configure.stderr).strip()}"
         )
     _refuse_unless_clang(build)
-    compiled = _run(["cmake", "--build", str(build), "--target", TEST_TARGET], layout.root)
+    compiled = _run(["cmake", "--build", str(build), "--target", target], layout.root)
     if compiled.returncode != 0:
         raise CxxTestsUnavailable(
-            "the C++ tests did not compile, so none of them ran:\n"
-            f"{(compiled.stdout + compiled.stderr).strip()}"
+            f"{target} did not compile:\n{(compiled.stdout + compiled.stderr).strip()}"
         )
+    return build
+
+
+def build_and_run(layout: Layout) -> CxxTestReport:
+    """Build the harness and run it, refusing by name at each step."""
+    build = build_target(layout, TEST_TARGET)
     executed = _run([str(build / "tests" / "cxx" / TEST_TARGET)], layout.root)
     output = (executed.stdout + executed.stderr).strip()
     summary = _SUMMARY.search(output)
