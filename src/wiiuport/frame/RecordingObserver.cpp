@@ -72,6 +72,25 @@ void RecordingObserver::OnGuestDraw(bool fromCommandBuffer) {
     ++m_guestDrawsFromRing;
 }
 
+void RecordingObserver::OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw) {
+    if (draw.fromRuntime) {
+        return;
+    }
+    ++m_guestDrawsPrepared;
+    if (draw.vertexUniforms) {
+        return;
+    }
+    ++m_guestDrawsWithoutVertexUniforms;
+    std::lock_guard lock(m_withoutUniformsMutex);
+    ++m_withoutUniformsByShader[{draw.vertexShaderBaseHash, draw.vertexShaderAuxHash}];
+}
+
+std::map<RecordingObserver::VertexShader, uint64_t>
+RecordingObserver::guestDrawsWithoutVertexUniformsByShader() const {
+    std::lock_guard lock(m_withoutUniformsMutex);
+    return m_withoutUniformsByShader;
+}
+
 void RecordingObserver::OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) {
     ++m_runtimeSubmissions;
     m_runtimePacketsProcessed += summary.packetsProcessed;

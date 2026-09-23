@@ -284,6 +284,21 @@ void aDrawTheRingIssuedIsCountedApartFromOneACommandBufferDid() {
                  "and the ones no recording of buffers can reach are counted apart");
 }
 
+void aDrawWhoseVertexShaderReadsNoUniformsIsCountedAsOneNoBlendMoves() {
+    RecordingObserver observer;
+    observer.OnDrawPrepared({0x1, 0, true, false});
+    observer.OnDrawPrepared({0x2, 0, false, false});
+    // The runtime's own replay draws the same frame again; it is not the
+    // title's.
+    observer.OnDrawPrepared({0x2, 0, false, true});
+    check::equal(observer.guestDrawsPrepared(), uint64_t{2}, "the title's draws are counted");
+    check::equal(observer.guestDrawsWithoutVertexUniforms(), uint64_t{1},
+                 "and the one placed by vertex data alone apart");
+    auto byShader = observer.guestDrawsWithoutVertexUniformsByShader();
+    check::equal(byShader.size(), size_t{1}, "under its own vertex shader");
+    check::equal(byShader[{0x2, 0}], uint64_t{1}, "once");
+}
+
 void theShapeOfEachPublishedFrameIsKeptAndTheOldestDropped() {
     // A frame's own totals cannot say whether the recorder publishes whole
     // frames or halves of them. A run of consecutive frames can, which is why
@@ -329,6 +344,7 @@ void runFrameTests() {
     whatASubmissionReachedIsSummedRatherThanOverwritten();
     aNestedBufferIsCountedAndNotRecordedTwice();
     aDrawTheRingIssuedIsCountedApartFromOneACommandBufferDid();
+    aDrawWhoseVertexShaderReadsNoUniformsIsCountedAsOneNoBlendMoves();
     theShapeOfEachPublishedFrameIsKeptAndTheOldestDropped();
 }
 

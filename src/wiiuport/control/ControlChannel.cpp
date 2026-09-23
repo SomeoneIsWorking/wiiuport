@@ -19,7 +19,8 @@ lucent::http::Response notFound() {
         404, "Not Found",
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
         "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
-        "GET /recordings, GET /objects, POST /replay, POST /capture, POST /present, POST "
+        "GET /recordings, GET /objects, GET /draws, POST /replay, POST /capture, POST /present, "
+        "POST "
         "/nulldiff, POST "
         "/interpolate, POST /continuous, POST /restorecheck, POST /pacing, POST /objects, POST "
         "/recordings and POST "
@@ -191,6 +192,9 @@ std::string ControlChannel::countersJson() const {
     body += ",\"guestDrawsFromCommandBuffers\":" +
             std::to_string(m_recorder.guestDrawsFromCommandBuffers());
     body += ",\"guestDrawsFromRing\":" + std::to_string(m_recorder.guestDrawsFromRing());
+    body += ",\"guestDrawsPrepared\":" + std::to_string(m_recorder.guestDrawsPrepared());
+    body += ",\"guestDrawsWithoutVertexUniforms\":" +
+            std::to_string(m_recorder.guestDrawsWithoutVertexUniforms());
     body += ",\"runtimeSubmissions\":" + std::to_string(m_recorder.runtimeSubmissions());
     body += ",\"runtimePacketsProcessed\":" + std::to_string(m_recorder.runtimePacketsProcessed());
     body += ",\"runtimeDrawsIssued\":" + std::to_string(m_recorder.runtimeDrawsIssued());
@@ -304,6 +308,20 @@ std::string ControlChannel::framesJson() const {
         body += ",\"distinctShaders\":" + std::to_string(shape.distinctShaders);
         body += ",\"byteCount\":" + std::to_string(shape.byteCount);
         body += ",\"complete\":" + std::string(shape.complete ? "true" : "false") + "}";
+    }
+    return body + "]}\n";
+}
+
+std::string ControlChannel::drawsJson() const {
+    std::string body = "{\"guestDrawsPrepared\":" + std::to_string(m_recorder.guestDrawsPrepared());
+    body += ",\"withoutVertexUniforms\":[";
+    auto first = true;
+    for (const auto& [shader, draws] : m_recorder.guestDrawsWithoutVertexUniformsByShader()) {
+        body += first ? "{" : ",{";
+        first = false;
+        body += "\"baseHash\":" + std::to_string(shader.baseHash);
+        body += ",\"auxHash\":" + std::to_string(shader.auxHash);
+        body += ",\"draws\":" + std::to_string(draws) + "}";
     }
     return body + "]}\n";
 }
@@ -730,6 +748,9 @@ bool ControlChannel::start(uint16_t port) {
                 }
                 return lucent::http::Response::binary(200, "OK", "application/octet-stream",
                                                       m_capture.lastImageFramed(slot));
+            }
+            if (request.path() == "/draws") {
+                return lucent::http::Response::json(200, "OK", drawsJson());
             }
             if (request.path() == "/frames") {
                 return lucent::http::Response::json(200, "OK", framesJson());

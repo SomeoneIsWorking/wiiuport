@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 from wiiuport.census import read_census, request_census
+from wiiuport.draws import read_draws
 from wiiuport.drive import left_stick, press, release
 from wiiuport.headless import HeadlessSession
 from wiiuport.image import arm_capture, read_capture
@@ -158,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
 
                 restart_pacing(args.port)
                 before = sample("walk start")
+                drawn_before = read_draws(port=args.port)
                 walk_started = time.monotonic()
                 samples: list[Interpolation] = []
                 step = max(1, args.walk // len(WALK_DIRECTIONS))
@@ -176,6 +178,7 @@ def main(argv: list[str] | None = None) -> int:
                 control = restore_check.take(args.port, in_between=True)
                 release(port=args.port)
                 after = sample("walk end")
+                drawn_after = read_draws(port=args.port)
                 walk_seconds = time.monotonic() - walk_started
                 frames = parse_recordings(body)
                 # What was on screen, so a run that never reached the world
@@ -200,6 +203,11 @@ def main(argv: list[str] | None = None) -> int:
     window = after.since(before)
     rate = window.ticks / walk_seconds
     print(f"title rate while walking: {rate:.2f} Hz ({window.ticks} ticks in {walk_seconds:.1f} s)")
+    try:
+        print(drawn_after.since(drawn_before).render())
+    except ControlUnavailable as unreported:
+        print(f"refused: {unreported}", file=sys.stderr)
+        return 1
     print("while walking:")
     print(window.render())
     for index, sample in enumerate(samples):
