@@ -298,6 +298,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     std::vector<DrawRecordedListener*> m_drawListeners;
     FrameRecording m_inFlight;
     FrameRecording m_completed;
+    RecordedUniformAssembly m_assemblyScratch;
     FrameRecording m_previous;
     std::array<uint64_t, LatteFrameHooks::kWithheldEffectCount> m_runtimeWithheld{};
     uint64_t m_framesObserved{0};

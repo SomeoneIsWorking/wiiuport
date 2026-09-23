@@ -11,11 +11,11 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <optional>
 #include <span>
 #include <string_view>
-#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -267,6 +267,9 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         VertexLayout layout;
         // Where each buffer's copy starts in the frame's bytes.
         std::vector<size_t> bufferStarts;
+        // The mesh it reads, by the frame's meshes: draws reading the same
+        // copies share one.
+        uint32_t mesh{0};
     };
 
     struct Frame {
@@ -281,6 +284,8 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         // told apart only by its place may be drawn anywhere among them the
         // frame before, under other blocks.
         std::map<std::pair<uint64_t, uint64_t>, std::vector<size_t>> byShader;
+        // Each mesh's id, by the copies it reads.
+        std::map<std::vector<size_t>, uint32_t> meshes;
         // ObjectBlend's frames ended when this one ended.
         uint64_t frameIndex{0};
         // Assemblies recorded so far, and the last vertex-stage one.
@@ -296,26 +301,16 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::span<const std::byte> bufferBytes(const Frame& frame, const Draw& draw,
                                            size_t buffer) const;
 
-    // One pair of draws' buffers read under one layout: draws of a mesh
-    // drawn many times in a frame blend it once.
-    struct PairKey {
-        std::vector<size_t> twoBack;
-        std::vector<size_t> before;
-        std::vector<size_t> after;
-        VertexLayout layout;
-        PartnerIdentity identity;
-
-        auto operator<=>(const PairKey&) const = default;
-    };
-
     struct PairBlend {
         VertexOutcome outcome;
         // Where its blended buffers start in m_blended.
         size_t start;
     };
 
-    // A distinct pair's place in m_blended, laid out before any is blended
-    // so the buffer never moves under a replay reading it.
+    // A mesh's place in m_blended, laid out before any is blended so the
+    // buffer never moves under a replay reading it. Every draw of a mesh
+    // shares one job (startBlending), so a mesh is one pair of draws and is
+    // blended once, however often it is drawn.
     struct PairSlot {
         size_t start;
         std::optional<VertexOutcome> outcome;
@@ -330,8 +325,19 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         PartnerIdentity identity;
         // The draw of its mesh whose partner was taken, and every attribute
         // the mesh's readers at N fetch: all of them draw the same bytes.
+        // The layout is a draw's of the latest frame or one of
+        // m_meshLayouts, both kept until the blend of the frame is done.
         size_t plannedBy;
-        VertexLayout layout;
+        const VertexLayout* layout;
+    };
+
+    // The layout every reader of a mesh fetches together: the first
+    // reader's until another fetches more, then a merged copy; none once
+    // two readers lay its buffers out otherwise.
+    struct MeshLayout {
+        const VertexLayout* layout{nullptr};
+        bool merged{false};
+        bool refused{false};
     };
 
     // Ties each of the latest frame's kept draws to its partner's and hands
@@ -351,7 +357,9 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
                             const VertexLayout& layout, PartnerIdentity identity, size_t start);
     // A place-identified job's draws two frames back and a frame before:
     // those of its shader and layout its vertices most resemble, the
-    // planner's where none more.
+    // planner's where none more. Done as its mesh is blended, not ahead of
+    // every mesh, so the replay's first draws do not wait on the frame's
+    // every search.
     void placeByVertices(Job& job);
     // Of `planned` and the draws of `drawn`'s shader with its buffers in
     // `frame`, the one `drawn` -- gathered into m_after -- most resembles
@@ -386,14 +394,15 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::vector<std::byte> m_blended;
     std::vector<std::optional<PairBlend>> m_drawBlends;
     std::vector<Job> m_jobs;
-    // The draws two frames back and a frame before found for each (N-2,
-    // N-1, N) buffers the planner named for a place-identified draw this
-    // frame: its passes share them.
-    std::map<std::tuple<std::vector<size_t>, std::vector<size_t>, std::vector<size_t>>,
-             std::pair<size_t, size_t>>
-        m_placed;
     std::vector<std::byte> m_candidate;
-    std::map<PairKey, size_t> m_pairs;
+    // The latest frame's meshes: their layouts, the merged ones' storage,
+    // whether a reader's shader was excluded, the job all their draws share,
+    // and their slots in m_blended. Kept for their capacity.
+    std::vector<MeshLayout> m_meshLayouts;
+    std::deque<VertexLayout> m_mergedLayouts;
+    std::vector<uint8_t> m_meshExcluded;
+    std::vector<std::optional<Job>> m_meshJobs;
+    std::vector<std::optional<size_t>> m_meshSlots;
     std::vector<PairSlot> m_pairSlots;
     std::vector<size_t> m_jobPairs;
     std::atomic<size_t> m_blendedThrough{0};

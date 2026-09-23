@@ -22,13 +22,15 @@ bool FrameRecording::addDisplayList(uint32_t physicalAddress, const void* data,
     if (!reserve(sizeInBytes)) {
         return false;
     }
-    RecordedDisplayList list;
+    if (m_displayListCount == m_displayLists.size()) {
+        m_displayLists.emplace_back();
+    }
+    RecordedDisplayList& list = m_displayLists[m_displayListCount++];
     list.physicalAddress = physicalAddress;
     list.data.resize(sizeInBytes);
     if (sizeInBytes > 0) {
         std::memcpy(list.data.data(), data, sizeInBytes);
     }
-    m_displayLists.push_back(std::move(list));
     return true;
 }
 
@@ -38,13 +40,17 @@ bool FrameRecording::addUniformAssembly(const RecordedUniformAssembly& assembly)
     if (!reserve(bytes)) {
         return false;
     }
-    m_uniformAssemblies.push_back(assembly);
+    if (m_uniformAssemblyCount == m_uniformAssemblies.size()) {
+        m_uniformAssemblies.emplace_back();
+    }
+    // Copy-assigned, so the slot's vectors keep their storage.
+    m_uniformAssemblies[m_uniformAssemblyCount++] = assembly;
     return true;
 }
 
 void FrameRecording::clear() {
-    m_displayLists.clear();
-    m_uniformAssemblies.clear();
+    m_displayListCount = 0;
+    m_uniformAssemblyCount = 0;
     m_byteCount = 0;
     m_refusedOverBudget = 0;
 }

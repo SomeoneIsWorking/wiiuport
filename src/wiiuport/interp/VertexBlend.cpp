@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <bit>
 #include <cstring>
-#include <set>
 #include <tuple>
 
 namespace wiiuport::interp {
@@ -264,6 +263,7 @@ void VertexBlend::Frame::clear() {
     copied.clear();
     byEntry.clear();
     byShader.clear();
+    meshes.clear();
     frameIndex = 0;
     assemblies = 0;
     lastVertexEntry.reset();
@@ -318,6 +318,10 @@ void VertexBlend::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) {
         }
         m_building.byShader[{draw.vertexShaderBaseHash, draw.vertexShaderAuxHash}].push_back(
             m_building.draws.size());
+        recorded.mesh =
+            m_building.meshes
+                .try_emplace(recorded.bufferStarts, static_cast<uint32_t>(m_building.meshes.size()))
+                .first->second;
         m_copying += std::chrono::steady_clock::now() - started;
     }
     m_building.draws.push_back(std::move(recorded));
@@ -353,35 +357,46 @@ void VertexBlend::startBlending() {
         std::lock_guard lock(m_excludedMutex);
         excluded = m_excluded;
     }
-    std::map<std::vector<size_t>, std::optional<VertexLayout>> layouts;
-    std::set<std::vector<size_t>> excludedMeshes;
+    size_t meshCount = m_latest.meshes.size();
+    m_meshLayouts.assign(meshCount, MeshLayout{});
+    m_mergedLayouts.clear();
+    m_meshExcluded.assign(meshCount, 0);
+    m_meshJobs.assign(meshCount, std::nullopt);
     for (const Draw& drawn : m_latest.draws) {
         if (!drawn.vertexEntry.has_value()) {
             continue;
         }
-        auto [layout, fresh] = layouts.try_emplace(drawn.bufferStarts, drawn.layout);
-        if (!fresh && layout->second.has_value() && !layout->second->absorb(drawn.layout)) {
-            layout->second.reset();
+        MeshLayout& mesh = m_meshLayouts[drawn.mesh];
+        if (mesh.layout == nullptr) {
+            mesh.layout = &drawn.layout;
+        } else if (!mesh.refused && *mesh.layout != drawn.layout) {
+            if (!mesh.merged) {
+                mesh.layout = &m_mergedLayouts.emplace_back(*mesh.layout);
+                mesh.merged = true;
+            }
+            mesh.refused = !m_mergedLayouts.back().absorb(drawn.layout);
         }
         if (drawn.vertexShaderBaseHash == excluded) {
-            excludedMeshes.insert(drawn.bufferStarts);
+            m_meshExcluded[drawn.mesh] = 1;
         }
     }
-    std::map<std::vector<size_t>, Job> meshes;
     for (size_t index = 0; index < m_latest.draws.size(); ++index) {
         const Draw& drawn = m_latest.draws[index];
         if (!drawn.vertexEntry.has_value()) {
             continue;
         }
-        if (excludedMeshes.contains(drawn.bufferStarts)) {
+        if (m_meshExcluded[drawn.mesh] != 0) {
             m_drawBlends[index] = PairBlend{VertexOutcome::Excluded, 0};
             continue;
         }
+        if (m_meshJobs[drawn.mesh].has_value()) {
+            continue;
+        }
         std::variant<Job, VertexOutcome> planned = planDraw(index);
-        const std::optional<VertexLayout>& layout = layouts.at(drawn.bufferStarts);
-        if (Job* job = std::get_if<Job>(&planned); job != nullptr && layout.has_value()) {
-            job->layout = *layout;
-            meshes.try_emplace(drawn.bufferStarts, *job);
+        const MeshLayout& layout = m_meshLayouts[drawn.mesh];
+        if (Job* job = std::get_if<Job>(&planned); job != nullptr && !layout.refused) {
+            job->layout = layout.layout;
+            m_meshJobs[drawn.mesh] = *job;
         } else {
             m_drawBlends[index] = PairBlend{
                 job != nullptr ? VertexOutcome::ShapeDiffers : std::get<VertexOutcome>(planned), 0};
@@ -389,16 +404,13 @@ void VertexBlend::startBlending() {
     }
     for (size_t index = 0; index < m_latest.draws.size(); ++index) {
         const Draw& drawn = m_latest.draws[index];
-        if (!drawn.vertexEntry.has_value()) {
+        if (!drawn.vertexEntry.has_value() || !m_meshJobs[drawn.mesh].has_value()) {
             continue;
         }
-        auto mesh = meshes.find(drawn.bufferStarts);
-        if (mesh != meshes.end()) {
-            Job job = mesh->second;
-            job.draw = index;
-            m_jobs.push_back(std::move(job));
-            m_drawBlends[index].reset();
-        }
+        Job job = *m_meshJobs[drawn.mesh];
+        job.draw = index;
+        m_jobs.push_back(job);
+        m_drawBlends[index].reset();
     }
     if (m_jobs.empty()) {
         m_blendedThrough.store(m_latest.draws.size(), std::memory_order_release);
@@ -430,7 +442,7 @@ std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index
     PartnerIdentity identity = planner.latest().sharesKey(*drawn.vertexEntry)
                                    ? PartnerIdentity::ByPlace
                                    : PartnerIdentity::ByBlocks;
-    return Job{index, *partner, *earlier, identity, index, drawn.layout};
+    return Job{index, *partner, *earlier, identity, index, &drawn.layout};
 }
 
 std::optional<size_t> VertexBlend::drawOf(const Frame& frame, size_t entry, const Draw& drawn) {
@@ -448,41 +460,35 @@ void VertexBlend::blendHandedOver(std::stop_token stop) {
     })) {
         lock.unlock();
         auto started = std::chrono::steady_clock::now();
-        // Each distinct pair's place first, so nothing blended moves.
-        m_pairs.clear();
+        // Each mesh's place first, so nothing blended moves.
+        m_meshSlots.assign(m_latest.meshes.size(), std::nullopt);
         m_pairSlots.clear();
         m_jobPairs.clear();
-        m_placed.clear();
         size_t bytes = 0;
-        for (Job& job : m_jobs) {
-            if (job.identity == PartnerIdentity::ByPlace) {
-                placeByVertices(job);
-            }
-            const Draw& drawn = m_latest.draws[job.draw];
-            const Draw& partner = m_previous.draws[job.partner];
-            const Draw& earlier = m_twoBack.draws[job.earlier];
-            auto [pair, fresh] =
-                m_pairs.try_emplace(PairKey{earlier.bufferStarts, partner.bufferStarts,
-                                            drawn.bufferStarts, job.layout, job.identity},
-                                    m_pairSlots.size());
-            if (fresh) {
+        for (const Job& job : m_jobs) {
+            std::optional<size_t>& slot = m_meshSlots[m_latest.draws[job.draw].mesh];
+            if (!slot.has_value()) {
+                slot = m_pairSlots.size();
                 m_pairSlots.push_back({bytes, std::nullopt});
-                for (const VertexLayout::Buffer& buffer : job.layout.buffers) {
+                for (const VertexLayout::Buffer& buffer : job.layout->buffers) {
                     bytes += buffer.sizeInBytes;
                 }
             }
-            m_jobPairs.push_back(pair->second);
+            m_jobPairs.push_back(*slot);
         }
         if (m_blended.size() < bytes) {
             m_blended.resize(bytes);
         }
         for (size_t index = 0; index < m_jobs.size(); ++index) {
-            const Job& job = m_jobs[index];
+            Job& job = m_jobs[index];
             PairSlot& slot = m_pairSlots[m_jobPairs[index]];
             if (!slot.outcome.has_value()) {
+                if (job.identity == PartnerIdentity::ByPlace) {
+                    placeByVertices(job);
+                }
                 slot.outcome =
                     blendPair(m_twoBack.draws[job.earlier], m_previous.draws[job.partner],
-                              m_latest.draws[job.draw], job.layout, job.identity, slot.start);
+                              m_latest.draws[job.draw], *job.layout, job.identity, slot.start);
             }
             m_drawBlends[job.draw] = PairBlend{*slot.outcome, slot.start};
             m_blendedThrough.store(job.draw + 1, std::memory_order_release);
@@ -649,23 +655,14 @@ size_t VertexBlend::mostResembling(const Draw& drawn, const VertexLayout& layout
 
 void VertexBlend::placeByVertices(Job& job) {
     const Draw& drawn = m_latest.draws[job.plannedBy];
-    auto [found, fresh] =
-        m_placed.try_emplace({m_twoBack.draws[job.earlier].bufferStarts,
-                              m_previous.draws[job.partner].bufferStarts, drawn.bufferStarts},
-                             std::pair{job.earlier, job.partner});
-    if (!fresh) {
-        std::tie(job.earlier, job.partner) = found->second;
-        return;
-    }
     size_t plannedEarlier = job.earlier;
     size_t plannedPartner = job.partner;
     gather(m_latest, drawn, m_after);
-    job.earlier = mostResembling(drawn, job.layout, m_twoBack, job.earlier);
-    job.partner = mostResembling(drawn, job.layout, m_previous, job.partner);
+    job.earlier = mostResembling(drawn, *job.layout, m_twoBack, job.earlier);
+    job.partner = mostResembling(drawn, *job.layout, m_previous, job.partner);
     if (job.earlier != plannedEarlier || job.partner != plannedPartner) {
         ++m_partnersFoundByVertices;
     }
-    found->second = {job.earlier, job.partner};
 }
 
 } // namespace wiiuport::interp

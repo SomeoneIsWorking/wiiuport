@@ -42,7 +42,8 @@ void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly
         }
         return;
     }
-    RecordedUniformAssembly recorded;
+    // Filled in place, so its vectors keep their storage from draw to draw.
+    RecordedUniformAssembly& recorded = m_assemblyScratch;
     recorded.shaderBaseHash = assembly.shaderBaseHash;
     recorded.shaderAuxHash = assembly.shaderAuxHash;
     recorded.stageIndex = assembly.stageIndex;
@@ -114,8 +115,9 @@ void RecordingObserver::OnFrameComplete() {
     if (!m_inFlight.isComplete()) {
         m_framesRefusedIncomplete++;
     }
-    m_previous = std::move(m_completed);
-    m_completed = std::move(m_inFlight);
+    // Rotated, so the frame to be filled reuses the oldest one's storage.
+    std::swap(m_previous, m_completed);
+    std::swap(m_completed, m_inFlight);
     m_inFlight.clear();
     // After publishing, never before: a listener must not be handed a frame
     // that is still being filled.
