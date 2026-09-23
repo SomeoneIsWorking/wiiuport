@@ -339,6 +339,21 @@ void aReplayOutOfStepStopsReplacing() {
     check::equal(blends.vertices.replaysDiverged(), uint64_t{1}, "and counted");
 }
 
+void verticesSwitchedOffAreDrawnAsTheTitleDrewThemAndBlendAgainOnceOn() {
+    Blends blends;
+    blends.objects.setPlanning(true);
+    blends.record(GuestFrame({{kBlockA, {0.0f, 7.0f}, {10.0f}}}));
+    blends.record(GuestFrame({{kBlockB, {1.0f, 7.0f}, {12.0f}}}));
+    GuestFrame latest({{kBlockA, {2.0f, 7.0f}, {14.0f}}});
+    blends.record(latest);
+    blends.vertices.setBlending(false);
+    check::equal(blends.replay(latest)[0][0], 14.0f, "switched off, the title's vertices");
+    check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{0}, "none blended");
+    blends.vertices.setBlending(true);
+    check::equal(blends.replay(latest)[0][0], 13.0f,
+                 "switched back on, the kept vertices blend in the next replay");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -354,6 +369,7 @@ void runVertexBlendTests() {
     anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore();
     nothingIsReplacedBeforeThreeFramesArePlanned();
     aReplayOutOfStepStopsReplacing();
+    verticesSwitchedOffAreDrawnAsTheTitleDrewThemAndBlendAgainOnceOn();
 }
 
 } // namespace wiiuport::tests

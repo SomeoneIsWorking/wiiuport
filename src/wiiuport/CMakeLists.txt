@@ -79,6 +79,7 @@ add_library(wiiuport STATIC
   interp/VertexBlend.h
   interp/ObjectCensus.cpp
   interp/ObjectCensus.h
+  interp/NeighbourCheck.cpp
   interp/RestoreCheck.cpp
   interp/RestoreCheck.h
   interp/ObjectPlanner.cpp

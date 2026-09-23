@@ -61,6 +61,7 @@ struct Fixture {
                                            wiiuport::interp::ContinuousInterpolator::kBlendPoint};
     wiiuport::frame::GuestStateGuard guard{&noGuard, &noRestore};
     wiiuport::interp::RestoreCheck restoreCheck{presenter, capture};
+    wiiuport::interp::NeighbourCheck neighbourCheck{capture};
     wiiuport::interp::ContinuousInterpolator continuous{viewTracker, substitution, objects,
                                                         replayer,    presenter,    guard,
                                                         scheduler,   restoreCheck, &neverNow};
@@ -79,6 +80,7 @@ struct Fixture {
         .viewTracker = viewTracker,
         .continuous = continuous,
         .restoreCheck = restoreCheck,
+        .neighbourCheck = neighbourCheck,
         .objects = objects,
         .vertices = vertices,
         .snapshot = snapshot,

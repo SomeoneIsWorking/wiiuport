@@ -15,6 +15,7 @@
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/interp/ContinuousInterpolator.h"
 #include "wiiuport/interp/FrameInterpolator.h"
+#include "wiiuport/interp/NeighbourCheck.h"
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/ReplayBlend.h"
 #include "wiiuport/interp/RestoreCheck.h"
@@ -118,6 +119,8 @@ class Runtime {
     interp::FrameInterpolator m_interpolator{m_search, m_substitution, m_scheduler};
     interp::ViewTracker m_viewTracker{m_search};
     interp::RestoreCheck m_restoreCheck{m_presenter, m_capture};
+    interp::NeighbourCheck m_neighbourCheck{m_capture};
+    interp::TickProbes m_tickProbes{m_restoreCheck, m_neighbourCheck};
     interp::ContinuousInterpolator m_continuous;
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
@@ -135,6 +138,7 @@ class Runtime {
         .viewTracker = m_viewTracker,
         .continuous = m_continuous,
         .restoreCheck = m_restoreCheck,
+        .neighbourCheck = m_neighbourCheck,
         .objects = m_objectBlend,
         .vertices = m_vertexBlend,
         .snapshot = m_snapshot,

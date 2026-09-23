@@ -113,7 +113,7 @@ void ContinuousInterpolator::onFrameRecorded(const frame::FrameRecording& record
         return;
     }
 
-    m_probe.beforeInBetween();
+    m_probe.beforeInBetween(m_ticks);
     Clock::time_point started = m_now();
     // Planned while the guest drew; a frame planning missed draws as drawn.
     m_objects.armOnce();

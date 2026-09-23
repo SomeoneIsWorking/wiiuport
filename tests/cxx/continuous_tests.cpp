@@ -9,6 +9,7 @@
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/interp/ContinuousInterpolator.h"
 #include "wiiuport/interp/CutDetector.h"
+#include "wiiuport/interp/NeighbourCheck.h"
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/RestoreCheck.h"
 #include "wiiuport/interp/Transform3x4.h"
@@ -33,6 +34,7 @@ using wiiuport::frame::RecordedUniformAssembly;
 using wiiuport::frame::RecordingSnapshot;
 using wiiuport::interp::ContinuousInterpolator;
 using wiiuport::interp::CutDetector;
+using wiiuport::interp::NeighbourCheck;
 using wiiuport::interp::RestoreCheck;
 using wiiuport::interp::Transform3x4;
 using wiiuport::interp::TransformSearch;
@@ -154,8 +156,10 @@ struct Rig {
     GuestStateGuard guard{&fakeGuard, &fakeRestore};
     wiiuport::frame::ReplayScheduler scheduler{replayer, presenter, capture};
     RestoreCheck restoreCheck{presenter, capture};
-    ContinuousInterpolator continuous{tracker, substitution, objects,      replayer, presenter,
-                                      guard,   scheduler,    restoreCheck, &fakeNow};
+    NeighbourCheck neighbourCheck{capture};
+    wiiuport::interp::TickProbes probes{restoreCheck, neighbourCheck};
+    ContinuousInterpolator continuous{tracker, substitution, objects, replayer, presenter,
+                                      guard,   scheduler,    probes,  &fakeNow};
 
     Rig() {
         resetFakes();
@@ -456,6 +460,65 @@ void aRestoreCheckWhoseCaptureIsRefusedSaysSo() {
     check::equal(rig.restoreCheck.completed(), uint64_t{0}, "and not completed");
 }
 
+void aNeighbourCheckCapturesTheTitlesFramesEitherSideOfAnInBetweenFrame() {
+    Rig rig;
+    float x = rig.walkUntilPaired();
+    check::isTrue(rig.neighbourCheck.arm(), "a check is armed");
+    check::isTrue(!rig.neighbourCheck.arm(), "and a second one while it waits is refused");
+    g_sequence.clear();
+    rig.tick(viewAt(x, 0, 0));
+    std::vector<std::string> before = {"guard", "replay", "present", "restore", "capture", "copy"};
+    check::isTrue(g_sequence == before,
+                  "the first tick's title frame is captured at its copy, and nothing extra is "
+                  "presented");
+    check::equal(rig.neighbourCheck.completed(), uint64_t{0}, "which is half a check");
+    g_sequence.clear();
+    rig.tick(viewAt(x + 1.0f, 0, 0));
+    std::vector<std::string> following = {"guard",   "replay",  "capture", "present",
+                                          "restore", "capture", "copy"};
+    check::isTrue(g_sequence == following,
+                  "the next tick's in-between frame is captured at its present and its title "
+                  "frame at its copy");
+    check::equal(rig.neighbourCheck.completed(), uint64_t{1}, "one check completed");
+    check::equal(rig.neighbourCheck.restarted(), uint64_t{0}, "without starting over");
+    g_sequence.clear();
+    rig.tick(viewAt(x + 2.0f, 0, 0));
+    check::isTrue(g_sequence.front() == "guard", "an unarmed tick captures nothing");
+    check::isTrue(rig.neighbourCheck.arm(), "and another check may be armed");
+}
+
+void aNeighbourCheckStartsOverWhenTheTickBetweenWasNotInterpolated() {
+    Rig rig;
+    float x = rig.walkUntilPaired();
+    rig.neighbourCheck.arm();
+    rig.tick(viewAt(x, 0, 0));
+    rig.continuous.setEnabled(false);
+    rig.tick(viewAt(x + 1.0f, 0, 0));
+    rig.continuous.setEnabled(true);
+    g_sequence.clear();
+    rig.tick(viewAt(x + 2.0f, 0, 0));
+    std::vector<std::string> before = {"guard", "replay", "present", "restore", "capture", "copy"};
+    check::isTrue(g_sequence == before,
+                  "the frame before a tick not interpolated is not the in-between frame's "
+                  "neighbour, so this tick's title frame is taken as the one before instead");
+    check::equal(rig.neighbourCheck.restarted(), uint64_t{1}, "counted as starting over");
+    rig.tick(viewAt(x + 3.0f, 0, 0));
+    check::equal(rig.neighbourCheck.completed(), uint64_t{1}, "and completed on the tick after");
+}
+
+void aNeighbourCheckWhoseCaptureIsRefusedSaysSo() {
+    Rig rig;
+    float x = rig.walkUntilPaired();
+    rig.neighbourCheck.arm();
+    rig.tick(viewAt(x, 0, 0));
+    g_captureAccepted = false;
+    rig.tick(viewAt(x + 1.0f, 0, 0));
+    check::equal(rig.neighbourCheck.refused(), uint64_t{1},
+                 "a slot that was never armed would hold some other frame, so it is refused");
+    check::equal(rig.neighbourCheck.completed(), uint64_t{0}, "and not completed");
+    check::isTrue(rig.neighbourCheck.arm(), "and the check may be armed again");
+}
+
 void theGuardRefusesToOpenTwiceOrCloseUnopened() {
     resetFakes();
     GuestStateGuard guard{&fakeGuard, &fakeRestore};
@@ -541,6 +604,9 @@ void runContinuousTests() {
     theGuardRefusesToOpenTwiceOrCloseUnopened();
     aRestoreCheckCapturesTheGuestFrameBeforeAndAfter();
     aRestoreCheckWhoseCaptureIsRefusedSaysSo();
+    aNeighbourCheckCapturesTheTitlesFramesEitherSideOfAnInBetweenFrame();
+    aNeighbourCheckStartsOverWhenTheTickBetweenWasNotInterpolated();
+    aNeighbourCheckWhoseCaptureIsRefusedSaysSo();
     aSnapshotHoldsConsecutiveFramesAsRecorded();
 }
 
