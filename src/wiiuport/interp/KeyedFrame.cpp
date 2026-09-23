@@ -132,6 +132,15 @@ std::optional<size_t> KeyedFrame::find(const AssemblyKey& key) const {
     return std::nullopt;
 }
 
+bool KeyedFrame::sharesKey(size_t entry) const {
+    if (m_keys[entry].occurrence > 0) {
+        return true;
+    }
+    AssemblyKey next = m_keys[entry];
+    next.occurrence = 1;
+    return find(next).has_value();
+}
+
 void KeyedFrame::flagShared(std::span<const uint32_t> group) {
     if (group.size() < 2) {
         return;

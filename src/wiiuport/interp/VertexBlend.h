@@ -55,10 +55,18 @@ enum class VertexOutcome : uint32_t {
     Blended,
     // Its bytes are the partner's: nothing in its vertices moved.
     Unchanged,
+    // Its vertices are as they were in N-2, whatever N-1 held: it stands
+    // where it stood, and is drawn as the title drew it.
+    Held,
+    // Told from its partner's draw only by its place among identical draws,
+    // and its vertices' N-2..N midpoint does not land on it: some other
+    // mesh. Drawn as the title drew it.
+    Unverified,
     // The object it draws was not blended: no partner, so no vertices a frame
     // before to blend from. Drawn as the title drew it.
     NoPartner,
-    // Its partner's draw has other buffers or attributes, or none of it.
+    // Its partner's draw, or its own two frames back, has other buffers or
+    // attributes, or there is none.
     ShapeDiffers,
     // A value's blend would not lie strictly between the two frames': a move
     // of an ulp. Drawn as the title drew it.
@@ -71,13 +79,25 @@ enum class VertexOutcome : uint32_t {
 inline constexpr size_t kVertexOutcomeCount = static_cast<size_t>(VertexOutcome::Count);
 std::string_view vertexOutcomeName(VertexOutcome outcome);
 
-// Blends a draw's vertex bytes at `t` from `before`, its partner's, to
-// `after`, its own, into `out` (as long as `after`): every float attribute
-// value whose bits differ and which is a number at both ends is lerped, the
-// rest kept as `after` has them. Pure, so the shipping arithmetic is what a
-// test checks.
-VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::byte> before,
-                               std::span<const std::byte> after, float t, std::span<std::byte> out);
+// How far the partner's draw is known to be the same mesh.
+enum class PartnerIdentity : uint8_t {
+    // Its object is told apart by the blocks it sourced.
+    ByBlocks,
+    // Its object shares its shader and blocks with other draws of the frame
+    // and is told apart only by its place among them, which the title
+    // reorders: the vertices themselves must show it.
+    ByPlace
+};
+
+// Blends a draw's vertex bytes at `t` from `before`, its partner's in N-1, to
+// `after`, its own in N, into `out` (as long as `after`): the float attribute
+// values that moved from `twoBack`, its draw in N-2, to N are lerped, where
+// numbers at both ends, and the rest kept as `after` has them. A partner
+// known only `ByPlace` is taken only once its vertices' N-2..N midpoint lands
+// on it (Midpoint). Pure, so the shipping arithmetic is what a test checks.
+VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::byte> twoBack,
+                               std::span<const std::byte> before, std::span<const std::byte> after,
+                               float t, PartnerIdentity identity, std::span<std::byte> out);
 
 // Draws the vertices the title positions on the CPU each frame -- skinned
 // characters, effects -- between the title's two frames, as ObjectBlend does
@@ -91,6 +111,17 @@ VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::
 // by value, where both are floats. A draw whose object has no partner has no
 // vertices a frame before to blend from, and is drawn as the title drew it,
 // counted.
+//
+// The partner names a draw only as far as the uniforms tell objects apart. A
+// held object's uniforms moved in nothing, so any candidate passes them, and
+// many draws hand the same uniforms from the same blocks -- clouds, effect
+// sprites -- told apart only by their place among each other, which the title
+// reorders. So for such a draw the one a frame before is taken only if the
+// object's own vertices, from its draw two frames back to N, pass through it:
+// the planner's midpoint test, on vertices. One that does not is some other
+// mesh, and blending towards it drew the clouds rearranged. A draw whose
+// blocks are its own keeps its partner: its animation turning back fails the
+// midpoint test while the mesh is its own.
 //
 // The replay re-issues the recorded frame, so its n-th draw is the
 // recording's n-th, and a draw is placed by the uniform assemblies replayed
@@ -210,9 +241,11 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // One pair of draws' buffers read under one layout: draws of a mesh
     // drawn many times in a frame blend it once.
     struct PairKey {
+        std::vector<size_t> twoBack;
         std::vector<size_t> before;
         std::vector<size_t> after;
         VertexLayout layout;
+        PartnerIdentity identity;
 
         auto operator<=>(const PairKey&) const = default;
     };
@@ -231,10 +264,12 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     };
 
     // A draw of the latest frame to blend against its partner's, which
-    // the frame before holds.
+    // the frame before holds, and the same object's draw two frames back.
     struct Job {
         size_t draw;
         size_t partner;
+        size_t earlier;
+        PartnerIdentity identity;
     };
 
     // Ties each of the latest frame's kept draws to its partner's and hands
@@ -245,8 +280,13 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // Waits until the blending thread has come to the latest frame's draw
     // at `index`.
     void waitUntilBlendedThrough(size_t index);
-    // Blends one pair into m_blended at `start`, its bytes laid out there.
-    VertexOutcome blendPair(const Draw& partner, const Draw& drawn, size_t start);
+    // Blends one pair into m_blended at `start`, its bytes laid out there,
+    // checked against the object's draw two frames back.
+    VertexOutcome blendPair(const Draw& earlier, const Draw& partner, const Draw& drawn,
+                            PartnerIdentity identity, size_t start);
+    // The draw a frame holds for an object's entry and a draw's place among
+    // it, if it was kept and is laid out as `drawn` is.
+    static std::optional<size_t> drawOf(const Frame& frame, size_t entry, const Draw& drawn);
     void count(VertexOutcome outcome);
 
     const ObjectBlend& m_objects;
@@ -254,6 +294,7 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     Frame m_building;
     Frame m_latest;
     Frame m_previous;
+    Frame m_twoBack;
     // Where the replay is in the latest frame's draws; the replay it was
     // armed for, by ObjectBlend's frames ended, and whether it fell out of
     // step.
@@ -275,6 +316,7 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::atomic<size_t> m_blendedThrough{0};
     // A changed pair's buffers, one after another, as blendVertexBytes reads
     // them; kept for their capacity.
+    std::vector<std::byte> m_twoBackBytes;
     std::vector<std::byte> m_before;
     std::vector<std::byte> m_after;
     std::array<uint64_t, kVertexOutcomeCount> m_outcomes{};

@@ -17,6 +17,7 @@ using wiiuport::frame::FrameRecording;
 using wiiuport::frame::RecordedUniformAssembly;
 using wiiuport::interp::blendVertexBytes;
 using wiiuport::interp::ObjectBlend;
+using wiiuport::interp::PartnerIdentity;
 using wiiuport::interp::VertexBlend;
 using wiiuport::interp::VertexLayout;
 using wiiuport::interp::VertexOutcome;
@@ -24,6 +25,7 @@ using wiiuport::interp::VertexOutcome;
 namespace {
 
 constexpr float kHalfway = 0.5f;
+constexpr PartnerIdentity kByBlocks = PartnerIdentity::ByBlocks;
 constexpr uint8_t kFloat3 = 0x30;
 constexpr uint8_t kFloat1 = 0x0E;
 // 8_8_8_8 UNORM: a colour, not floats.
@@ -92,12 +94,16 @@ VertexLayout layoutOf(uint32_t vertexCount, uint8_t endian) {
 }
 
 void checkBlendsHalfWay(uint8_t endian, const std::string& order) {
+    // Moving steadily: N-1 half way between N-2 and N.
+    std::vector<std::byte> twoBack =
+        bytesOf({{{-2.0f, 2.0f, -12.0f}, 0x00000000}, {{1.0f, -1.0f, 1.0f}, 0x22222222}}, endian);
     std::vector<std::byte> before =
         bytesOf({{{0.0f, 2.0f, -4.0f}, 0x11111111}, {{1.0f, 1.0f, 1.0f}, 0x22222222}}, endian);
     std::vector<std::byte> after =
         bytesOf({{{2.0f, 2.0f, 4.0f}, 0x33333333}, {{1.0f, 3.0f, 1.0f}, 0x22222222}}, endian);
     std::vector<std::byte> out(after.size());
-    VertexOutcome outcome = blendVertexBytes(layoutOf(2, endian), before, after, kHalfway, out);
+    VertexOutcome outcome =
+        blendVertexBytes(layoutOf(2, endian), twoBack, before, after, kHalfway, kByBlocks, out);
     check::isTrue(outcome == VertexOutcome::Blended, order + ": a moved mesh is blended");
     std::vector<Vertex> blended = verticesOf(out, endian);
     check::equal(blended[0].position[0], 1.0f, order + ": each moved value lies half way");
@@ -116,7 +122,8 @@ void aMovedMeshIsBlendedValueByValueInEitherByteOrder() {
 void aMeshThatDidNotMoveIsUnchangedAndByteIdentical() {
     std::vector<std::byte> bytes = bytesOf({{{1.0f, 2.0f, 3.0f}, 0x44444444}}, kBigEndian);
     std::vector<std::byte> out(bytes.size());
-    VertexOutcome outcome = blendVertexBytes(layoutOf(1, kBigEndian), bytes, bytes, kHalfway, out);
+    VertexOutcome outcome =
+        blendVertexBytes(layoutOf(1, kBigEndian), bytes, bytes, bytes, kHalfway, kByBlocks, out);
     check::isTrue(outcome == VertexOutcome::Unchanged, "the same bytes are unchanged");
     check::isTrue(out == bytes, "and drawn byte for byte as N");
 }
@@ -125,7 +132,8 @@ void aMeshWhoseOnlyChangeIsNotFloatsIsNotBlended() {
     std::vector<std::byte> before = bytesOf({{{1.0f, 2.0f, 3.0f}, 0x44444444}}, kBigEndian);
     std::vector<std::byte> after = bytesOf({{{1.0f, 2.0f, 3.0f}, 0x55555555}}, kBigEndian);
     std::vector<std::byte> out(after.size());
-    VertexOutcome outcome = blendVertexBytes(layoutOf(1, kBigEndian), before, after, kHalfway, out);
+    VertexOutcome outcome =
+        blendVertexBytes(layoutOf(1, kBigEndian), before, before, after, kHalfway, kByBlocks, out);
     check::isTrue(outcome == VertexOutcome::NotFloats, "a colour change is no float to blend");
     check::isTrue(out == after, "and N is drawn");
 }
@@ -134,7 +142,8 @@ void aByteOrderTheDecoderDoesNotReadIsNotBlended() {
     std::vector<std::byte> before = bytesOf({{{1.0f, 2.0f, 3.0f}, 0}}, kLittleEndian);
     std::vector<std::byte> after = bytesOf({{{5.0f, 2.0f, 3.0f}, 0}}, kLittleEndian);
     std::vector<std::byte> out(after.size());
-    VertexOutcome outcome = blendVertexBytes(layoutOf(1, kSwapU16), before, after, kHalfway, out);
+    VertexOutcome outcome =
+        blendVertexBytes(layoutOf(1, kSwapU16), before, before, after, kHalfway, kByBlocks, out);
     check::isTrue(outcome == VertexOutcome::NotFloats, "words in another order are not blended");
     check::isTrue(out == after, "and N is drawn");
 }
@@ -142,23 +151,65 @@ void aByteOrderTheDecoderDoesNotReadIsNotBlended() {
 void aMoveTooSmallToHalveIsOutside() {
     float one = 1.0f;
     float next = std::nextafter(one, 2.0f);
+    float down = one - (next - one);
+    std::vector<std::byte> twoBack = bytesOf({{{down, 0.0f, 0.0f}, 0}}, kBigEndian);
     std::vector<std::byte> before = bytesOf({{{one, 0.0f, 0.0f}, 0}}, kBigEndian);
     std::vector<std::byte> after = bytesOf({{{next, 0.0f, 0.0f}, 0}}, kBigEndian);
     std::vector<std::byte> out(after.size());
-    VertexOutcome outcome = blendVertexBytes(layoutOf(1, kBigEndian), before, after, kHalfway, out);
+    VertexOutcome outcome =
+        blendVertexBytes(layoutOf(1, kBigEndian), twoBack, before, after, kHalfway, kByBlocks, out);
     check::isTrue(outcome == VertexOutcome::Outside, "an ulp's move has no value between");
 }
 
 void aValueThatIsNotANumberIsTakenFromN() {
     float nan = std::nanf("");
+    std::vector<std::byte> twoBack = bytesOf({{{4.0f, -2.0f, 0.0f}, 0}}, kBigEndian);
     std::vector<std::byte> before = bytesOf({{{nan, 0.0f, 0.0f}, 0}}, kBigEndian);
     std::vector<std::byte> after = bytesOf({{{4.0f, 2.0f, 0.0f}, 0}}, kBigEndian);
     std::vector<std::byte> out(after.size());
-    VertexOutcome outcome = blendVertexBytes(layoutOf(1, kBigEndian), before, after, kHalfway, out);
+    VertexOutcome outcome =
+        blendVertexBytes(layoutOf(1, kBigEndian), twoBack, before, after, kHalfway, kByBlocks, out);
     check::isTrue(outcome == VertexOutcome::Blended, "the numbers beside it are blended");
     std::vector<Vertex> blended = verticesOf(out, kBigEndian);
     check::equal(blended[0].position[0], 4.0f, "a value that was no number is N's");
     check::equal(blended[0].position[1], 1.0f, "while its neighbour lies half way");
+}
+
+void anotherMeshAFrameBeforeIsNotBlendedTowards() {
+    // Its own mesh stood near 100 and moved on to 102; the draw offered a
+    // frame before, known only by its place, is some other mesh, at 501.
+    std::vector<std::byte> twoBack = bytesOf({{{100.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> before = bytesOf({{{501.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> after = bytesOf({{{102.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> out(after.size());
+    VertexOutcome outcome = blendVertexBytes(layoutOf(1, kBigEndian), twoBack, before, after,
+                                             kHalfway, PartnerIdentity::ByPlace, out);
+    check::isTrue(outcome == VertexOutcome::Unverified, "a mesh it did not pass through");
+    check::isTrue(out == after, "is not blended towards: N is drawn");
+}
+
+void aMeshItsBlocksNameIsBlendedThoughItTurnedBack() {
+    // Its own animation turned back: N-1 is not near the middle of N-2..N,
+    // but its blocks say whose mesh it is.
+    std::vector<std::byte> twoBack = bytesOf({{{100.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> before = bytesOf({{{104.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> after = bytesOf({{{102.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> out(after.size());
+    VertexOutcome outcome =
+        blendVertexBytes(layoutOf(1, kBigEndian), twoBack, before, after, kHalfway, kByBlocks, out);
+    check::isTrue(outcome == VertexOutcome::Blended, "a mesh its blocks name is blended");
+    check::equal(verticesOf(out, kBigEndian)[0].position[0], 103.0f, "half way from N-1");
+}
+
+void aMeshBackWhereItStoodTwoFramesAgoIsHeld() {
+    // N-2 and N agree whatever N-1 holds: flipping, not moving.
+    std::vector<std::byte> stood = bytesOf({{{3.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> before = bytesOf({{{9.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> out(stood.size());
+    VertexOutcome outcome =
+        blendVertexBytes(layoutOf(1, kBigEndian), stood, before, stood, kHalfway, kByBlocks, out);
+    check::isTrue(outcome == VertexOutcome::Held, "a mesh back where it stood is held");
+    check::isTrue(out == stood, "and drawn as N");
 }
 
 // --- VertexBlend, fed as the runtime feeds it ---
@@ -300,14 +351,36 @@ void anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore() {
     blends.record(GuestFrame({{kBlockA, {0.0f, 7.0f}, {10.0f}}}));
     blends.record(GuestFrame({{kBlockB, {1.0f, 7.0f}, {12.0f}}}));
     blends.record(GuestFrame({{kBlockA, {2.0f, 7.0f}, {14.0f}}}));
-    blends.record(GuestFrame({{kBlockB, {2.0f, 7.0f}, {20.0f}}}));
+    blends.record(GuestFrame({{kBlockB, {2.0f, 7.0f}, {18.0f}}}));
     GuestFrame latest({{kBlockA, {2.0f, 7.0f}, {22.0f}}});
     blends.record(latest);
     std::vector<std::vector<float>> drawn = blends.replay(latest);
     check::equal(blends.objects.objects(ObjectBlend::Outcome::Held), uint64_t{1},
                  "the idling actor is held in its uniforms");
-    check::equal(drawn[0][0], 21.0f, "and its mesh lies half way from its pose a frame before");
+    check::equal(drawn[0][0], 20.0f, "and its mesh lies half way from its pose a frame before");
     check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{1}, "counted blended");
+}
+
+// A block every cloud's draw sources alike, the same every frame.
+constexpr uint32_t kSkyBlock = 0xf4003000;
+
+void cloudsTheTitleReordersAreNotBlendedIntoEachOther() {
+    // Two clouds drawn with the same uniforms from the same block, told
+    // apart only by their place: N-1 draws them the other way round, so the
+    // first draw's partner a frame before is the other cloud.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    blends.record(GuestFrame({{kSkyBlock, {1.0f}, {100.0f}}, {kSkyBlock, {1.0f}, {500.0f}}}));
+    blends.record(GuestFrame({{kSkyBlock, {1.0f}, {501.0f}}, {kSkyBlock, {1.0f}, {101.0f}}}));
+    GuestFrame latest({{kSkyBlock, {1.0f}, {102.0f}}, {kSkyBlock, {1.0f}, {502.0f}}});
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(blends.objects.objects(ObjectBlend::Outcome::Held), uint64_t{2},
+                 "both clouds are held in their uniforms");
+    check::equal(drawn[0][0], 102.0f, "the first cloud is not drawn towards the second");
+    check::equal(drawn[1][0], 502.0f, "nor the second towards the first");
+    check::equal(blends.vertices.draws(VertexOutcome::Unverified), uint64_t{2},
+                 "and both are counted unverified");
 }
 
 void nothingIsReplacedBeforeThreeFramesArePlanned() {
@@ -365,8 +438,12 @@ void runVertexBlendTests() {
     aByteOrderTheDecoderDoesNotReadIsNotBlended();
     aMoveTooSmallToHalveIsOutside();
     aValueThatIsNotANumberIsTakenFromN();
+    anotherMeshAFrameBeforeIsNotBlendedTowards();
+    aMeshItsBlocksNameIsBlendedThoughItTurnedBack();
+    aMeshBackWhereItStoodTwoFramesAgoIsHeld();
     aWalkingActorsMeshIsDrawnBetweenItsPartnersAndItsOwn();
     anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore();
+    cloudsTheTitleReordersAreNotBlendedIntoEachOther();
     nothingIsReplacedBeforeThreeFramesArePlanned();
     aReplayOutOfStepStopsReplacing();
     verticesSwitchedOffAreDrawnAsTheTitleDrewThemAndBlendAgainOnceOn();
