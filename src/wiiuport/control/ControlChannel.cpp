@@ -462,6 +462,8 @@ std::string ControlChannel::interpolationJson() const {
     body += ",\"objectUnverifiedSharingValues\":" +
             std::to_string(objects.planner().unverifiedSharingValues());
     body += ",\"objectValuesShared\":" + std::to_string(objects.planner().valuesShared());
+    body += ",\"objectUnblendedCarried\":" + std::to_string(objects.planner().unblendedCarried());
+    body += ",\"objectTransformsCarried\":" + std::to_string(objects.planner().transformsCarried());
     body += ",\"objectDrawsWritten\":" + std::to_string(objects.drawsWritten());
     body += ",\"objectReplaysDiverged\":" + std::to_string(objects.replaysDiverged());
     body += ",\"objectFramesEnded\":" + std::to_string(objects.framesEnded());
@@ -540,12 +542,12 @@ bool ControlChannel::requestedFlag(const std::string& query, std::string_view na
     return fallback;
 }
 
-bool ControlChannel::requestedHash(const std::string& query, std::string_view name,
-                                   std::optional<uint64_t>& hash) {
+bool ControlChannel::requestedHashes(const std::string& query, std::string_view name,
+                                     std::vector<uint64_t>& hashes) {
     std::string_view rest(query);
     std::string_view key;
     std::string_view value;
-    hash.reset();
+    hashes.clear();
     while (nextParameter(rest, key, value)) {
         if (key != name) {
             continue;
@@ -555,7 +557,20 @@ bool ControlChannel::requestedHash(const std::string& query, std::string_view na
         if (value.size() != 16 || error != std::errc{} || end != value.data() + value.size()) {
             return false;
         }
-        hash = parsed;
+        hashes.push_back(parsed);
+    }
+    return true;
+}
+
+bool ControlChannel::requestedHash(const std::string& query, std::string_view name,
+                                   std::optional<uint64_t>& hash) {
+    std::vector<uint64_t> hashes;
+    if (!requestedHashes(query, name, hashes)) {
+        return false;
+    }
+    hash.reset();
+    if (!hashes.empty()) {
+        hash = hashes.back();
     }
     return true;
 }
@@ -707,6 +722,8 @@ bool ControlChannel::start(uint16_t port) {
             // maintainer's discriminator, not a setting.
             // vertexShaderOff=<16 hex digits> draws the meshes one vertex
             // shader reads as the title did, to name the draws a defect is.
+            // objectShaderOff=<16 hex digits>, repeated for several, does the
+            // same for the objects those shaders draw.
             if (request.method == "POST" && request.path() == "/blends") {
                 std::string query(request.query());
                 std::optional<uint64_t> excluded;
@@ -715,6 +732,13 @@ bool ControlChannel::start(uint16_t port) {
                         400, "Bad Request",
                         "vertexShaderOff must be a vertex shader's base hash, 16 hex digits.\n");
                 }
+                std::vector<uint64_t> objectExcluded;
+                if (!requestedHashes(query, "objectShaderOff", objectExcluded)) {
+                    return lucent::http::Response::text(
+                        400, "Bad Request",
+                        "objectShaderOff must be a shader's base hash, 16 hex digits.\n");
+                }
+                m_objects.exclude(std::move(objectExcluded));
                 m_objects.setPlanning(m_continuous.enabled() &&
                                       requestedFlag(query, "objects", true));
                 m_vertices.setBlending(requestedFlag(query, "vertices", true));

@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/interp/AssemblyKey.h"
 #include "wiiuport/interp/KeyedFrame.h"
+#include "wiiuport/interp/SharedTransforms.h"
 #include "wiiuport/interp/SharedValues.h"
 
 #include <array>
@@ -123,8 +125,19 @@ class ObjectPlanner {
         // N-1 and N: nearer each than they are to each other. An object that
         // moved less than a float can halve is one, and is drawn at N.
         Outside,
+        // Draws the light's map or looks it up, and is drawn at N: a draw
+        // that writes depth alone renders a map a later draw samples (the
+        // shadow map), and a pixel stage's values shade rather than place.
+        // The map and its look-up must hold one light. The look-up holds it
+        // multiplied into the camera, whose blend value by value is neither
+        // the light's nor the camera's: measured on Wind Waker HD, a turning
+        // camera with the casters blended, or the look-up, or both, put
+        // the pier in its own shadow in the in-between frame, and with both
+        // at N it was not.
+        Shading,
         Count
     };
+    static constexpr uint32_t kPixelStage = LatteFrameHooks::kPixelStageIndex;
     static constexpr size_t kOutcomeCount = static_cast<size_t>(Outcome::Count);
     static std::string_view outcomeName(Outcome outcome);
 
@@ -218,6 +231,17 @@ class ObjectPlanner {
         return m_valuesShared;
     }
 
+    // Objects drawn at N -- unverified or unmatched -- whose matrices were
+    // carried through the in-between camera (SharedTransforms), and how many
+    // 4x4s that was.
+    uint64_t unblendedCarried() const {
+        return m_unblendedCarried;
+    }
+
+    uint64_t transformsCarried() const {
+        return m_transformsCarried;
+    }
+
   private:
     // Where an entry's blend sits in a plan's floats; none when drawn as is.
     static constexpr uint32_t kNotBlended = UINT32_MAX;
@@ -241,9 +265,12 @@ class ObjectPlanner {
 
     // Plans the building frame's entry against N-1 and N-2.
     Outcome plan(size_t entry);
-    // Draws the building frame's unverified objects in the values they
-    // share with its blended ones, once every draw of it is planned.
-    void blendSharedValues();
+    // Draws the building frame's objects that are drawn at N -- unverified
+    // or unmatched -- through the in-between camera, once every draw of it is
+    // planned: in the values they share with its blended ones
+    // (SharedValues), and in the matrices every blended draw of their shader
+    // changed alike (SharedTransforms).
+    void seeUnblendedThroughTheCamera();
 
     FrameState frameState(const ShaderKey& shader) const;
 
@@ -305,7 +332,12 @@ class ObjectPlanner {
     // Reused every frame: what the blended draws share, and the shaders of
     // the unverified ones, sorted, which are all that is looked up.
     SharedValues m_shared;
+    SharedTransforms m_transforms;
     std::vector<ShaderKey> m_unverifiedShaders;
+    // Reused per object: which of its values came from SharedValues.
+    std::vector<uint8_t> m_sharedAt;
+    uint64_t m_unblendedCarried{0};
+    uint64_t m_transformsCarried{0};
     uint64_t m_unverifiedSharingValues{0};
     uint64_t m_valuesShared{0};
     uint64_t m_partnersDerived{0};

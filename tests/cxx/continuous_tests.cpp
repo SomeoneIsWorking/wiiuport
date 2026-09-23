@@ -557,8 +557,9 @@ void aSnapshotHoldsConsecutiveFramesAsRecorded() {
     uint32_t frames = 0;
     std::memcpy(&frames, framed.data() + 8, sizeof(frames));
     check::equal(frames, uint32_t{2}, "holding both frames");
-    // magic, frames, complete, assemblies, base, aux, stage, sources, floats
-    size_t firstFloat = 8 + 4 + 4 + 4 + 8 + 8 + 4 + 4 + 4;
+    // magic, frames, complete, assemblies, base, aux, stage, writesColour,
+    // sources, floats
+    size_t firstFloat = 8 + 4 + 4 + 4 + 8 + 8 + 4 + 4 + 4 + 4;
     float value = 0.0f;
     std::memcpy(&value, framed.data() + firstFloat + (3 * sizeof(float)), sizeof(value));
     check::equal(value, 1.0f, "with the first frame's values first");
@@ -571,6 +572,7 @@ void aSnapshotHoldsConsecutiveFramesAsRecorded() {
     check::isTrue(read[1].assemblies.size() == second.uniformAssemblies().size() &&
                       actual.shaderBaseHash == expected.shaderBaseHash &&
                       actual.stageIndex == expected.stageIndex &&
+                      actual.writesColour == expected.writesColour &&
                       actual.blockSources == expected.blockSources && actual.data == expected.data,
                   "each as recorded");
     bool refused = false;

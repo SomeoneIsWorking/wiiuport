@@ -4,6 +4,7 @@
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/PlanReplay.h"
 #include "wiiuport/interp/ReplayBlend.h"
+#include "wiiuport/interp/SharedTransforms.h"
 #include "wiiuport/interp/TransformSubstitution.h"
 
 #include <array>
@@ -18,12 +19,16 @@ using wiiuport::frame::FrameRecording;
 using wiiuport::frame::RecordedUniformAssembly;
 using wiiuport::interp::ObjectBlend;
 using Outcome = wiiuport::interp::ObjectBlend::Outcome;
+using wiiuport::interp::ObjectPlanner;
+using wiiuport::interp::ShaderKey;
+using wiiuport::interp::SharedTransforms;
 
 namespace {
 
 // Half way between the title's two frames, as the product blends.
 constexpr float kHalfway = 0.5f;
 constexpr uint64_t kActorShader = 0xdddd;
+constexpr uint64_t kPierShader = 0xeeee;
 // A second pass drawing the same actor, as its outline.
 constexpr uint64_t kOutline = 0xeeee;
 // The two blocks one actor alternates between, as the title double-buffers
@@ -39,6 +44,8 @@ struct Draw {
     uint64_t shader{kActorShader};
     // A second block at an address the title allocated for this frame alone.
     uint32_t freshBlock{0};
+    uint32_t stage{0};
+    bool writesColour{true};
 
     std::vector<uint32_t> sources() const {
         if (freshBlock == 0) {
@@ -53,6 +60,8 @@ FrameRecording frameOf(const std::vector<Draw>& draws) {
     for (const Draw& draw : draws) {
         RecordedUniformAssembly assembly;
         assembly.shaderBaseHash = draw.shader;
+        assembly.stageIndex = draw.stage;
+        assembly.writesColour = draw.writesColour;
         assembly.blockSources = draw.sources();
         assembly.data = draw.values;
         frame.addUniformAssembly(assembly);
@@ -69,6 +78,8 @@ struct ReplayedDraw {
 
     explicit ReplayedDraw(const Draw& draw) : sources(draw.sources()), values(draw.values) {
         assembly.shaderBaseHash = draw.shader;
+        assembly.stageIndex = draw.stage;
+        assembly.writesColour = draw.writesColour;
         assembly.data = values.data();
         assembly.sizeInBytes = static_cast<uint32_t>(values.size() * sizeof(float));
         assembly.blockAddresses = sources.data();
@@ -552,6 +563,155 @@ void anUnverifiedObjectIsSeenThroughTheInBetweenCamera() {
     check::equal(blend.planner().valuesShared(), uint64_t{1}, "with the values taken");
 }
 
+void aPassValueIsOneValueInEveryShaderThatReadsIt() {
+    // Two casters blended, drawing the pier into the light's map with the
+    // light second; the pier, unverified, looks itself up in that map with
+    // the light first, in a shader of its own. It must hold the light the
+    // casters drew it with, or it shadows itself.
+    std::vector<Draw> twoBack{{kBlockA, {0.0f, 100.0f}},
+                              {kOtherA, {10.0f, 100.0f}},
+                              {kTileA, {100.0f, 20.0f}, kPierShader}};
+    std::vector<Draw> oneBack{{kBlockB, {1.0f, 101.0f}},
+                              {kOtherB, {11.0f, 101.0f}},
+                              {kTileB, {101.0f, 29.0f}, kPierShader}};
+    std::vector<Draw> latest{{kBlockA, {2.0f, 102.0f}},
+                             {kOtherA, {12.0f, 102.0f}},
+                             {kTileA, {102.0f, 21.0f}, kPierShader}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, twoBack, oneBack, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Unverified), uint64_t{1}, "the pier is unverified");
+    check::equal(uploaded[2][0], 101.5f, "yet holds the light as the casters drew it");
+    check::equal(uploaded[2][1], 21.0f, "and its own value at N");
+}
+
+// A 4x4 one row after another: the camera turned by `angle` about the
+// vertical and stepped `step` along its view, times an object's own matrix
+// `place`, as a model-view-projection the title hands each object.
+std::vector<float> seenFrom(float angle, float step, const std::array<float, 16>& place) {
+    std::array<float, 16> camera{
+        std::cos(angle),  0.0f, std::sin(angle), 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
+        -std::sin(angle), 0.0f, std::cos(angle), step, 0.0f, 0.0f, 0.5f, 1.0f};
+    std::vector<float> product(16, 0.0f);
+    for (size_t row = 0; row < 4; ++row) {
+        for (size_t column = 0; column < 4; ++column) {
+            for (size_t k = 0; k < 4; ++k) {
+                product[(row * 4) + column] += camera[(row * 4) + k] * place[(k * 4) + column];
+            }
+        }
+    }
+    return product;
+}
+
+std::array<float, 16> placedAt(float x, float y, float z) {
+    return {1.0f, 0.0f, 0.0f, x, 0.0f, 1.0f, 0.0f, y, 0.0f, 0.0f, 1.0f, z, 0.0f, 0.0f, 0.0f, 1.0f};
+}
+
+std::vector<float> halfWay(const std::vector<float>& one, const std::vector<float>& other) {
+    std::vector<float> between;
+    for (size_t index = 0; index < one.size(); ++index) {
+        between.push_back(one[index] + ((other[index] - one[index]) * kHalfway));
+    }
+    return between;
+}
+
+bool near(const std::vector<float>& one, const std::vector<float>& other) {
+    for (size_t index = 0; index < one.size(); ++index) {
+        if (std::abs(one[index] - other[index]) > 1e-4f * std::max(1.0f, std::abs(one[index]))) {
+            return false;
+        }
+    }
+    return one.size() == other.size();
+}
+
+void aMatrixEveryBlendedDrawChangedAlikeCarriesAnObjectDrawnAtN() {
+    ShaderKey shader{kActorShader, 0, 0};
+    SharedTransforms transforms;
+    for (float x : {1.0f, 5.0f, -3.0f}) {
+        std::array<float, 16> place = placedAt(x, 2.0f, 9.0f);
+        transforms.addBlended(shader, seenFrom(0.2f, 1.0f, place),
+                              halfWay(seenFrom(0.1f, 0.0f, place), seenFrom(0.2f, 1.0f, place)));
+    }
+    transforms.index();
+    check::isTrue(transforms.windowsOf(shader) == std::vector<uint32_t>{0},
+                  "the matrix every blended draw changed alike is found");
+    std::array<float, 16> tree = placedAt(-7.0f, 0.0f, 20.0f);
+    std::vector<float> latest = seenFrom(0.2f, 1.0f, tree);
+    std::vector<float> out = latest;
+    std::vector<uint8_t> keep(latest.size(), 0);
+    check::equal(transforms.carry(shader, latest, keep, out), size_t{1}, "one window carried");
+    check::isTrue(near(out, halfWay(seenFrom(0.1f, 0.0f, tree), latest)),
+                  "to where it would have been blended, had it been");
+}
+
+void aMatrixTheBlendedDrawsChangedEachTheirOwnWayIsNoCamera() {
+    ShaderKey shader{kActorShader, 0, 0};
+    SharedTransforms transforms;
+    float turn = 0.1f;
+    for (float x : {1.0f, 5.0f, -3.0f}) {
+        std::array<float, 16> place = placedAt(x, 2.0f, 9.0f);
+        transforms.addBlended(
+            shader, seenFrom(turn * 2.0f, 1.0f, place),
+            halfWay(seenFrom(turn, 0.0f, place), seenFrom(turn * 2.0f, 1.0f, place)));
+        turn += 0.1f;
+    }
+    transforms.index();
+    check::isTrue(transforms.windowsOf(shader).empty(), "no window is shared");
+    std::vector<float> latest = seenFrom(0.2f, 1.0f, placedAt(-7.0f, 0.0f, 20.0f));
+    std::vector<float> out = latest;
+    std::vector<uint8_t> keep(latest.size(), 0);
+    check::equal(transforms.carry(shader, latest, keep, out), size_t{0}, "nothing is carried");
+    check::isTrue(out == latest, "and the object is drawn as the title drew it");
+}
+
+void aWindowSharedValuesAlreadyDrewIsLeftToThem() {
+    ShaderKey shader{kActorShader, 0, 0};
+    SharedTransforms transforms;
+    for (float x : {1.0f, 5.0f, -3.0f}) {
+        std::array<float, 16> place = placedAt(x, 2.0f, 9.0f);
+        transforms.addBlended(shader, seenFrom(0.2f, 1.0f, place),
+                              halfWay(seenFrom(0.1f, 0.0f, place), seenFrom(0.2f, 1.0f, place)));
+    }
+    transforms.index();
+    std::vector<float> latest = seenFrom(0.2f, 1.0f, placedAt(-7.0f, 0.0f, 20.0f));
+    std::vector<float> out = latest;
+    std::vector<uint8_t> keep(latest.size(), 1);
+    check::equal(transforms.carry(shader, latest, keep, out), size_t{0}, "nothing carried");
+}
+
+void anUnverifiedObjectsOwnViewIsTurnedWithTheCamera() {
+    // Four objects of one shader, each handed its matrix with the camera in
+    // it, the camera turning. The tree's draw in N-1 is not where it passed
+    // through -- its blocks name another draw -- so it is unverified, and
+    // held at N it would stand where N's camera put it, amid a world drawn
+    // from between the two.
+    constexpr uint32_t kRockA = 0xf4003000;
+    constexpr uint32_t kRockB = 0xf4083000;
+    constexpr uint32_t kTreeA = 0xf4004000;
+    constexpr uint32_t kTreeB = 0xf4084000;
+    std::array<float, 16> tree = placedAt(-7.0f, 0.0f, 20.0f);
+    auto frame = [&](float angle, float step, uint32_t house, uint32_t other, uint32_t rock,
+                     uint32_t treeBlock, const std::vector<float>& treeValues) {
+        return std::vector<Draw>{{house, seenFrom(angle, step, placedAt(1.0f, 2.0f, 9.0f))},
+                                 {other, seenFrom(angle, step, placedAt(5.0f, 2.0f, 9.0f))},
+                                 {rock, seenFrom(angle, step, placedAt(-3.0f, 2.0f, 9.0f))},
+                                 {treeBlock, treeValues}};
+    };
+    std::vector<float> treeAway = seenFrom(0.1f, 0.5f, placedAt(40.0f, 0.0f, -20.0f));
+    std::vector<Draw> latest =
+        frame(0.2f, 1.0f, kBlockA, kOtherA, kRockA, kTreeA, seenFrom(0.2f, 1.0f, tree));
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, frame(0.0f, 0.0f, kBlockA, kOtherA, kRockA, kTreeA, seenFrom(0.0f, 0.0f, tree)),
+             frame(0.1f, 0.5f, kBlockB, kOtherB, kRockB, kTreeB, treeAway), latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{3}, "the three others are blended");
+    check::equal(blend.objects(Outcome::Unverified), uint64_t{1}, "the tree is unverified");
+    check::isTrue(near(uploaded[3], halfWay(seenFrom(0.1f, 0.5f, tree), latest[3].values)),
+                  "yet drawn as it would have been blended, turned with the camera");
+    check::equal(blend.planner().unblendedCarried(), uint64_t{1}, "counted");
+    check::equal(blend.planner().transformsCarried(), uint64_t{1}, "with its one matrix");
+}
+
 void aValueBlendedDrawsDisagreeOnIsNotShared() {
     // Two blended tiles held the unverified tile's view at N-2 and N but
     // passed through different values in N-1: which of them it shares is
@@ -569,6 +729,26 @@ void aValueBlendedDrawsDisagreeOnIsNotShared() {
     check::equal(blend.objects(Outcome::Unverified), uint64_t{1}, "the tile is unverified");
     check::isTrue(uploaded[2] == latest[2].values, "and drawn as the title drew it");
     check::equal(blend.planner().unverifiedSharingValues(), uint64_t{0}, "sharing nothing");
+}
+
+void theLightsMapAndItsLookUpAreDrawnAtN() {
+    // A caster drawn into the shadow map -- depth alone -- and the pixel
+    // stage looking the map up both moved with the light, as the walker
+    // moved of itself: only the walker is drawn between.
+    auto frame = [](float walker, float light) {
+        return std::vector<Draw>{
+            {kBlockA, {walker, 7.0f}},
+            {kOtherA, {5.0f, light}, kActorShader, 0, 0, false},
+            {kTileA, {light, light}, kPierShader, 0, ObjectPlanner::kPixelStage}};
+    };
+    std::vector<Draw> latest = frame(2.0f, 12.0f);
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, frame(0.0f, 10.0f), frame(1.0f, 11.0f), latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Shading), uint64_t{2}, "the caster and look-up shade");
+    check::equal(uploaded[0][0], 1.5f, "the walker is drawn half way");
+    check::isTrue(uploaded[1] == latest[1].values, "the caster as the title drew it");
+    check::isTrue(uploaded[2] == latest[2].values, "and the look-up as the title drew it");
 }
 
 void aMoveTooSmallToHalveIsNotDrawnBetween() {
@@ -756,6 +936,12 @@ void runObjectBlendTests() {
     aLoneDrawsValuesAreItsOwn();
     anUnverifiedObjectIsSeenThroughTheInBetweenCamera();
     aValueBlendedDrawsDisagreeOnIsNotShared();
+    aPassValueIsOneValueInEveryShaderThatReadsIt();
+    theLightsMapAndItsLookUpAreDrawnAtN();
+    aMatrixEveryBlendedDrawChangedAlikeCarriesAnObjectDrawnAtN();
+    aMatrixTheBlendedDrawsChangedEachTheirOwnWayIsNoCamera();
+    aWindowSharedValuesAlreadyDrewIsLeftToThem();
+    anUnverifiedObjectsOwnViewIsTurnedWithTheCamera();
     aPartnerWhoseMovingValuesAreNotNumbersIsNoPartner();
     anObjectThatStoppedAtNMinusOneIsDrawnWhereItStopped();
     aHeldStillWorldReplaysByteIdenticalToTheTitlesFrame();

@@ -81,6 +81,7 @@ add_library(wiiuport STATIC
   interp/ObjectCensus.h
   interp/NeighbourCheck.cpp
   interp/RestoreCheck.cpp
+  interp/SharedTransforms.cpp
   interp/SharedValues.cpp
   interp/SharedValues.h
   interp/RestoreCheck.h

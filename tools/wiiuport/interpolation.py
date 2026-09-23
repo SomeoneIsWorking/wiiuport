@@ -19,7 +19,7 @@ from wiiuport.control import (
     wait_for,
 )
 
-RECORDINGS_MAGIC = b"WIIUREC1"
+RECORDINGS_MAGIC = b"WIIUREC2"
 
 
 @dataclass(frozen=True)
@@ -259,6 +259,9 @@ class RecordedAssembly:
     stage: int
     sources: tuple[int, ...]
     floats: tuple[float, ...]
+    # False when the draw writes depth alone: it renders a map, such as the
+    # light's shadow map, that a later draw looks up.
+    writesColour: bool
 
 
 @dataclass(frozen=True)
@@ -294,7 +297,7 @@ def parse_recordings(body: bytes) -> tuple[RecordedFrame, ...]:
     """Decode GET /recordings. The runtime writes host byte order, and the
     tools run on the host that wrote it."""
     if not body.startswith(RECORDINGS_MAGIC):
-        raise ControlUnavailable("the recordings body does not start with WIIUREC1")
+        raise ControlUnavailable("the recordings body does not start with WIIUREC2")
     reader = _Reader(body[len(RECORDINGS_MAGIC) :])
     (frame_count,) = reader.take("=I")
     frames = []
@@ -302,11 +305,13 @@ def parse_recordings(body: bytes) -> tuple[RecordedFrame, ...]:
         complete, assembly_count = reader.take("=II")
         assemblies = []
         for _ in range(assembly_count):
-            base, aux, stage, source_count = reader.take("=QQII")
+            base, aux, stage, writes_colour, source_count = reader.take("=QQIII")
             sources = reader.take(f"={source_count}I")
             (float_count,) = reader.take("=I")
             floats = reader.take(f"={float_count}f")
-            assemblies.append(RecordedAssembly(base, aux, stage, sources, floats))
+            assemblies.append(
+                RecordedAssembly(base, aux, stage, sources, floats, bool(writes_colour))
+            )
         frames.append(RecordedFrame(bool(complete), tuple(assemblies)))
     if not reader.finished():
         raise ControlUnavailable("the recordings snapshot has bytes after its last frame")

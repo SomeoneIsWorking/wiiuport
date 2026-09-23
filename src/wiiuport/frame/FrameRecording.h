@@ -29,6 +29,9 @@ struct RecordedUniformAssembly {
     uint64_t shaderBaseHash{0};
     uint64_t shaderAuxHash{0};
     uint32_t stageIndex{0};
+    // Whether the draw writes any colour buffer; one that writes depth alone
+    // renders a map a later draw looks up (LatteFrameHooks::UniformAssembly).
+    bool writesColour{true};
     // The guest addresses of the uniform blocks this draw sourced, as
     // (bufferId, physicalAddress) pairs. This is the engine's own storage for
     // the object, and the only identity a recorded draw carries.
