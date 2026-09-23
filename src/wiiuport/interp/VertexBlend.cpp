@@ -231,6 +231,7 @@ void VertexBlend::startBlending() {
     m_drawBlends.assign(m_latest.draws.size(), std::nullopt);
     m_jobs.clear();
     if (m_previous.frameIndex + 1 != m_latest.frameIndex) {
+        m_blendedThrough.store(m_latest.draws.size(), std::memory_order_release);
         return;
     }
     // The plan is the latest frame's until the next frame ends: read here,
@@ -255,8 +256,10 @@ void VertexBlend::startBlending() {
         m_jobs.push_back({index, found->second});
     }
     if (m_jobs.empty()) {
+        m_blendedThrough.store(m_latest.draws.size(), std::memory_order_release);
         return;
     }
+    m_blendedThrough.store(0, std::memory_order_release);
     std::lock_guard lock(m_mutex);
     m_jobHandedOver = true;
     m_handedOver.notify_one();
@@ -269,24 +272,55 @@ void VertexBlend::blendHandedOver(std::stop_token stop) {
     })) {
         lock.unlock();
         auto started = std::chrono::steady_clock::now();
-        m_blended.clear();
+        // Each distinct pair's place first, so nothing blended moves.
         m_pairs.clear();
+        m_pairSlots.clear();
+        m_jobPairs.clear();
+        size_t bytes = 0;
         for (const Job& job : m_jobs) {
             const Draw& drawn = m_latest.draws[job.draw];
             const Draw& partner = m_previous.draws[job.partner];
-            PairKey key{partner.bufferStarts, drawn.bufferStarts, drawn.layout};
-            auto known = m_pairs.find(key);
-            if (known == m_pairs.end()) {
-                known = m_pairs.emplace(std::move(key), blendPair(partner, drawn)).first;
+            auto [pair, fresh] =
+                m_pairs.try_emplace(PairKey{partner.bufferStarts, drawn.bufferStarts, drawn.layout},
+                                    m_pairSlots.size());
+            if (fresh) {
+                m_pairSlots.push_back({bytes, std::nullopt});
+                for (const VertexLayout::Buffer& buffer : drawn.layout.buffers) {
+                    bytes += buffer.sizeInBytes;
+                }
             }
-            m_drawBlends[job.draw] = known->second;
+            m_jobPairs.push_back(pair->second);
         }
+        if (m_blended.size() < bytes) {
+            m_blended.resize(bytes);
+        }
+        for (size_t index = 0; index < m_jobs.size(); ++index) {
+            const Job& job = m_jobs[index];
+            PairSlot& slot = m_pairSlots[m_jobPairs[index]];
+            if (!slot.outcome.has_value()) {
+                slot.outcome =
+                    blendPair(m_previous.draws[job.partner], m_latest.draws[job.draw], slot.start);
+            }
+            m_drawBlends[job.draw] = PairBlend{*slot.outcome, slot.start};
+            m_blendedThrough.store(job.draw + 1, std::memory_order_release);
+            m_blendedThrough.notify_all();
+        }
+        m_blendedThrough.store(m_latest.draws.size(), std::memory_order_release);
+        m_blendedThrough.notify_all();
         m_blendingNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(
                                      std::chrono::steady_clock::now() - started)
                                      .count();
         lock.lock();
         m_jobHandedOver = false;
         m_blendedAll.notify_all();
+    }
+}
+
+void VertexBlend::waitUntilBlendedThrough(size_t index) {
+    size_t through = m_blendedThrough.load(std::memory_order_acquire);
+    while (through <= index) {
+        m_blendedThrough.wait(through, std::memory_order_acquire);
+        through = m_blendedThrough.load(std::memory_order_acquire);
     }
 }
 
@@ -323,10 +357,6 @@ bool VertexBlend::onRuntimeDraw(const LatteFrameHooks::DrawPrepared& draw,
                           m_previous.frameIndex + 1 != m_latest.frameIndex;
         if (m_replayStopped) {
             ++m_replaysUnaligned;
-        } else {
-            auto started = std::chrono::steady_clock::now();
-            waitUntilBlended();
-            m_waiting += std::chrono::steady_clock::now() - started;
         }
     }
     if (m_replayStopped) {
@@ -353,6 +383,9 @@ bool VertexBlend::onRuntimeDraw(const LatteFrameHooks::DrawPrepared& draw,
         count(VertexOutcome::ShapeDiffers);
         return false;
     }
+    auto started = std::chrono::steady_clock::now();
+    waitUntilBlendedThrough(index);
+    m_waiting += std::chrono::steady_clock::now() - started;
     const std::optional<PairBlend>& blended = m_drawBlends[index];
     if (!blended.has_value()) {
         return false;
@@ -369,7 +402,7 @@ bool VertexBlend::onRuntimeDraw(const LatteFrameHooks::DrawPrepared& draw,
     return true;
 }
 
-VertexBlend::PairBlend VertexBlend::blendPair(const Draw& partner, const Draw& drawn) {
+VertexOutcome VertexBlend::blendPair(const Draw& partner, const Draw& drawn, size_t start) {
     bool changed = false;
     for (size_t buffer = 0; buffer < drawn.layout.buffers.size() && !changed; ++buffer) {
         std::span<const std::byte> was = bufferBytes(m_previous, partner, buffer);
@@ -377,7 +410,7 @@ VertexBlend::PairBlend VertexBlend::blendPair(const Draw& partner, const Draw& d
         changed = std::memcmp(was.data(), is.data(), is.size()) != 0;
     }
     if (!changed) {
-        return {VertexOutcome::Unchanged, 0};
+        return VertexOutcome::Unchanged;
     }
     // The buffers one after another, as blendVertexBytes reads them.
     m_before.clear();
@@ -388,15 +421,8 @@ VertexBlend::PairBlend VertexBlend::blendPair(const Draw& partner, const Draw& d
         m_before.insert(m_before.end(), was.begin(), was.end());
         m_after.insert(m_after.end(), is.begin(), is.end());
     }
-    size_t start = m_blended.size();
-    m_blended.resize(start + m_after.size());
-    VertexOutcome outcome =
-        blendVertexBytes(drawn.layout, m_before, m_after, m_t,
-                         std::span<std::byte>(m_blended.data() + start, m_after.size()));
-    if (outcome != VertexOutcome::Blended) {
-        m_blended.resize(start);
-    }
-    return {outcome, start};
+    return blendVertexBytes(drawn.layout, m_before, m_after, m_t,
+                            std::span<std::byte>(m_blended.data() + start, m_after.size()));
 }
 
 } // namespace wiiuport::interp
