@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 from wiiuport.census import read_census, request_census
-from wiiuport.draws import read_draws
+from wiiuport.draws import read_draws, read_vertex_census, request_vertex_census
 from wiiuport.drive import left_stick, press, release
 from wiiuport.headless import HeadlessSession
 from wiiuport.image import arm_capture, read_capture
@@ -170,9 +170,13 @@ def main(argv: list[str] | None = None) -> int:
                 # Which shaders drew what was not blended, over the frames
                 # planned while the snapshot fills.
                 request_census(CENSUS_FRAMES, port=args.port)
+                # And whether the draws that read uniforms rewrite their
+                # vertex bytes, over as many frames.
+                request_vertex_census(CENSUS_FRAMES, port=args.port)
                 arm_recordings(args.snapshot, port=args.port)
                 body = wait_for(lambda: fetch_recordings(args.port), seconds=60)
                 census = wait_for(lambda: read_census(port=args.port), seconds=60)
+                vertex_census = wait_for(lambda: read_vertex_census(port=args.port), seconds=60)
                 # Still walking: the control only differs on a moving scene.
                 restored = restore_check.take(args.port, in_between=False)
                 control = restore_check.take(args.port, in_between=True)
@@ -205,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"title rate while walking: {rate:.2f} Hz ({window.ticks} ticks in {walk_seconds:.1f} s)")
     try:
         print(drawn_after.since(drawn_before).render())
+        print(vertex_census.render())
     except ControlUnavailable as unreported:
         print(f"refused: {unreported}", file=sys.stderr)
         return 1

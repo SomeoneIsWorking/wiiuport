@@ -77,11 +77,10 @@ void RecordingObserver::OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw
         return;
     }
     ++m_guestDrawsPrepared;
-    if (draw.vertexUniforms) {
-        return;
+    if (!draw.vertexUniforms) {
+        ++m_guestDrawsWithoutVertexUniforms;
     }
-    ++m_guestDrawsWithoutVertexUniforms;
-    m_uniformlessDraws.onDraw(draw);
+    m_vertexChanges.onDraw(draw);
 }
 
 void RecordingObserver::OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) {
@@ -95,7 +94,7 @@ void RecordingObserver::OnRuntimeSubmission(const LatteFrameHooks::SubmissionSum
 
 void RecordingObserver::OnFrameComplete() {
     m_framesObserved++;
-    m_uniformlessDraws.onFrameComplete();
+    m_vertexChanges.onFrameComplete();
     // An incomplete frame is published as incomplete rather than skipped:
     // skipping would leave the frame before it standing in for it, and a
     // listener would act on a frame that is over. Every reader refuses an

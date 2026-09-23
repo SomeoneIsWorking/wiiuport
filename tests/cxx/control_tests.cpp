@@ -80,6 +80,7 @@ struct Fixture {
         .objects = objects,
         .snapshot = snapshot,
         .pacing = pacing,
+        .vertexChanges = recorder.vertexChanges(),
     }};
 };
 

@@ -20,11 +20,8 @@ lucent::http::Response notFound() {
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
         "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
         "GET /recordings, GET /objects, GET /draws, POST /replay, POST /capture, POST /present, "
-        "POST "
-        "/nulldiff, POST "
-        "/interpolate, POST /continuous, POST /restorecheck, POST /pacing, POST /objects, POST "
-        "/recordings and POST "
-        "/input.\n");
+        "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, POST /pacing, "
+        "POST /objects, POST /draws, POST /recordings and POST /input.\n");
 }
 
 // The one-shot routes each own a frame boundary, and so does continuous
@@ -114,7 +111,8 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_scheduler(sources.scheduler), m_interpolator(sources.interpolator),
       m_shapeLog(sources.shapeLog), m_viewTracker(sources.viewTracker),
       m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
-      m_objects(sources.objects), m_snapshot(sources.snapshot), m_pacing(sources.pacing) {
+      m_objects(sources.objects), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
+      m_vertexChanges(sources.vertexChanges) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -312,21 +310,35 @@ std::string ControlChannel::framesJson() const {
     return body + "]}\n";
 }
 
-std::string ControlChannel::drawsJson() const {
-    std::string body = "{\"guestDrawsPrepared\":" + std::to_string(m_recorder.guestDrawsPrepared());
-    body += ",\"withoutVertexUniforms\":[";
+namespace {
+
+std::string vertexChangesJson(
+    const std::map<frame::VertexChanges::VertexShader, frame::VertexChanges::Counts>& byShader) {
+    std::string body = "[";
     auto first = true;
-    for (const auto& [shader, counts] : m_recorder.uniformlessDraws().byShader()) {
+    for (const auto& [shader, counts] : byShader) {
         body += first ? "{" : ",{";
         first = false;
         body += "\"baseHash\":" + std::to_string(shader.baseHash);
         body += ",\"auxHash\":" + std::to_string(shader.auxHash);
         body += ",\"draws\":" + std::to_string(counts.draws);
+        body += ",\"compared\":" + std::to_string(counts.compared);
         body += ",\"changed\":" + std::to_string(counts.changed);
-        body += ",\"unmatched\":" + std::to_string(counts.unmatched);
         body += ",\"bytesHashed\":" + std::to_string(counts.bytesHashed) + "}";
     }
-    return body + "]}\n";
+    return body + "]";
+}
+
+} // namespace
+
+std::string ControlChannel::drawsJson() const {
+    std::string body = "{\"guestDrawsPrepared\":" + std::to_string(m_recorder.guestDrawsPrepared());
+    body += ",\"withoutVertexUniforms\":" + vertexChangesJson(m_vertexChanges.withoutUniforms());
+    frame::VertexChanges::Census census = m_vertexChanges.census();
+    body += ",\"census\":{\"framesAsked\":" + std::to_string(census.framesAsked);
+    body += ",\"framesTaken\":" + std::to_string(census.framesTaken);
+    body += ",\"withVertexUniforms\":" + vertexChangesJson(census.byShader);
+    return body + "}}\n";
 }
 
 std::string ControlChannel::interpolationJson() const {
@@ -627,6 +639,19 @@ bool ControlChannel::start(uint16_t port) {
                 m_objects.requestCensus(static_cast<uint32_t>(frames));
                 return lucent::http::Response::json(
                     200, "OK", "{\"requested\":true,\"frames\":" + std::to_string(frames) + "}\n");
+            }
+            // A census of the next frames' draws that read uniforms, by
+            // whether their vertex bytes change; GET /draws reads it back.
+            if (request.method == "POST" && request.path() == "/draws") {
+                size_t frames = requestedCount(std::string(request.query()), "frames", 1);
+                if (frames == 0 || frames > frame::VertexChanges::kMaxCensusFrames) {
+                    return lucent::http::Response::text(
+                        400, "Bad Request",
+                        "frames must be a count from 1 to " +
+                            std::to_string(frame::VertexChanges::kMaxCensusFrames) + ".\n");
+                }
+                m_vertexChanges.requestCensus(static_cast<uint32_t>(frames));
+                return lucent::http::Response::json(200, "OK", drawsJson());
             }
             // Several consecutive frames' uniform assemblies, filled at the
             // frame boundaries that follow; GET /recordings reads them back.
