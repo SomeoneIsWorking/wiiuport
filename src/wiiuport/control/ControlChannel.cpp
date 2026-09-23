@@ -19,7 +19,8 @@ lucent::http::Response notFound() {
         404, "Not Found",
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
         "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
-        "GET /recordings, GET /objects, GET /draws, POST /replay, POST /capture, POST /present, "
+        "GET /recordings, GET /objects, GET /draws, GET /vertices, POST /replay, POST /capture, "
+        "POST /present, "
         "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, "
         "POST /neighbourcheck, POST /blends, POST /pacing, "
         "POST /objects, POST /draws, POST /recordings and POST /input.\n");
@@ -361,6 +362,24 @@ std::string ControlChannel::drawsJson() const {
     return body + "}}\n";
 }
 
+std::string ControlChannel::vertexShadersJson() const {
+    std::string body = "{\"shaders\":[";
+    bool first = true;
+    for (const interp::ShaderVertexOutcomes& shader : m_vertices.drawsByShader()) {
+        body += first ? "{" : ",{";
+        first = false;
+        body += "\"baseHash\":" + std::to_string(shader.shaderBaseHash) + ",\"draws\":{";
+        for (size_t index = 0; index < interp::kVertexOutcomeCount; ++index) {
+            body += index == 0 ? "\"" : ",\"";
+            body +=
+                std::string(interp::vertexOutcomeName(static_cast<interp::VertexOutcome>(index))) +
+                "\":" + std::to_string(shader.draws[index]);
+        }
+        body += "}}";
+    }
+    return body + "]}\n";
+}
+
 std::string ControlChannel::verticesJson() const {
     std::string body = std::string(",\"objectsPlanning\":") +
                        (m_objects.isPlanning() ? "true" : "false") +
@@ -375,6 +394,7 @@ std::string ControlChannel::verticesJson() const {
     body += "}";
     body += ",\"runtimeDrawsReplaceable\":" + std::to_string(m_recorder.runtimeDrawsReplaceable());
     body += ",\"runtimeDrawsReplaced\":" + std::to_string(m_recorder.runtimeDrawsReplaced());
+    body += ",\"vertexPartnersFound\":" + std::to_string(m_vertices.partnersFoundByVertices());
     body += ",\"vertexReplaysDiverged\":" + std::to_string(m_vertices.replaysDiverged());
     body += ",\"vertexReplaysUnaligned\":" + std::to_string(m_vertices.replaysUnaligned());
     body += ",\"vertexBytesCopied\":" + std::to_string(m_vertices.bytesCopied());
@@ -858,6 +878,9 @@ bool ControlChannel::start(uint16_t port) {
             }
             if (request.path() == "/interpolation") {
                 return lucent::http::Response::json(200, "OK", interpolationJson());
+            }
+            if (request.path() == "/vertices") {
+                return lucent::http::Response::json(200, "OK", vertexShadersJson());
             }
             if (request.path() == "/objects") {
                 std::optional<interp::ObjectCensus> census = m_objects.census();

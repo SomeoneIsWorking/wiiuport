@@ -133,6 +133,8 @@ class ControlChannel {
     // title rewrote: by what blending them came to, over the runtime's draws
     // that could take new vertices, with what keeping and blending cost.
     std::string verticesJson() const;
+    // GET /vertices: each vertex shader's replayed draws by outcome.
+    std::string vertexShadersJson() const;
 
     // Which capture slot a query names, defaulting to the first.
     static size_t requestedSlot(const std::string& query);

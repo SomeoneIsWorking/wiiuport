@@ -77,6 +77,9 @@ class Interpolation:
     vertexDraws: dict[str, int]
     runtimeDrawsReplaceable: int
     runtimeDrawsReplaced: int
+    # Place-identified draws whose partner was found among their siblings by
+    # their vertices.
+    vertexPartnersFound: int
     vertexReplaysDiverged: int
     vertexReplaysUnaligned: int
     vertexBytesCopied: int
@@ -203,7 +206,8 @@ class Interpolation:
             "  vertices: "
             + ", ".join(f"{name} {count}" for name, count in self.vertexDraws.items())
             + f"; {self.runtimeDrawsReplaced} of {self.runtimeDrawsReplaceable} replaceable "
-            f"runtime draws replaced; {self.vertexReplaysDiverged} replays out of step, "
+            f"runtime draws replaced; {self.vertexPartnersFound} partners found by their "
+            f"vertices; {self.vertexReplaysDiverged} replays out of step, "
             f"{self.vertexReplaysUnaligned} not the plan's frames; "
             f"{self.vertexBytesCopied / ended / 1e6:.2f} MB kept a frame in "
             f"{self.vertexCopyingNanoseconds / ended / 1e6:.2f} ms; the blending thread "

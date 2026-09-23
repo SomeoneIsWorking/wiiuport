@@ -94,6 +94,7 @@ def report(ticks: int, interpolated: int, no_view: int) -> Interpolation:
         vertexDraws={"blended": interpolated, "noPartner": 2},
         runtimeDrawsReplaceable=interpolated * 3,
         runtimeDrawsReplaced=interpolated,
+        vertexPartnersFound=0,
         vertexReplaysDiverged=0,
         vertexReplaysUnaligned=0,
         vertexBytesCopied=0,
