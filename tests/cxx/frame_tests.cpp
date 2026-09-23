@@ -367,6 +367,39 @@ void drawsThatReadUniformsAreComparedOnlyOverACensus() {
                  "and none of them is a draw without uniforms");
 }
 
+void aCensusNamesTheAttributeTheTitleRewrote() {
+    RecordingObserver observer;
+
+    // Two vertices of a position (semantic 0) and a colour (semantic 1),
+    // interleaved; the title moves the second vertex's position each frame.
+    struct Vertex {
+        std::array<float, 3> position;
+        uint32_t colour;
+    };
+
+    std::array<Vertex, 2> vertices{Vertex{{0.0f, 0.0f, 0.0f}, 7}, Vertex{{1.0f, 0.0f, 0.0f}, 7}};
+    observer.vertexChanges().requestCensus(3);
+    for (int frame = 0; frame < 3; ++frame) {
+        vertices[1].position[1] = static_cast<float>(frame);
+        LatteFrameHooks::DrawPrepared prepared = preparedDraw(0x4, true, false);
+        prepared.vertexBuffers[0] = {vertices.data(), sizeof(vertices), sizeof(Vertex)};
+        prepared.vertexBufferCount = 1;
+        prepared.vertexAttributes[0] = {0, 0, 12, 0x30, 2, 0, false};
+        prepared.vertexAttributes[1] = {0, 12, 4, 0x1A, 2, 1, false};
+        prepared.vertexAttributeCount = 2;
+        observer.OnDrawPrepared(prepared);
+        observer.OnFrameComplete();
+    }
+    auto byAttribute = observer.vertexChanges().census().byAttribute;
+    check::equal(byAttribute.size(), size_t{2}, "each attribute is tallied apart");
+    check::equal(byAttribute[{{0x4, 0}, 0, 0x30}].changed, uint64_t{2},
+                 "the position the title moved changed in each frame compared");
+    check::equal(byAttribute[{{0x4, 0}, 1, 0x1A}].changed, uint64_t{0},
+                 "the colour it left did not, though it shares the buffer");
+    check::equal(byAttribute[{{0x4, 0}, 0, 0x30}].bytesHashed, uint64_t{3 * 2 * 12},
+                 "only the attribute's own bytes are read, vertex by vertex");
+}
+
 void theShapeOfEachPublishedFrameIsKeptAndTheOldestDropped() {
     // A frame's own totals cannot say whether the recorder publishes whole
     // frames or halves of them. A run of consecutive frames can, which is why
@@ -415,6 +448,7 @@ void runFrameTests() {
     aDrawWhoseVertexShaderReadsNoUniformsIsCountedAsOneNoBlendMoves();
     aDrawWhoseVertexBytesTheTitleRewroteIsCountedAsChanged();
     drawsThatReadUniformsAreComparedOnlyOverACensus();
+    aCensusNamesTheAttributeTheTitleRewrote();
     theShapeOfEachPublishedFrameIsKeptAndTheOldestDropped();
 }
 

@@ -39,6 +39,16 @@ class VertexChanges {
         auto operator<=>(const VertexShader&) const = default;
     };
 
+    // One value a vertex shader's draws read per vertex: which input it
+    // feeds, in which of Latte's data formats.
+    struct Attribute {
+        VertexShader shader;
+        uint8_t semanticId;
+        uint8_t format;
+
+        auto operator<=>(const Attribute&) const = default;
+    };
+
     struct Counts {
         uint64_t draws{0};
         // Draws in a frame after one the shader also drew in, and of them
@@ -53,6 +63,9 @@ class VertexChanges {
         uint32_t framesAsked{0};
         uint32_t framesTaken{0};
         std::map<VertexShader, Counts> byShader;
+        // The same draws by attribute: which of their values the title
+        // rewrote -- where they stand, or how they are coloured or textured.
+        std::map<Attribute, Counts> byAttribute;
     };
 
     // One of the title's draws.
@@ -68,28 +81,33 @@ class VertexChanges {
     Census census() const;
 
   private:
-    // One class of draws' hashes and counts.
-    class Tally {
+    // One class of draws' hashes and counts, by whatever read the bytes.
+    template <typename Key> class Tally {
       public:
-        void add(const VertexShader& shader, uint64_t hash, uint64_t bytes);
+        void add(const Key& key, uint64_t hash, uint64_t bytes);
         void compareFrame();
         void clear();
 
-        const std::map<VertexShader, Counts>& counts() const {
+        const std::map<Key, Counts>& counts() const {
             return m_counts;
         }
 
       private:
-        std::map<VertexShader, Counts> m_counts;
-        // Each shader's draws' hashes this frame, and the frame before's
-        // sorted.
-        std::map<VertexShader, std::vector<uint64_t>> m_frame;
-        std::map<VertexShader, std::vector<uint64_t>> m_previous;
+        std::map<Key, Counts> m_counts;
+        // Each key's hashes this frame, and the frame before's sorted.
+        std::map<Key, std::vector<uint64_t>> m_frame;
+        std::map<Key, std::vector<uint64_t>> m_previous;
     };
 
+    // Hashes each attribute of a draw that reads uniforms into the census.
+    void addAttributes(const VertexShader& shader, const LatteFrameHooks::DrawPrepared& draw);
+
     mutable std::mutex m_mutex;
-    Tally m_withoutUniforms;
-    Tally m_withUniforms;
+    Tally<VertexShader> m_withoutUniforms;
+    Tally<VertexShader> m_withUniforms;
+    Tally<Attribute> m_attributes;
+    // Reused: one attribute's bytes gathered out of its stride.
+    std::vector<char> m_gathered;
     uint32_t m_censusAsked{0};
     uint32_t m_censusTaken{0};
 };
