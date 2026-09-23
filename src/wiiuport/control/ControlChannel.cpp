@@ -316,12 +316,15 @@ std::string ControlChannel::drawsJson() const {
     std::string body = "{\"guestDrawsPrepared\":" + std::to_string(m_recorder.guestDrawsPrepared());
     body += ",\"withoutVertexUniforms\":[";
     auto first = true;
-    for (const auto& [shader, draws] : m_recorder.guestDrawsWithoutVertexUniformsByShader()) {
+    for (const auto& [shader, counts] : m_recorder.uniformlessDraws().byShader()) {
         body += first ? "{" : ",{";
         first = false;
         body += "\"baseHash\":" + std::to_string(shader.baseHash);
         body += ",\"auxHash\":" + std::to_string(shader.auxHash);
-        body += ",\"draws\":" + std::to_string(draws) + "}";
+        body += ",\"draws\":" + std::to_string(counts.draws);
+        body += ",\"changed\":" + std::to_string(counts.changed);
+        body += ",\"unmatched\":" + std::to_string(counts.unmatched);
+        body += ",\"bytesHashed\":" + std::to_string(counts.bytesHashed) + "}";
     }
     return body + "]}\n";
 }

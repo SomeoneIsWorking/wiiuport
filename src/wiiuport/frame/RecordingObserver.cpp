@@ -81,14 +81,7 @@ void RecordingObserver::OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw
         return;
     }
     ++m_guestDrawsWithoutVertexUniforms;
-    std::lock_guard lock(m_withoutUniformsMutex);
-    ++m_withoutUniformsByShader[{draw.vertexShaderBaseHash, draw.vertexShaderAuxHash}];
-}
-
-std::map<RecordingObserver::VertexShader, uint64_t>
-RecordingObserver::guestDrawsWithoutVertexUniformsByShader() const {
-    std::lock_guard lock(m_withoutUniformsMutex);
-    return m_withoutUniformsByShader;
+    m_uniformlessDraws.onDraw(draw);
 }
 
 void RecordingObserver::OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) {
@@ -102,6 +95,7 @@ void RecordingObserver::OnRuntimeSubmission(const LatteFrameHooks::SubmissionSum
 
 void RecordingObserver::OnFrameComplete() {
     m_framesObserved++;
+    m_uniformlessDraws.onFrameComplete();
     // An incomplete frame is published as incomplete rather than skipped:
     // skipping would leave the frame before it standing in for it, and a
     // listener would act on a frame that is over. Every reader refuses an
