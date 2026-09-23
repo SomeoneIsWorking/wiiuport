@@ -824,20 +824,38 @@ void anObjectKnownByItsBlocksThatStoppedAtNMinusOneIsHeld() {
 }
 
 void anObjectKnownByItsBlocksThatStoodUntilNMinusOneIsDrawnAtN() {
-    // Walked, stood, and moved again after N-1: set off, or put somewhere
-    // else, which three frames cannot tell apart. It is drawn at N.
+    // Walked, parked from N-2 to N-1, and put somewhere else by N: its step
+    // from N-3 does not pass through where it stood, and it is drawn at N.
     ObjectBlend blend{kHalfway};
     blend.setPlanning(true);
     record(blend, {{kBlockA, {0.0f, 7.0f}}});
     record(blend, {{kBlockB, {1.0f, 7.0f}}});
     record(blend, {{kBlockA, {2.0f, 7.0f}}});
-    record(blend, {{kBlockB, {2.0f, 7.0f}}});
-    std::vector<Draw> moved{{kBlockA, {3.0f, 7.0f}}};
-    record(blend, moved);
+    record(blend, {{kBlockB, {-100.0f, 7.0f}}});
+    record(blend, {{kBlockA, {-100.0f, 7.0f}}});
+    std::vector<Draw> placed{{kBlockB, {3.0f, 7.0f}}};
+    record(blend, placed);
     blend.armOnce();
-    auto uploaded = replay(blend, moved);
+    auto uploaded = replay(blend, placed);
     check::equal(blend.objects(Outcome::Blended), uint64_t{0}, "it is not blended");
     check::equal(uploaded[0][0], 3.0f, "but drawn as the title drew it");
+}
+
+void anObjectTheTitleMovesEveryOtherFrameIsBlended() {
+    // Swaying in the wind a step every other frame: it stood from N-2 to
+    // N-1, and N-1 is midway from N-3 to N.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kBlockA, {-1.0f, 7.0f}}});
+    record(blend, {{kBlockB, {0.0f, 7.0f}}});
+    record(blend, {{kBlockA, {1.0f, 7.0f}}});
+    record(blend, {{kBlockB, {1.0f, 7.0f}}});
+    std::vector<Draw> stepped{{kBlockA, {2.0f, 7.0f}}};
+    record(blend, stepped);
+    blend.armOnce();
+    auto uploaded = replay(blend, stepped);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "it is blended");
+    check::equal(uploaded[0][0], 1.5f, "half way from N-1");
 }
 
 void anObjectKnownByItsBlocksThatTurnedBackIsBlended() {
@@ -1056,6 +1074,7 @@ void runObjectBlendTests() {
     anObjectFarFromTheOriginIsKnownThroughItsRounding();
     anObjectKnownByItsBlocksThatStoppedAtNMinusOneIsHeld();
     anObjectKnownByItsBlocksThatStoodUntilNMinusOneIsDrawnAtN();
+    anObjectTheTitleMovesEveryOtherFrameIsBlended();
     anObjectKnownByItsBlocksThatTurnedBackIsBlended();
     blocksReusedByAnotherObjectDoNotNameThePartner();
     aFlippingValueFarLargerThanTheMoveDoesNotHideThePartner();

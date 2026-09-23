@@ -307,11 +307,17 @@ std::optional<size_t> ObjectPlanner::derivedPartner(const AssemblyKey& key,
     if (midpoint.landsOn()) {
         return entry;
     }
-    // One that stood bit for bit still until N-1 has no step to check its
-    // move against: set off, or put somewhere else -- a quad parked and
-    // placed, a tile snapped to the next cell -- look alike, and it is drawn
-    // at N, as its vertices are (VertexOutcome::Started).
+    // One that stood bit for bit still from N-2 to N-1 has no step there to
+    // check its move against. The title moves some every other frame -- the
+    // wind's sway -- and their step from N-3 is the check: the midpoint of
+    // N-3 and N lands on N-1. Otherwise it was set off or put somewhere else
+    // -- a quad parked and placed, a tile snapped to the next cell -- which
+    // look alike, and it is drawn at N, as its vertices are
+    // (VertexOutcome::Started).
     if (midpoint.stoodAtStart()) {
+        if (movedEveryOtherFrame(*derived, after, between.values(*entry), key.shader)) {
+            return entry;
+        }
         return std::nullopt;
     }
     // A stop or a turn at N-1 sets the object's own draw off its midpoint.
@@ -326,6 +332,22 @@ std::optional<size_t> ObjectPlanner::derivedPartner(const AssemblyKey& key,
         return entry;
     }
     return std::nullopt;
+}
+
+bool ObjectPlanner::movedEveryOtherFrame(const AssemblyKey& derived, std::span<const float> after,
+                                         std::span<const float> oneBack,
+                                         const ShaderKey& shader) const {
+    if (m_framesHeld < m_frames.size()) {
+        return false;
+    }
+    // The blocks alternate with the title's double buffering: N-3 drew with
+    // N-1's.
+    const KeyedFrame& threeBack = m_frames[2];
+    std::optional<size_t> entry = threeBack.find(derived);
+    if (!entry.has_value() || threeBack.values(*entry).size() != after.size()) {
+        return false;
+    }
+    return measure(threeBack.values(*entry), after, oneBack, frameState(shader)).landsOn();
 }
 
 std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey& key,

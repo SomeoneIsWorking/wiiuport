@@ -288,6 +288,12 @@ class ObjectPlanner {
 
     FrameState frameState(const ShaderKey& shader) const;
 
+    // Whether the object whose draw in N is `after`, and whose draw in N-1
+    // is `oneBack` under the `derived` key, passed through N-1 on its way
+    // from N-3: moving every other frame, it stood from N-2 to N-1.
+    bool movedEveryOtherFrame(const AssemblyKey& derived, std::span<const float> after,
+                              std::span<const float> oneBack, const ShaderKey& shader) const;
+
     // An object's draws in N-2 and N-1: where it stood two frames back, and
     // its partner -- none when it stood exactly where it stands in N.
     struct Found {
@@ -341,7 +347,8 @@ class ObjectPlanner {
     // The frame the guest is drawing, and its plan.
     KeyedFrame m_building;
     Plan m_buildingPlan;
-    // Whole frames, latest first: N, N-1, N-2, and the plan for N.
+    // Whole frames, latest first: N-1, N-2 and N-3 while N is building, and
+    // the plan for N-1.
     std::array<KeyedFrame, 3> m_frames;
     Plan m_plan;
     size_t m_framesHeld{0};
