@@ -1,5 +1,6 @@
 #include "wiiuport/interp/ObjectBlend.h"
 
+#include <algorithm>
 #include <cstring>
 #include <utility>
 
@@ -106,6 +107,10 @@ bool ObjectBlend::armOnce() {
     for (size_t outcome = 0; outcome < planned.size(); ++outcome) {
         m_outcomes[outcome] += planned[outcome];
     }
+    {
+        std::lock_guard lock(m_excludedMutex);
+        m_armedExcluded = m_excluded;
+    }
     m_replayCursor = 0;
     ++m_armings;
     m_armed = true;
@@ -127,7 +132,8 @@ bool ObjectBlend::apply(const LatteFrameHooks::UniformAssembly& assembly) {
     }
     size_t entry = m_replayCursor++;
     std::span<const float> blend = m_planner.blendOf(entry);
-    if (blend.empty()) {
+    if (blend.empty() || std::binary_search(m_armedExcluded.begin(), m_armedExcluded.end(),
+                                            assembly.shaderBaseHash)) {
         return false;
     }
     if (blend.size_bytes() != assembly.sizeInBytes) {

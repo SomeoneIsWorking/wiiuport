@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         nargs="?",
         default=layout.root / "scratch" / "continuous-run" / "recordings.bin",
-        help="a WIIUREC1 snapshot; defaults to the last continuous run's",
+        help="a WIIUREC2 snapshot; defaults to the last continuous run's",
     )
     parser.add_argument("--repeats", type=int, default=5)
     args = parser.parse_args(argv)

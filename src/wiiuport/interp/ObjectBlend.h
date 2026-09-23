@@ -6,6 +6,7 @@
 #include "wiiuport/interp/ObjectCensus.h"
 #include "wiiuport/interp/ObjectPlanner.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -87,6 +88,15 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
         return m_planner;
     }
 
+    // Draws the objects of the shaders with these base hashes as the title
+    // drew them from the next arming on. A maintainer's discriminator, not a
+    // setting. Safe from any thread.
+    void exclude(std::vector<uint64_t> shaderBaseHashes) {
+        std::sort(shaderBaseHashes.begin(), shaderBaseHashes.end());
+        std::lock_guard lock(m_excludedMutex);
+        m_excluded = std::move(shaderBaseHashes);
+    }
+
     // Replayed draws written, and replays that fell out of step with the
     // recording. The replay re-issues the recorded frame, so its n-th draw is
     // the recording's n-th; one that is not stops the blend for the rest of
@@ -153,6 +163,11 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
     size_t m_pendingCount{0};
     std::vector<frame::RecordedUniformAssembly> m_taken;
     bool m_planningBatch{false};
+
+    std::mutex m_excludedMutex;
+    std::vector<uint64_t> m_excluded;
+    // m_excluded as it was at the arming, read by the replay without a lock.
+    std::vector<uint64_t> m_armedExcluded;
 
     size_t m_replayCursor{0};
     uint64_t m_armings{0};

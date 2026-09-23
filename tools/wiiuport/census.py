@@ -14,7 +14,7 @@ from wiiuport.control import DEFAULT_PORT, ControlUnavailable, request_bytes, re
 
 # What an object can come to, as the runtime names them. An outcome the runtime
 # reports that is not here, or one missing, is refused rather than dropped.
-OUTCOMES = ("blended", "held", "unmatched", "unverified", "outside")
+OUTCOMES = ("blended", "held", "unmatched", "unverified", "outside", "shading")
 UNBLENDED = ("unmatched", "unverified", "outside")
 
 _ROW_FIELDS = (

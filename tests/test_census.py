@@ -13,7 +13,7 @@ URL = "http://127.0.0.1:0/objects"
 def outcomes(**counts: int) -> dict[str, int]:
     return {
         name: counts.get(name, 0)
-        for name in ("blended", "held", "unmatched", "unverified", "outside")
+        for name in ("blended", "held", "unmatched", "unverified", "outside", "shading")
     }
 
 

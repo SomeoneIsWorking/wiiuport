@@ -82,6 +82,8 @@ std::string_view ObjectPlanner::outcomeName(Outcome outcome) {
         return "unverified";
     case Outcome::Outside:
         return "outside";
+    case Outcome::Shading:
+        return "shading";
     case Outcome::Count:
         break;
     }
@@ -114,7 +116,12 @@ void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
     m_buildingPlan.earlierAt.push_back(kNotBlended);
     // Planned only against two whole frames; before that the frame is kept
     // as history, and its entries read as unmatched in a plan never ready.
-    Outcome outcome = m_framesHeld >= 2 ? plan(entry) : Outcome::Unmatched;
+    Outcome outcome = Outcome::Unmatched;
+    if (!assembly.writesColour || assembly.stageIndex == kPixelStage) {
+        outcome = Outcome::Shading;
+    } else if (m_framesHeld >= 2) {
+        outcome = plan(entry);
+    }
     m_buildingPlan.outcomeOf.push_back(outcome);
     ++m_buildingPlan.outcomes[static_cast<size_t>(outcome)];
 }
@@ -124,7 +131,7 @@ void ObjectPlanner::endFrame() {
     // to become N-1 and be searched.
     indexLatest();
     m_building.finish();
-    blendSharedValues();
+    seeUnblendedThroughTheCamera();
     ++m_framesPlanned;
     // Swapping keeps every frame's storage, so a steady scene allocates
     // nothing frame to frame.
@@ -408,15 +415,16 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     return Outcome::Blended;
 }
 
-void ObjectPlanner::blendSharedValues() {
+void ObjectPlanner::seeUnblendedThroughTheCamera() {
     Plan& plan = m_buildingPlan;
     const KeyedFrame& twoBack = m_frames[1];
-    auto unverified = [&plan](size_t entry) {
-        return plan.outcomeOf[entry] == Outcome::Unverified && plan.earlierAt[entry] != kNotBlended;
+    auto drawnAtN = [&plan](size_t entry) {
+        return plan.outcomeOf[entry] == Outcome::Unverified ||
+               plan.outcomeOf[entry] == Outcome::Unmatched;
     };
     m_unverifiedShaders.clear();
     for (size_t entry = 0; entry < m_building.size(); ++entry) {
-        if (unverified(entry)) {
+        if (drawnAtN(entry)) {
             m_unverifiedShaders.push_back(m_building.key(entry).shader);
         }
     }
@@ -427,41 +435,63 @@ void ObjectPlanner::blendSharedValues() {
     m_unverifiedShaders.erase(std::unique(m_unverifiedShaders.begin(), m_unverifiedShaders.end()),
                               m_unverifiedShaders.end());
     m_shared.clear();
+    m_transforms.clear();
     for (size_t entry = 0; entry < m_building.size(); ++entry) {
-        const ShaderKey& shader = m_building.key(entry).shader;
-        if (plan.outcomeOf[entry] != Outcome::Blended ||
-            !std::binary_search(m_unverifiedShaders.begin(), m_unverifiedShaders.end(), shader)) {
+        if (drawnAtN(entry) && plan.earlierAt[entry] != kNotBlended) {
+            m_shared.addWanted(twoBack.values(plan.earlierAt[entry]), m_building.values(entry));
+        }
+    }
+    for (size_t entry = 0; entry < m_building.size(); ++entry) {
+        if (plan.outcomeOf[entry] != Outcome::Blended) {
             continue;
         }
+        const ShaderKey& shader = m_building.key(entry).shader;
         std::span<const float> after = m_building.values(entry);
-        m_shared.addBlended(shader, twoBack.values(plan.earlierAt[entry]), after,
-                            {plan.floats.data() + plan.blendedAt[entry], after.size()});
+        std::span<const float> blended{plan.floats.data() + plan.blendedAt[entry], after.size()};
+        m_shared.addBlended(twoBack.values(plan.earlierAt[entry]), after, blended);
+        if (std::binary_search(m_unverifiedShaders.begin(), m_unverifiedShaders.end(), shader)) {
+            m_transforms.addBlended(shader, after, blended);
+        }
     }
     m_shared.index();
+    m_transforms.index();
     for (size_t entry = 0; entry < m_building.size(); ++entry) {
-        if (!unverified(entry)) {
+        if (!drawnAtN(entry)) {
             continue;
         }
         const ShaderKey& shader = m_building.key(entry).shader;
-        std::span<const float> before = twoBack.values(plan.earlierAt[entry]);
         std::span<const float> after = m_building.values(entry);
         size_t start = plan.floats.size();
+        m_sharedAt.assign(after.size(), 0);
         uint64_t shared = 0;
+        // Shared values are known only from the object's own draw at N-2.
+        bool twoBackKnown = plan.earlierAt[entry] != kNotBlended;
+        std::span<const float> before =
+            twoBackKnown ? twoBack.values(plan.earlierAt[entry]) : std::span<const float>{};
         for (size_t index = 0; index < after.size(); ++index) {
             std::optional<float> blended =
-                m_shared.blendOf(shader, static_cast<uint32_t>(index), before[index], after[index]);
+                twoBackKnown ? m_shared.blendOf(before[index], after[index]) : std::nullopt;
             if (blended.has_value()) {
                 ++shared;
+                m_sharedAt[index] = 1;
             }
             plan.floats.push_back(blended.value_or(after[index]));
         }
-        if (shared == 0) {
+        size_t carried = m_transforms.carry(
+            shader, after, m_sharedAt, std::span<float>(plan.floats.data() + start, after.size()));
+        if (shared == 0 && carried == 0) {
             plan.floats.resize(start);
             continue;
         }
         plan.blendedAt[entry] = static_cast<uint32_t>(start);
-        ++m_unverifiedSharingValues;
-        m_valuesShared += shared;
+        if (shared > 0) {
+            ++m_unverifiedSharingValues;
+            m_valuesShared += shared;
+        }
+        if (carried > 0) {
+            ++m_unblendedCarried;
+            m_transformsCarried += carried;
+        }
     }
 }
 

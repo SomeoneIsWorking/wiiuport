@@ -12,7 +12,7 @@ from wiiuport.control import ENV_CONTROL_PORT, ENV_INTERPOLATION, ControlUnavail
 
 def assembly(base: int, sources: list[int], floats: list[float]) -> bytes:
     return (
-        struct.pack("=QQII", base, 0, 1, len(sources))
+        struct.pack("=QQIII", base, 0, 1, 1, len(sources))
         + struct.pack(f"={len(sources)}I", *sources)
         + struct.pack("=I", len(floats))
         + struct.pack(f"={len(floats)}f", *floats)
@@ -49,7 +49,7 @@ def test_trailing_bytes_are_refused():
 
 
 def test_a_foreign_body_is_refused():
-    with pytest.raises(ControlUnavailable, match="WIIUREC1"):
+    with pytest.raises(ControlUnavailable, match="WIIUREC2"):
         parse_recordings(b"OTHERMAG" + bytes(4))
 
 
