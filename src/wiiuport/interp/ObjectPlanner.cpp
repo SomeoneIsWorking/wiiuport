@@ -303,12 +303,20 @@ std::optional<size_t> ObjectPlanner::derivedPartner(const AssemblyKey& key,
     if (!entry.has_value() || between.values(*entry).size() != after.size()) {
         return std::nullopt;
     }
-    if (measure(before, after, between.values(*entry), frameState(key.shader)).landsOn()) {
+    Midpoint midpoint = measure(before, after, between.values(*entry), frameState(key.shader));
+    if (midpoint.landsOn()) {
         return entry;
     }
-    // A start, a stop or a turn at N-1 sets the object's own draw off its
-    // midpoint. Blocks reused by another object name a draw standing
-    // elsewhere; the object's own is the one nearest it by its values too.
+    // One that stood bit for bit still until N-1 has no step to check its
+    // move against: set off, or put somewhere else -- a quad parked and
+    // placed, a tile snapped to the next cell -- look alike, and it is drawn
+    // at N, as its vertices are (VertexOutcome::Started).
+    if (midpoint.stoodAtStart()) {
+        return std::nullopt;
+    }
+    // A stop or a turn at N-1 sets the object's own draw off its midpoint.
+    // Blocks reused by another object name a draw standing elsewhere; the
+    // object's own is the one nearest it by its values too.
     placeSearchPoint(key, before, after);
     DrawTree::Nearest nearest =
         between.nearest(key.shader, {m_point, std::numeric_limits<double>::infinity(),
