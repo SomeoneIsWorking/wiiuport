@@ -45,6 +45,7 @@ Runtime::Runtime()
     m_recorder.addAssemblyRecordedListener(&m_vertexBlend);
     m_recorder.addDrawRecordedListener(&m_vertexBlend);
     m_recorder.addDisplayedListener(&m_pacing);
+    m_recorder.addScanOutListener(&m_scanOut);
     m_recorder.addFrameEndListener(&m_searchFeed);
     m_recorder.addFrameEndListener(&m_shapeLog);
     m_recorder.addFrameEndListener(&m_viewTracker);

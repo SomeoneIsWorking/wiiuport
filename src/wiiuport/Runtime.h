@@ -124,6 +124,7 @@ class Runtime {
     interp::ContinuousInterpolator m_continuous;
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
+    frame::PresentPacing m_scanOut{&frame::PresentPacing::Clock::now};
     input::InputDriver m_input;
     control::ControlChannel m_control{control::ControlChannel::Sources{
         .recorder = m_recorder,
@@ -143,6 +144,7 @@ class Runtime {
         .vertices = m_vertexBlend,
         .snapshot = m_snapshot,
         .pacing = m_pacing,
+        .scanOut = m_scanOut,
         .vertexChanges = m_recorder.vertexChanges(),
     }};
     bool m_hooksInstalled{false};

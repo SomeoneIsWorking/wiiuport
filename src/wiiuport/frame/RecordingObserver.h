@@ -66,6 +66,15 @@ class DisplayedListener {
     virtual void onDisplayed(bool fromRuntime) = 0;
 };
 
+// Notified when a frame handed to the display reached the screen, as the
+// presentation engine reports it, a few frames later; only where the surface
+// reports it.
+class ScanOutListener {
+  public:
+    virtual ~ScanOutListener() = default;
+    virtual void onScannedOut(const LatteFrameHooks::ShownFrame& shown) = 0;
+};
+
 // Something that may edit a uniform buffer the runtime is about to upload.
 // Only the runtime's own replayed draws are offered: editing the guest's
 // frame would change what the title is showing rather than what the runtime
@@ -116,6 +125,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void OnFrameComplete() override;
     void OnFrameEnd() override;
     void OnDisplayed(bool fromRuntime) override;
+    void OnShown(const LatteFrameHooks::ShownFrame& shown) override;
     void OnGuestDraw(bool fromCommandBuffer) override;
     void OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw,
                         LatteFrameHooks::VertexReplacements& replacements) override;
@@ -152,6 +162,12 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void addDisplayedListener(DisplayedListener* listener) {
         if (listener != nullptr) {
             m_displayedListeners.push_back(listener);
+        }
+    }
+
+    void addScanOutListener(ScanOutListener* listener) {
+        if (listener != nullptr) {
+            m_scanOutListeners.push_back(listener);
         }
     }
 
@@ -295,6 +311,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     std::vector<FrameShownListener*> m_shownListeners;
     std::vector<PresentListener*> m_presentListeners;
     std::vector<DisplayedListener*> m_displayedListeners;
+    std::vector<ScanOutListener*> m_scanOutListeners;
     std::vector<DrawRecordedListener*> m_drawListeners;
     FrameRecording m_inFlight;
     FrameRecording m_completed;
