@@ -7,6 +7,7 @@
 #include "wiiuport/interp/ObjectPlanner.h"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -83,6 +84,17 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
         return m_replaysDiverged;
     }
 
+    // Frames the guest ended while planning, and how long their ends spent
+    // on it: waiting for the planner to catch up, then indexing the frame for
+    // the searches of the frames after it. A cost the title's own frame pays.
+    uint64_t framesEnded() const {
+        return m_framesEnded.load();
+    }
+
+    std::chrono::nanoseconds frameEndPlanning() const {
+        return std::chrono::nanoseconds{m_frameEndPlanningNanoseconds.load()};
+    }
+
     // A minute of the title's frames: a census long enough to be steady.
     static constexpr size_t kMaxCensusFrames = 1800;
 
@@ -125,6 +137,8 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
     ObjectPlanner::Outcomes m_outcomes{};
     uint64_t m_drawsWritten{0};
     uint64_t m_replaysDiverged{0};
+    std::atomic<uint64_t> m_framesEnded{0};
+    std::atomic<int64_t> m_frameEndPlanningNanoseconds{0};
 
     // Frames asked for and not yet taken up, then the tally taking them.
     std::atomic<uint32_t> m_censusRequested{0};

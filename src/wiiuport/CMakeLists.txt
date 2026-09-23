@@ -67,6 +67,8 @@ add_library(wiiuport STATIC
   interp/Blendable.h
   interp/CutDetector.cpp
   interp/CutDetector.h
+  interp/DrawTree.cpp
+  interp/DrawTree.h
   interp/KeyedFrame.cpp
   interp/KeyedFrame.h
   interp/ObjectBlend.cpp

@@ -208,9 +208,11 @@ def main(argv: list[str] | None = None) -> int:
     print(census.render())
     print(restored.render())
     print(control.render())
+    # Each check's pair comes from one tick, and the two checks from two.
     restored.guest.write_png(out / "restore-title.png")
     restored.other.write_png(out / "restore-restored.png")
-    control.other.write_png(out / "restore-in-between.png")
+    control.guest.write_png(out / "control-title.png")
+    control.other.write_png(out / "control-in-between.png")
     print(paired.render())
     snapshot = out / "recordings.bin"
     snapshot.write_bytes(body)

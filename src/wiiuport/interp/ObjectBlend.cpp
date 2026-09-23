@@ -30,12 +30,17 @@ void ObjectBlend::onAssemblyRecorded(const frame::RecordedUniformAssembly& assem
 }
 
 void ObjectBlend::onFrameRecorded(const frame::FrameRecording& /*recording*/) {
+    auto started = std::chrono::steady_clock::now();
     waitUntilPlanned();
     if (!m_planning.load()) {
         m_planner.forget();
         return;
     }
     m_planner.endFrame();
+    m_frameEndPlanningNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                         std::chrono::steady_clock::now() - started)
+                                         .count();
+    ++m_framesEnded;
     tallyCensus();
 }
 

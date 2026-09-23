@@ -123,6 +123,12 @@ class ContinuousInterpolator final : public frame::FrameEndListener {
         return m_subresourcesRestored;
     }
 
+    // Copies aside allocated rather than reused: steady when the title writes
+    // the same targets every frame.
+    uint64_t shadowsCreated() const {
+        return m_shadowsCreated;
+    }
+
     // Summed over the restores that fell back to a replay.
     struct NotCopied {
         uint64_t subresources{0};
@@ -184,6 +190,7 @@ class ContinuousInterpolator final : public frame::FrameEndListener {
     uint64_t m_restoresByCopy{0};
     uint64_t m_restoresByReplay{0};
     uint64_t m_subresourcesRestored{0};
+    uint64_t m_shadowsCreated{0};
     NotCopied m_notCopied;
     std::array<std::chrono::nanoseconds, kPhaseCount> m_timeIn{};
 };

@@ -2,6 +2,7 @@
 
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/interp/AssemblyKey.h"
+#include "wiiuport/interp/DrawTree.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -22,13 +23,18 @@ namespace wiiuport::interp {
 class KeyedFrame {
   public:
     // Built one assembly at a time as the guest draws, then finished once the
-    // frame is: lookups by key or shader are only valid after finish().
+    // frame is: lookups by key or address are only valid after finish(), and
+    // searches by values after indexValues().
     void begin();
     // Returns the entry the assembly was given. Against `twoBack`, the frame
     // two before, a block it did not source is keyed as fresh; without one
     // every block is keyed by its address.
     size_t add(const frame::RecordedUniformAssembly& assembly, const KeyedFrame* twoBack);
     void finish();
+    // Builds what nearest() searches. Apart from finish() because nothing
+    // searches a frame until the next one is drawn, so it need not be built
+    // while the title waits for the frame to end.
+    void indexValues();
 
     size_t size() const {
         return m_keys.size();
@@ -44,22 +50,10 @@ class KeyedFrame {
 
     std::optional<size_t> find(const AssemblyKey& key) const;
 
-    // One shader's draws, ordered by their value at the one position that
-    // spreads them widest, so a search can take only the draws near a value
-    // there instead of all of them. Draws with no number at that position
-    // cannot be ordered by it and are kept apart.
-    struct ShaderDraws {
-        static constexpr uint32_t kNoPosition = UINT32_MAX;
-        uint32_t position{kNoPosition};
-        std::span<const uint32_t> ordered;
-        std::span<const uint32_t> unordered;
-    };
-
-    ShaderDraws drawnBy(const ShaderKey& shader) const;
-
-    // Those of `draws.ordered` whose value at `draws.position` lies in
-    // [low, high].
-    std::span<const uint32_t> within(const ShaderDraws& draws, double low, double high) const;
+    // The draw of `shader` nearest the query's point, as DrawTree finds it;
+    // none when the frame has no draw of that shader. Throws before
+    // indexValues(): the tree would still be some earlier frame's.
+    DrawTree::Nearest nearest(const ShaderKey& shader, const DrawTree::Query& query) const;
 
     // Whether any draw of the frame sourced a block at this address, fresh
     // or not.
@@ -92,29 +86,22 @@ class KeyedFrame {
         size_t m_used{0};
     };
 
+    DrawValues values() const {
+        return {m_floats, m_spans};
+    }
+
     std::vector<AssemblyKey> m_keys;
     std::vector<float> m_floats;
     std::vector<std::pair<uint32_t, uint32_t>> m_spans;
     // (key hash, entry), sorted.
     std::vector<std::pair<uint64_t, uint32_t>> m_byHash;
 
-    // One shader's run of m_byShader: [begin, orderedEnd) ordered by the
-    // value at `position`, [orderedEnd, end) with no number there.
-    struct ShaderRun {
-        ShaderKey shader;
-        uint32_t begin;
-        uint32_t orderedEnd;
-        uint32_t end;
-        uint32_t position;
-    };
-
-    // Orders one shader's run by the position that spreads it widest.
-    ShaderRun order(uint32_t begin, uint32_t end);
-
-    // Entries grouped by shader, each group ordered as its run says.
+    // Entries grouped by shader, for building each shader's tree.
     std::vector<uint32_t> m_byShader;
-    // Sorted by shader.
-    std::vector<ShaderRun> m_runs;
+    // Each shader's group in m_tree, sorted by shader.
+    std::vector<std::pair<ShaderKey, uint32_t>> m_groups;
+    DrawTree m_tree;
+    bool m_indexed{false};
     // Sorted and unique.
     std::vector<uint32_t> m_addresses;
     OccurrenceTable m_occurrences;

@@ -31,6 +31,7 @@ class Interpolation:
     restoresByCopy: int
     restoresByReplay: int
     subresourcesRestored: int
+    shadowsCreated: int
     notCopied: dict[str, int]
     # Captures of the guest's frame before and after an in-between frame was
     # drawn over it; refused ones left a slot holding some other frame.
@@ -42,6 +43,12 @@ class Interpolation:
     objects: dict[str, int]
     objectPartnersDerived: int
     objectPartnersSearched: int
+    objectPartnersReidentified: int
+    objectReidentifyAttempts: int
+    objectNearestCandidates: int
+    objectPartnerCandidates: int
+    objectFramesEnded: int
+    objectFrameEndPlanningNanoseconds: int
     objectSearchesDeferred: int
     objectValuesNotBlended: int
     objectValuesAlternating: int
@@ -92,6 +99,10 @@ class Interpolation:
             **counted,
         )
 
+    def frame_end_planning_ms(self) -> float:
+        """How long, on average, a frame's end spent on planning: the wait, then the index."""
+        return self.objectFrameEndPlanningNanoseconds / max(1, self.objectFramesEnded) / 1e6
+
     def render(self) -> str:
         skipped = ", ".join(f"{name} {count}" for name, count in self.skipped.items() if count)
         withheld = ", ".join(f"{name} {count}" for name, count in self.withheld.items() if count)
@@ -109,7 +120,8 @@ class Interpolation:
                 f"  per interpolated tick: {phases}",
                 (
                     f"  restores: {self.restoresByCopy} by copy "
-                    f"({self.subresourcesRestored} subresources), "
+                    f"({self.subresourcesRestored} subresources, "
+                    f"{self.shadowsCreated} copies allocated), "
                     f"{self.restoresByReplay} by replay "
                     f"({', '.join(f'{k} {v}' for k, v in self.notCopied.items() if v) or 'none'} "
                     f"not copied), {self.restoresRefused} refused; "
@@ -120,12 +132,18 @@ class Interpolation:
                     "  objects: "
                     + ", ".join(f"{name} {count}" for name, count in self.objects.items())
                     + f"; partners {self.objectPartnersDerived} derived, "
-                    f"{self.objectPartnersSearched} searched, "
+                    f"{self.objectPartnersSearched} searched "
+                    f"({self.objectPartnersReidentified} found by their values), "
                     f"{self.objectSearchesDeferred} searches deferred; "
+                    f"{self.objectPartnerCandidates} draws compared for partners over "
+                    f"{self.objectPartnersSearched} searches, {self.objectNearestCandidates} "
+                    f"for identity over {self.objectReidentifyAttempts} searches by values; "
                     f"{self.objectDrawsWritten} draws written, "
                     f"{self.objectReplaysDiverged} replays out of step with the recording, "
                     f"{self.objectValuesNotBlended} values kept as not numbers, "
-                    f"{self.objectValuesAlternating} as flipping between frames"
+                    f"{self.objectValuesAlternating} as flipping between frames; "
+                    f"a frame's end spent {self.frame_end_planning_ms():.2f} ms on planning over "
+                    f"{self.objectFramesEnded} frames"
                 ),
                 (
                     f"  view: {self.viewFramesTracked} frames tracked, "
