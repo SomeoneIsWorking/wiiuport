@@ -823,21 +823,21 @@ void anObjectKnownByItsBlocksThatStoppedAtNMinusOneIsHeld() {
     check::equal(uploaded[0][0], 3.0f, "and drawn where it stopped");
 }
 
-void anObjectKnownByItsBlocksThatStartedAtNMinusOneIsBlended() {
-    // Walked, stood, and set off again after N-1 -- a camera starting to
-    // turn: half way from where it stood at N-1 to N.
+void anObjectKnownByItsBlocksThatStoodUntilNMinusOneIsDrawnAtN() {
+    // Walked, stood, and moved again after N-1: set off, or put somewhere
+    // else, which three frames cannot tell apart. It is drawn at N.
     ObjectBlend blend{kHalfway};
     blend.setPlanning(true);
     record(blend, {{kBlockA, {0.0f, 7.0f}}});
     record(blend, {{kBlockB, {1.0f, 7.0f}}});
     record(blend, {{kBlockA, {2.0f, 7.0f}}});
     record(blend, {{kBlockB, {2.0f, 7.0f}}});
-    std::vector<Draw> started{{kBlockA, {3.0f, 7.0f}}};
-    record(blend, started);
+    std::vector<Draw> moved{{kBlockA, {3.0f, 7.0f}}};
+    record(blend, moved);
     blend.armOnce();
-    auto uploaded = replay(blend, started);
-    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "it is known by its blocks");
-    check::equal(uploaded[0][0], 2.5f, "and drawn half way from where it stood");
+    auto uploaded = replay(blend, moved);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{0}, "it is not blended");
+    check::equal(uploaded[0][0], 3.0f, "but drawn as the title drew it");
 }
 
 void anObjectKnownByItsBlocksThatTurnedBackIsBlended() {
@@ -1055,7 +1055,7 @@ void runObjectBlendTests() {
     aMoveTooSmallToHalveIsNotDrawnBetween();
     anObjectFarFromTheOriginIsKnownThroughItsRounding();
     anObjectKnownByItsBlocksThatStoppedAtNMinusOneIsHeld();
-    anObjectKnownByItsBlocksThatStartedAtNMinusOneIsBlended();
+    anObjectKnownByItsBlocksThatStoodUntilNMinusOneIsDrawnAtN();
     anObjectKnownByItsBlocksThatTurnedBackIsBlended();
     blocksReusedByAnotherObjectDoNotNameThePartner();
     aFlippingValueFarLargerThanTheMoveDoesNotHideThePartner();
