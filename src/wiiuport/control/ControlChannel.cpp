@@ -4,11 +4,13 @@
 #include <lucent/log.h>
 
 #include <array>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace wiiuport::control {
@@ -538,6 +540,26 @@ bool ControlChannel::requestedFlag(const std::string& query, std::string_view na
     return fallback;
 }
 
+bool ControlChannel::requestedHash(const std::string& query, std::string_view name,
+                                   std::optional<uint64_t>& hash) {
+    std::string_view rest(query);
+    std::string_view key;
+    std::string_view value;
+    hash.reset();
+    while (nextParameter(rest, key, value)) {
+        if (key != name) {
+            continue;
+        }
+        uint64_t parsed = 0;
+        auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed, 16);
+        if (value.size() != 16 || error != std::errc{} || end != value.data() + value.size()) {
+            return false;
+        }
+        hash = parsed;
+    }
+    return true;
+}
+
 size_t ControlChannel::requestedCount(const std::string& query, std::string_view name,
                                       size_t fallback) {
     std::string_view rest(query);
@@ -683,11 +705,20 @@ bool ControlChannel::start(uint16_t port) {
             // camera's always: objects=0 draws every object as the title did
             // (and so every vertex), vertices=0 only the vertices. A
             // maintainer's discriminator, not a setting.
+            // vertexShaderOff=<16 hex digits> draws the meshes one vertex
+            // shader reads as the title did, to name the draws a defect is.
             if (request.method == "POST" && request.path() == "/blends") {
                 std::string query(request.query());
+                std::optional<uint64_t> excluded;
+                if (!requestedHash(query, "vertexShaderOff", excluded)) {
+                    return lucent::http::Response::text(
+                        400, "Bad Request",
+                        "vertexShaderOff must be a vertex shader's base hash, 16 hex digits.\n");
+                }
                 m_objects.setPlanning(m_continuous.enabled() &&
                                       requestedFlag(query, "objects", true));
                 m_vertices.setBlending(requestedFlag(query, "vertices", true));
+                m_vertices.exclude(excluded);
                 return lucent::http::Response::json(200, "OK", interpolationJson());
             }
             // Frame pacing measured from here on, so a walk is not averaged
