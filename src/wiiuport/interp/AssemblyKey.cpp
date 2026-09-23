@@ -28,6 +28,19 @@ bool AssemblyKey::sameDrawAs(const AssemblyKey& other) const {
            std::equal(sources.begin(), sources.begin() + sourceCount, other.sources.begin());
 }
 
+bool AssemblyKey::describes(const AssemblyKey& drawn) const {
+    if (shader != drawn.shader || sourceCount != drawn.sourceCount) {
+        return false;
+    }
+    for (size_t word = 0; word < sourceCount; ++word) {
+        bool freshAddress = (word % 2) == 1 && sources[word] == kFreshBlock;
+        if (!freshAddress && sources[word] != drawn.sources[word]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 uint64_t AssemblyKey::drawHash() const {
     uint64_t seed = mix(mix(mix(0, shader.baseHash), shader.auxHash), shader.stageIndex);
     for (uint32_t word : sourceWords()) {

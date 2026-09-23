@@ -12,6 +12,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 
 DEFAULT_PORT = 21337
@@ -252,6 +253,20 @@ def wait_for_channel(port: int, seconds: int) -> bool:
             continue
         return True
     return False
+
+
+def wait_for[T](read: Callable[[], T], seconds: int) -> T:
+    """What `read` returns once it stops refusing, polled each second. A title
+    running slowly takes longer to reach what was asked of it, and that is
+    itself worth seeing rather than a refusal after a fixed sleep."""
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            return read()
+        except ControlUnavailable:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(1)
 
 
 def read_counters(port: int = DEFAULT_PORT, timeout: float = 2.0) -> Counters:

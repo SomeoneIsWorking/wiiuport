@@ -18,6 +18,7 @@ import sys
 import time
 from pathlib import Path
 
+from wiiuport.census import read_census, request_census
 from wiiuport.drive import left_stick, press, release
 from wiiuport.headless import HeadlessSession
 from wiiuport.image import arm_capture, read_capture
@@ -28,15 +29,33 @@ from wiiuport.interpolation import (
     parse_recordings,
     read_interpolation,
     restart_pacing,
+    set_continuous,
 )
+from wiiuport.paired import PairedRates
 from wiiuport.paths import find_layout
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
-from wiiuport.control import DEFAULT_PORT, ControlUnavailable, runtime_env, wait_for_channel
+from wiiuport import restore_check
+from wiiuport.control import (
+    DEFAULT_PORT,
+    ControlUnavailable,
+    runtime_env,
+    wait_for,
+    wait_for_channel,
+)
 
 # Where the stick points while walking, in turn: a camera that only ever moves
 # one way is a narrower test of the blend than one that turns and reverses.
 WALK_DIRECTIONS = ((0.0, 1.0), (1.0, 0.0), (0.0, -1.0), (-1.0, 0.0))
+
+# Windows of the paired comparison and how long each lasts: short enough that
+# the two settings see the same places, long enough to hold tens of ticks.
+PAIRED_WINDOWS = 8
+PAIRED_SECONDS = 3
+
+# Frames the object census adds up: one frame's objects vary too much from
+# the next to rank shaders by.
+CENSUS_FRAMES = 16
 
 
 def render_trace(trace: list[tuple[str, Interpolation]]) -> str:
@@ -51,18 +70,22 @@ def render_trace(trace: list[tuple[str, Interpolation]]) -> str:
     return "\n".join(lines)
 
 
-def wait_for_recordings(port: int, seconds: int) -> bytes:
-    """The armed snapshot, once its frames have all ended. A title running
-    slowly takes longer to end them, and that is itself worth seeing rather
-    than a refusal after a fixed sleep."""
-    deadline = time.monotonic() + seconds
-    while True:
-        try:
-            return fetch_recordings(port)
-        except ControlUnavailable:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(1)
+def walk_paired(port: int, windows: int) -> PairedRates:
+    """Walks with interpolation off and on by turns, and leaves it on."""
+    rates = PairedRates()
+    for index in range(windows):
+        on = index % 2 == 1
+        set_continuous(on, port=port)
+        x, y = WALK_DIRECTIONS[index % len(WALK_DIRECTIONS)]
+        left_stick(x, y, port=port)
+        start = read_interpolation(port)
+        started = time.monotonic()
+        time.sleep(PAIRED_SECONDS)
+        end = read_interpolation(port)
+        rates.add(on, end.ticks - start.ticks, time.monotonic() - started)
+    release(port=port)
+    set_continuous(True, port=port)
+    return rates
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -76,13 +99,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--interval", type=int, default=8)
     parser.add_argument("--walk", type=int, default=24, help="seconds to walk while measuring")
     parser.add_argument(
-        "--baseline",
-        action="store_true",
-        help="run with interpolation off and report only the title's own rate: the "
-        "comparison an interpolated run's rate is judged against",
+        "--paired",
+        type=int,
+        default=PAIRED_WINDOWS,
+        help="alternating windows, off then on, that compare the title's rate in the same scenes",
     )
     parser.add_argument("--snapshot", type=int, default=16, help="consecutive frames to keep")
     args = parser.parse_args(argv)
+    if args.paired < 2:
+        parser.error("--paired needs at least 2 windows: one with interpolation off, one on")
 
     try:
         game = resolve_game(args.game)
@@ -101,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     session = HeadlessSession(
         layout=layout,
         activity="continuous-run",
-        runtime_env=runtime_env(args.port, continuous=not args.baseline),
+        runtime_env=runtime_env(args.port, continuous=True),
     )
     with session:
         session.prepare(keys_source=keys, save_source=save)
@@ -140,8 +165,15 @@ def main(argv: list[str] | None = None) -> int:
                     left_stick(x, y, port=args.port)
                     time.sleep(step)
                     samples.append(sample(f"walk {x:+.0f},{y:+.0f}"))
+                # Which shaders drew what was not blended, over the frames
+                # planned while the snapshot fills.
+                request_census(CENSUS_FRAMES, port=args.port)
                 arm_recordings(args.snapshot, port=args.port)
-                body = wait_for_recordings(args.port, seconds=60)
+                body = wait_for(lambda: fetch_recordings(args.port), seconds=60)
+                census = wait_for(lambda: read_census(port=args.port), seconds=60)
+                # Still walking: the control only differs on a moving scene.
+                restored = restore_check.take(args.port, in_between=False)
+                control = restore_check.take(args.port, in_between=True)
                 release(port=args.port)
                 after = sample("walk end")
                 walk_seconds = time.monotonic() - walk_started
@@ -151,7 +183,8 @@ def main(argv: list[str] | None = None) -> int:
                 arm_capture(args.port, slot=0)
                 time.sleep(3)
                 screen = read_capture(args.port, slot=0)
-            except ControlUnavailable as unavailable:
+                paired = walk_paired(args.port, args.paired)
+            except (ControlUnavailable, restore_check.RestoreCheckRefused) as unavailable:
                 print(render_trace(trace))
                 print(f"refused: {unavailable}", file=sys.stderr)
                 return 1
@@ -172,6 +205,13 @@ def main(argv: list[str] | None = None) -> int:
     for index, sample in enumerate(samples):
         part = sample.since(before if index == 0 else samples[index - 1])
         print(f"  leg {index}: {part.framesInterpolated} of {part.ticks} ticks interpolated")
+    print(census.render())
+    print(restored.render())
+    print(control.render())
+    restored.guest.write_png(out / "restore-title.png")
+    restored.other.write_png(out / "restore-restored.png")
+    control.other.write_png(out / "restore-in-between.png")
+    print(paired.render())
     snapshot = out / "recordings.bin"
     snapshot.write_bytes(body)
     print(
@@ -183,6 +223,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"wrote {snapshot} and {out / 'screen.png'}")
     print(f"process exit {exit_code}")
 
+    problems = restore_check.judge(restored, control)
+    for problem in problems:
+        print(f"refused: {problem}", file=sys.stderr)
+    if problems:
+        return 1
     if software:
         print(
             f"refused: the runtime rendered on {device}, a software rasteriser; these "
@@ -190,9 +235,6 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    if args.baseline:
-        print(f"baseline: interpolation off, title rate {rate:.2f} Hz")
-        return 0
     if window.ticks == 0:
         print(
             "refused: no tick was counted while walking; the title drew nothing.", file=sys.stderr

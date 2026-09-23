@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,8 +19,11 @@ lucent::http::Response notFound() {
         404, "Not Found",
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
         "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
-        "GET /recordings, POST /replay, POST /capture, POST /present, POST /nulldiff, POST "
-        "/interpolate, POST /continuous, POST /pacing, POST /recordings and POST /input.\n");
+        "GET /recordings, GET /objects, POST /replay, POST /capture, POST /present, POST "
+        "/nulldiff, POST "
+        "/interpolate, POST /continuous, POST /restorecheck, POST /pacing, POST /objects, POST "
+        "/recordings and POST "
+        "/input.\n");
 }
 
 // The one-shot routes each own a frame boundary, and so does continuous
@@ -108,7 +112,8 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_input(sources.input), m_capture(sources.capture), m_presenter(sources.presenter),
       m_scheduler(sources.scheduler), m_interpolator(sources.interpolator),
       m_shapeLog(sources.shapeLog), m_viewTracker(sources.viewTracker),
-      m_continuous(sources.continuous), m_snapshot(sources.snapshot), m_pacing(sources.pacing) {
+      m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
+      m_objects(sources.objects), m_snapshot(sources.snapshot), m_pacing(sources.pacing) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -238,6 +243,39 @@ std::string shaderJson(const interp::TransformSubstitution::OfferedShader& shade
     return body + "}";
 }
 
+// Objects by what they came to, every outcome named, zero or not.
+std::string outcomesJson(const interp::ObjectPlanner::Outcomes& outcomes) {
+    std::string body = "{";
+    for (size_t index = 0; index < interp::ObjectPlanner::kOutcomeCount; ++index) {
+        auto outcome = static_cast<interp::ObjectPlanner::Outcome>(index);
+        body += index == 0 ? "\"" : ",\"";
+        body += std::string(interp::ObjectPlanner::outcomeName(outcome)) +
+                "\":" + std::to_string(outcomes[index]);
+    }
+    return body + "}";
+}
+
+std::string censusJson(const interp::ObjectCensus& census) {
+    std::string body = "{\"frames\":" + std::to_string(census.frames);
+    body += ",\"objects\":" + std::to_string(census.objects);
+    body += ",\"outcomes\":" + outcomesJson(census.outcomes);
+    body += ",\"shaders\":" + std::to_string(census.shaders);
+    body += ",\"rows\":[";
+    for (size_t i = 0; i < census.rows.size(); ++i) {
+        const interp::ObjectCensus::Row& row = census.rows[i];
+        body += i == 0 ? "{" : ",{";
+        body += "\"stageIndex\":" + std::to_string(row.shader.stageIndex);
+        body += ",\"baseHash\":" + std::to_string(row.shader.baseHash);
+        body += ",\"auxHash\":" + std::to_string(row.shader.auxHash);
+        body += ",\"draws\":" + std::to_string(row.draws);
+        body += ",\"outcomes\":" + outcomesJson(row.outcomes);
+        body += ",\"mostValues\":" + std::to_string(row.mostValues);
+        body += ",\"withoutBlocks\":" + std::to_string(row.withoutBlocks);
+        body += "}";
+    }
+    return body + "]}\n";
+}
+
 std::string shaderArrayJson(const std::vector<interp::TransformSubstitution::OfferedShader>& set) {
     std::string body = "[";
     for (size_t i = 0; i < set.size(); ++i) {
@@ -285,6 +323,15 @@ std::string ControlChannel::interpolationJson() const {
     }
     body += "}";
     body += ",\"restoresRefused\":" + std::to_string(m_continuous.restoresRefused());
+    body += ",\"restoresByCopy\":" + std::to_string(m_continuous.restoresByCopy());
+    body += ",\"restoresByReplay\":" + std::to_string(m_continuous.restoresByReplay());
+    body += ",\"subresourcesRestored\":" + std::to_string(m_continuous.subresourcesRestored());
+    body += ",\"restoreChecksCompleted\":" + std::to_string(m_restoreCheck.completed());
+    body += ",\"restoreChecksRefused\":" + std::to_string(m_restoreCheck.refused());
+    const interp::ContinuousInterpolator::NotCopied& notCopied = m_continuous.notCopied();
+    body += ",\"notCopied\":{\"subresources\":" + std::to_string(notCopied.subresources) +
+            ",\"texturesCreated\":" + std::to_string(notCopied.texturesCreated) +
+            ",\"streamoutWrites\":" + std::to_string(notCopied.streamoutWrites) + "}";
     body += ",\"phaseNanoseconds\":{";
     for (size_t index = 0; index < interp::ContinuousInterpolator::kPhaseCount; ++index) {
         auto phase = static_cast<interp::ContinuousInterpolator::Phase>(index);
@@ -295,19 +342,13 @@ std::string ControlChannel::interpolationJson() const {
     body += "}";
     body += ",\"cutsByTurn\":" + std::to_string(m_continuous.cuts().cutsByTurn());
     body += ",\"cutsByStep\":" + std::to_string(m_continuous.cuts().cutsByStep());
-    const interp::ObjectBlend& objects = m_continuous.objects();
-    body += ",\"objects\":{";
-    for (size_t index = 0; index < interp::ObjectPlanner::kOutcomeCount; ++index) {
-        auto outcome = static_cast<interp::ObjectPlanner::Outcome>(index);
-        body += index == 0 ? "\"" : ",\"";
-        body += std::string(interp::ObjectPlanner::outcomeName(outcome)) +
-                "\":" + std::to_string(objects.objects(outcome));
-    }
-    body += "}";
+    const interp::ObjectBlend& objects = m_objects;
+    body += ",\"objects\":" + outcomesJson(objects.outcomes());
     body += ",\"objectPartnersDerived\":" + std::to_string(objects.planner().partnersDerived());
     body += ",\"objectPartnersSearched\":" + std::to_string(objects.planner().partnersSearched());
     body += ",\"objectSearchesDeferred\":" + std::to_string(objects.planner().searchesDeferred());
     body += ",\"objectValuesNotBlended\":" + std::to_string(objects.planner().valuesNotBlended());
+    body += ",\"objectValuesAlternating\":" + std::to_string(objects.planner().valuesAlternating());
     body += ",\"objectDrawsWritten\":" + std::to_string(objects.drawsWritten());
     body += ",\"objectReplaysDiverged\":" + std::to_string(objects.replaysDiverged());
     frame::PresentPacing::Summary pacing = m_pacing.summary();
@@ -528,6 +569,33 @@ bool ControlChannel::start(uint16_t port) {
                 m_pacing.restart();
                 return lucent::http::Response::json(200, "OK", interpolationJson());
             }
+            // The guest's frame captured before and after the next in-between
+            // frame is drawn over it and taken back out, into capture slots 0
+            // and 1; with inbetween=1, slot 1 is the in-between frame instead,
+            // which is the comparison's control.
+            if (request.method == "POST" && request.path() == "/restorecheck") {
+                bool inBetween = requestedFlag(std::string(request.query()), "inbetween", false);
+                if (!m_restoreCheck.arm(inBetween ? interp::RestoreCheck::Against::InBetween
+                                                  : interp::RestoreCheck::Against::Restored)) {
+                    return lucent::http::Response::text(
+                        409, "Conflict", "a restore check is already waiting for its tick.\n");
+                }
+                return lucent::http::Response::json(200, "OK", interpolationJson());
+            }
+            // A census of the next planned frames' objects by shader; GET
+            // /objects reads it back once they are all planned.
+            if (request.method == "POST" && request.path() == "/objects") {
+                size_t frames = requestedCount(std::string(request.query()), "frames", 1);
+                if (frames == 0 || frames > interp::ObjectBlend::kMaxCensusFrames) {
+                    return lucent::http::Response::text(
+                        400, "Bad Request",
+                        "frames must be a count from 1 to " +
+                            std::to_string(interp::ObjectBlend::kMaxCensusFrames) + ".\n");
+                }
+                m_objects.requestCensus(static_cast<uint32_t>(frames));
+                return lucent::http::Response::json(
+                    200, "OK", "{\"requested\":true,\"frames\":" + std::to_string(frames) + "}\n");
+            }
             // Several consecutive frames' uniform assemblies, filled at the
             // frame boundaries that follow; GET /recordings reads them back.
             if (request.method == "POST" && request.path() == "/recordings") {
@@ -657,6 +725,16 @@ bool ControlChannel::start(uint16_t port) {
             }
             if (request.path() == "/interpolation") {
                 return lucent::http::Response::json(200, "OK", interpolationJson());
+            }
+            if (request.path() == "/objects") {
+                std::optional<interp::ObjectCensus> census = m_objects.census();
+                if (!census) {
+                    return lucent::http::Response::text(
+                        404, "Not Found",
+                        "no census has been taken yet. Request one with POST /objects while "
+                        "continuous interpolation is planning.\n");
+                }
+                return lucent::http::Response::json(200, "OK", censusJson(*census));
             }
             if (request.path() == "/recordings") {
                 std::string framed = m_snapshot.framed();

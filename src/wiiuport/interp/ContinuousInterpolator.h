@@ -2,10 +2,12 @@
 
 #include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameReplayer.h"
+#include "wiiuport/frame/GuestStateGuard.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/interp/CutDetector.h"
 #include "wiiuport/interp/ObjectBlend.h"
+#include "wiiuport/interp/TickProbe.h"
 #include "wiiuport/interp/TransformSubstitution.h"
 #include "wiiuport/interp/ViewTracker.h"
 
@@ -21,9 +23,8 @@ namespace wiiuport::interp {
 //
 // Runs at the moment the guest's frame is finished and not yet shown. The
 // frame it just drew is replayed with the view blended half way back to the
-// frame before, and presented; then replayed as drawn and copied back to the
-// scan buffer, so the guest's own swap that follows presents the frame the
-// guest drew.
+// frame before, and presented; then put back and copied to the scan buffer,
+// so the guest's own swap that follows presents the frame the guest drew.
 //
 // Spacing the two presents is the display's job, not this class's: with FIFO
 // presentation each lands on its own vblank, so a 30 Hz title shows sixty
@@ -31,10 +32,13 @@ namespace wiiuport::interp {
 // the title's next frame behind the sleep -- measured: 30.10 Hz without
 // interpolation fell to 20 Hz with a half-tick wait here.
 //
-// The replay that puts the guest's frame back is not a luxury: the in-between
-// replay drew over every render target the frame uses. Leaving it would show
-// the in-between frame twice and hand the title's next frame render targets
-// its own frame did not leave behind.
+// Putting the guest's frame back is not a luxury: the in-between replay drew
+// over every render target the frame uses. Leaving it would show the
+// in-between frame twice and hand the title's next frame render targets its
+// own frame did not leave behind. It is put back by copying what the replay
+// overwrote, which costs transfers; drawing the frame a second time cost a
+// third of the tick. When the copies cannot undo everything the replay did,
+// the frame is drawn again after all, and that is counted.
 //
 // Every tick is counted, and every tick without an in-between frame is
 // counted by why. A run where this never fired has to be distinguishable from
@@ -68,8 +72,8 @@ class ContinuousInterpolator final : public frame::FrameEndListener {
 
     ContinuousInterpolator(const ViewTracker& tracker, TransformSubstitution& substitution,
                            ObjectBlend& objects, frame::FrameReplayer& replayer,
-                           frame::FramePresenter& presenter,
-                           const frame::ReplayScheduler& scheduler, Now now);
+                           frame::FramePresenter& presenter, frame::GuestStateGuard& guard,
+                           const frame::ReplayScheduler& scheduler, TickProbe& probe, Now now);
 
     // Last among the frame-recorded listeners: the view tracker and the object
     // blend have to have taken this frame in first.
@@ -103,6 +107,33 @@ class ContinuousInterpolator final : public frame::FrameEndListener {
         return m_restoresRefused;
     }
 
+    // How each in-between frame was taken back out of guest-visible state.
+    // By copy is the intended way; by replay means the copies could not
+    // undo something the in-between replay did, which `notCopied` says.
+    uint64_t restoresByCopy() const {
+        return m_restoresByCopy;
+    }
+
+    uint64_t restoresByReplay() const {
+        return m_restoresByReplay;
+    }
+
+    // Texture subresources copied back, over every restore.
+    uint64_t subresourcesRestored() const {
+        return m_subresourcesRestored;
+    }
+
+    // Summed over the restores that fell back to a replay.
+    struct NotCopied {
+        uint64_t subresources{0};
+        uint64_t texturesCreated{0};
+        uint64_t streamoutWrites{0};
+    };
+
+    const NotCopied& notCopied() const {
+        return m_notCopied;
+    }
+
     // Where an interpolated tick's time goes, summed over every interpolated
     // tick. The title's own frame waits on all of it, so a tick rate that
     // collapses is attributed to a phase here rather than guessed at.
@@ -131,7 +162,8 @@ class ContinuousInterpolator final : public frame::FrameEndListener {
     void skip(Skip reason);
     // Adds the time since `since` to `phase`, and returns now.
     Clock::time_point charge(Phase phase, Clock::time_point since);
-    // Replays the frame as the guest drew it and copies it to the scan buffer.
+    // Puts the frame back as the guest drew it and copies it to the scan
+    // buffer.
     void restoreGuestFrame(const frame::FrameRecording& recording);
 
     const ViewTracker& m_tracker;
@@ -139,7 +171,9 @@ class ContinuousInterpolator final : public frame::FrameEndListener {
     ObjectBlend& m_objects;
     frame::FrameReplayer& m_replayer;
     frame::FramePresenter& m_presenter;
+    frame::GuestStateGuard& m_guard;
     const frame::ReplayScheduler& m_scheduler;
+    TickProbe& m_probe;
     Now m_now;
     CutDetector m_cuts;
     std::atomic<bool> m_enabled{false};
@@ -147,6 +181,10 @@ class ContinuousInterpolator final : public frame::FrameEndListener {
     uint64_t m_framesInterpolated{0};
     std::array<uint64_t, kSkipCount> m_skipped{};
     uint64_t m_restoresRefused{0};
+    uint64_t m_restoresByCopy{0};
+    uint64_t m_restoresByReplay{0};
+    uint64_t m_subresourcesRestored{0};
+    NotCopied m_notCopied;
     std::array<std::chrono::nanoseconds, kPhaseCount> m_timeIn{};
 };
 

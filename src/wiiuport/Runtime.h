@@ -6,6 +6,7 @@
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameShapeLog.h"
+#include "wiiuport/frame/GuestStateGuard.h"
 #include "wiiuport/frame/PresentPacing.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/RecordingSnapshot.h"
@@ -16,6 +17,7 @@
 #include "wiiuport/interp/FrameInterpolator.h"
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/ReplayBlend.h"
+#include "wiiuport/interp/RestoreCheck.h"
 #include "wiiuport/interp/TransformSearch.h"
 #include "wiiuport/interp/TransformSubstitution.h"
 #include "wiiuport/interp/ViewTracker.h"
@@ -103,6 +105,7 @@ class Runtime {
     frame::FrameReplayer m_replayer;
     frame::FramePresenter m_presenter;
     frame::FrameCapture m_capture;
+    frame::GuestStateGuard m_guard;
     frame::ReplayScheduler m_scheduler{m_replayer, m_presenter, m_capture};
     interp::TransformSearch m_search;
     frame::SearchFeed m_searchFeed{m_search};
@@ -112,6 +115,7 @@ class Runtime {
     interp::ReplayBlend m_replayBlend{m_objectBlend, m_substitution};
     interp::FrameInterpolator m_interpolator{m_search, m_substitution, m_scheduler};
     interp::ViewTracker m_viewTracker{m_search};
+    interp::RestoreCheck m_restoreCheck{m_presenter, m_capture};
     interp::ContinuousInterpolator m_continuous;
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
@@ -128,6 +132,8 @@ class Runtime {
         .shapeLog = m_shapeLog,
         .viewTracker = m_viewTracker,
         .continuous = m_continuous,
+        .restoreCheck = m_restoreCheck,
+        .objects = m_objectBlend,
         .snapshot = m_snapshot,
         .pacing = m_pacing,
     }};

@@ -3,6 +3,7 @@
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/frame/RecordingObserver.h"
+#include "wiiuport/interp/ObjectCensus.h"
 #include "wiiuport/interp/ObjectPlanner.h"
 
 #include <atomic>
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <thread>
 #include <vector>
@@ -61,6 +63,10 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
         return m_outcomes[static_cast<size_t>(outcome)];
     }
 
+    const ObjectPlanner::Outcomes& outcomes() const {
+        return m_outcomes;
+    }
+
     const ObjectPlanner& planner() const {
         return m_planner;
     }
@@ -77,6 +83,19 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
         return m_replaysDiverged;
     }
 
+    // A minute of the title's frames: a census long enough to be steady.
+    static constexpr size_t kMaxCensusFrames = 1800;
+
+    // Asks for a census of the next `frames` planned frames, replacing any
+    // taken or being taken. Safe from any thread.
+    void requestCensus(uint32_t frames) {
+        m_censusRequested.store(frames);
+    }
+
+    // The census last completed; none until one was requested and its frames
+    // were planned. Safe from any thread.
+    std::optional<ObjectCensus> census() const;
+
   private:
     // Draws handed over before the planning thread is woken for them: waking
     // it for every draw would cost more than planning one.
@@ -85,6 +104,8 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
     void planHandedOver(std::stop_token stop);
     // Returns once every draw handed over has been planned.
     void waitUntilPlanned();
+    // Adds the frame just planned to a requested census.
+    void tallyCensus();
 
     ObjectPlanner m_planner;
     std::atomic<bool> m_planning{false};
@@ -104,6 +125,13 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
     ObjectPlanner::Outcomes m_outcomes{};
     uint64_t m_drawsWritten{0};
     uint64_t m_replaysDiverged{0};
+
+    // Frames asked for and not yet taken up, then the tally taking them.
+    std::atomic<uint32_t> m_censusRequested{0};
+    uint32_t m_censusWanted{0};
+    CensusTally m_tally;
+    mutable std::mutex m_censusMutex;
+    std::optional<ObjectCensus> m_census;
 
     // Last, so it starts after and stops before everything it uses.
     std::jthread m_thread;

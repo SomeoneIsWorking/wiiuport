@@ -25,6 +25,17 @@ class Interpolation:
     framesInterpolated: int
     skipped: dict[str, int]
     restoresRefused: int
+    # How each in-between frame was taken back out of guest-visible state:
+    # by copying what it overwrote, or -- when a copy could not undo what it
+    # did, which notCopied says -- by drawing the title's frame again.
+    restoresByCopy: int
+    restoresByReplay: int
+    subresourcesRestored: int
+    notCopied: dict[str, int]
+    # Captures of the guest's frame before and after an in-between frame was
+    # drawn over it; refused ones left a slot holding some other frame.
+    restoreChecksCompleted: int
+    restoreChecksRefused: int
     phaseNanoseconds: dict[str, int]
     cutsByTurn: int
     cutsByStep: int
@@ -33,6 +44,7 @@ class Interpolation:
     objectPartnersSearched: int
     objectSearchesDeferred: int
     objectValuesNotBlended: int
+    objectValuesAlternating: int
     objectDrawsWritten: int
     objectReplaysDiverged: int
     # Frame times at the display since the last POST /pacing: a measurement
@@ -57,12 +69,21 @@ class Interpolation:
             name: delta(name)
             for name in Interpolation.__annotations__
             if name
-            not in {"enabled", "skipped", "withheld", "phaseNanoseconds", "objects", "pacing"}
+            not in {
+                "enabled",
+                "skipped",
+                "withheld",
+                "phaseNanoseconds",
+                "objects",
+                "notCopied",
+                "pacing",
+            }
         }
         return Interpolation(
             enabled=self.enabled,
             pacing=self.pacing,
             objects={k: v - earlier.objects.get(k, 0) for k, v in self.objects.items()},
+            notCopied={k: v - earlier.notCopied.get(k, 0) for k, v in self.notCopied.items()},
             skipped={k: v - earlier.skipped.get(k, 0) for k, v in self.skipped.items()},
             withheld={k: v - earlier.withheld.get(k, 0) for k, v in self.withheld.items()},
             phaseNanoseconds={
@@ -87,7 +108,11 @@ class Interpolation:
                 f"  skipped: {skipped or 'none'}",
                 f"  per interpolated tick: {phases}",
                 (
-                    f"  restores refused {self.restoresRefused}, "
+                    f"  restores: {self.restoresByCopy} by copy "
+                    f"({self.subresourcesRestored} subresources), "
+                    f"{self.restoresByReplay} by replay "
+                    f"({', '.join(f'{k} {v}' for k, v in self.notCopied.items() if v) or 'none'} "
+                    f"not copied), {self.restoresRefused} refused; "
                     f"copies submitted {self.copiesSubmitted}"
                 ),
                 f"  cuts: {self.cutsByTurn} by turn, {self.cutsByStep} by step",
@@ -99,7 +124,8 @@ class Interpolation:
                     f"{self.objectSearchesDeferred} searches deferred; "
                     f"{self.objectDrawsWritten} draws written, "
                     f"{self.objectReplaysDiverged} replays out of step with the recording, "
-                    f"{self.objectValuesNotBlended} values kept as not numbers"
+                    f"{self.objectValuesNotBlended} values kept as not numbers, "
+                    f"{self.objectValuesAlternating} as flipping between frames"
                 ),
                 (
                     f"  view: {self.viewFramesTracked} frames tracked, "

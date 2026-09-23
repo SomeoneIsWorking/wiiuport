@@ -20,20 +20,18 @@ namespace wiiuport::interp {
 // The title double-buffers its uniform storage: an object writes one block on
 // even frames and another on odd, so a block address in frame N comes back in
 // N+2 and never in N+1. The same address is therefore the same object two
-// frames apart, which is what this blends between: the in-between frame at
-// point t of N-1..N sits at (1 + t) / 2 of N-2..N, exact for an object moving
-// steadily and needing no guess at which odd-frame block goes with which even
-// one.
+// frames apart, and that is how its draw in N-1 -- its partner -- is found:
+// the draw the object's N-2..N midpoint lands on. The in-between frame is
+// then the lerp from the partner to N at t, which needs nothing of how the
+// object moved; N-2 only establishes who it is.
 //
 // An address can be reused by a different object between those two frames,
-// and blending two objects draws a third that never existed. So the blend is
-// checked against the frame in between: its midpoint has to land on the
-// object's partner draw in N-1. Partners are learned as block addresses -- A
-// on even frames goes with B on odd -- so one draw's search pairs every draw
-// of that object, and later frames derive the partner rather than search for
-// it. A derived partner is re-checked every frame, so a wrong or stale
-// pairing fails the check rather than passing silently. An object that fails, or has no N-2, is
-// drawn as the title drew it and counted.
+// and blending two objects draws a third that never existed: such an object's
+// midpoint lands on nothing in N-1, and it is not blended. Partners are learned as block addresses
+// -- A on even frames goes with B on odd -- so one draw's search pairs every draw of that object,
+// and later frames derive the partner rather than search for it. A derived partner is re-checked
+// every frame, so a wrong or stale pairing fails the check rather than passing silently. An object
+// that fails, or has no N-2, is drawn as the title drew it and counted.
 //
 // Only numbers are blended. A value that is not a finite normal float at both
 // ends -- an integer in a float's clothing, a NaN -- is the later frame's.
@@ -89,7 +87,7 @@ class ObjectPlanner {
         Unverified,
         // Its partner was found, but its blend would not lie strictly between
         // N-1 and N: nearer each than they are to each other. An object that
-        // stood still from N-1 to N is one, and N is then where it belongs.
+        // moved less than a float can halve is one, and is drawn at N.
         Outside,
         Count
     };
@@ -101,6 +99,11 @@ class ObjectPlanner {
     // What N's objects came to.
     const Outcomes& latestOutcomes() const {
         return m_plan.outcomes;
+    }
+
+    // What one of N's objects came to.
+    Outcome outcomeOf(size_t entry) const {
+        return m_plan.outcomeOf[entry];
     }
 
     // Partners derived from learned block pairs and confirmed, against
@@ -135,6 +138,12 @@ class ObjectPlanner {
         return m_valuesNotBlended;
     }
 
+    // Values of blended objects kept at the later frame because they were the
+    // same at N-2 and N but not at N-1: flipping, not moving.
+    uint64_t valuesAlternating() const {
+        return m_valuesAlternating;
+    }
+
   private:
     // Where an entry's blend sits in a plan's floats; none when drawn as is.
     static constexpr uint32_t kNotBlended = UINT32_MAX;
@@ -143,6 +152,8 @@ class ObjectPlanner {
     struct Plan {
         std::vector<uint32_t> blendedAt;
         std::vector<float> floats;
+        // What each entry came to, by entry.
+        std::vector<Outcome> outcomeOf;
         Outcomes outcomes{};
 
         void clear();
@@ -167,9 +178,8 @@ class ObjectPlanner {
                                         std::span<const float> after);
     void learn(const AssemblyKey& key, const AssemblyKey& partner);
 
-    // (1 + t) / 2: the blend runs over N-2..N, twice as long as N-1..N and
-    // starting a frame earlier.
-    float m_s;
+    // Where the in-between frame sits on N-1..N.
+    float m_t;
     // The frame the guest is drawing, and its plan.
     KeyedFrame m_building;
     Plan m_buildingPlan;
@@ -188,6 +198,7 @@ class ObjectPlanner {
     uint64_t m_partnersSearched{0};
     uint64_t m_searchesDeferred{0};
     uint64_t m_valuesNotBlended{0};
+    uint64_t m_valuesAlternating{0};
 };
 
 } // namespace wiiuport::interp

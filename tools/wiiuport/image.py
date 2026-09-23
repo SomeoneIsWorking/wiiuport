@@ -154,6 +154,25 @@ def arm_null_diff(port: int = DEFAULT_PORT, timeout: float = 5.0, redraw: bool =
         raise ControlUnavailable(f"{url} did not answer ({unreachable.reason})") from unreachable
 
 
+def arm_restore_check(
+    port: int = DEFAULT_PORT, timeout: float = 5.0, in_between: bool = False
+) -> None:
+    """Ask the runtime to capture the guest's frame before an in-between frame
+    is drawn over it (slot 0), and after it has been taken back out (slot 1).
+    With `in_between`, slot 1 is the in-between frame instead: the control,
+    which on a moving scene must differ."""
+    url = f"http://127.0.0.1:{port}/restorecheck?inbetween={1 if in_between else 0}"
+    request = urllib.request.Request(url, method="POST", data=b"")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout):
+            return
+    except urllib.error.HTTPError as refused:
+        body = refused.read().decode("utf-8", "replace").strip()
+        raise ControlUnavailable(f"{url} refused ({refused.code}): {body}") from refused
+    except urllib.error.URLError as unreachable:
+        raise ControlUnavailable(f"{url} did not answer ({unreachable.reason})") from unreachable
+
+
 def bounding_box(before: Image, after: Image) -> str:
     """Where the differing pixels are. A difference spread over the whole
     frame and one confined to a small box are different faults, and the

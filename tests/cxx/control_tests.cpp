@@ -4,6 +4,7 @@
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameReplayer.h"
+#include "wiiuport/frame/GuestStateGuard.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/interp/TransformSearch.h"
@@ -29,6 +30,13 @@ bool refusePresent(const LatteFrameHooks::PresentArguments&) {
     return false;
 }
 
+void noGuard() {
+}
+
+LatteFrameHooks::GuestStateRestore noRestore() {
+    return {};
+}
+
 wiiuport::interp::ContinuousInterpolator::Clock::time_point neverNow() {
     return {};
 }
@@ -49,8 +57,11 @@ struct Fixture {
     wiiuport::frame::FrameShapeLog shapeLog;
     wiiuport::interp::ViewTracker viewTracker{search};
     wiiuport::interp::ObjectBlend objects{wiiuport::interp::ContinuousInterpolator::kBlendPoint};
-    wiiuport::interp::ContinuousInterpolator continuous{
-        viewTracker, substitution, objects, replayer, presenter, scheduler, &neverNow};
+    wiiuport::frame::GuestStateGuard guard{&noGuard, &noRestore};
+    wiiuport::interp::RestoreCheck restoreCheck{presenter, capture};
+    wiiuport::interp::ContinuousInterpolator continuous{viewTracker, substitution, objects,
+                                                        replayer,    presenter,    guard,
+                                                        scheduler,   restoreCheck, &neverNow};
     wiiuport::frame::RecordingSnapshot snapshot;
     wiiuport::frame::PresentPacing pacing{&neverNow};
     ControlChannel channel{ControlChannel::Sources{
@@ -65,6 +76,8 @@ struct Fixture {
         .shapeLog = shapeLog,
         .viewTracker = viewTracker,
         .continuous = continuous,
+        .restoreCheck = restoreCheck,
+        .objects = objects,
         .snapshot = snapshot,
         .pacing = pacing,
     }};

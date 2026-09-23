@@ -13,6 +13,8 @@
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/interp/ContinuousInterpolator.h"
 #include "wiiuport/interp/FrameInterpolator.h"
+#include "wiiuport/interp/ObjectBlend.h"
+#include "wiiuport/interp/RestoreCheck.h"
 #include "wiiuport/interp/TransformSearch.h"
 #include "wiiuport/interp/ViewTracker.h"
 
@@ -59,6 +61,8 @@ class ControlChannel {
         const frame::FrameShapeLog& shapeLog;
         const interp::ViewTracker& viewTracker;
         interp::ContinuousInterpolator& continuous;
+        interp::RestoreCheck& restoreCheck;
+        interp::ObjectBlend& objects;
         frame::RecordingSnapshot& snapshot;
         frame::PresentPacing& pacing;
     };
@@ -150,6 +154,8 @@ class ControlChannel {
     const frame::FrameShapeLog& m_shapeLog;
     const interp::ViewTracker& m_viewTracker;
     interp::ContinuousInterpolator& m_continuous;
+    interp::RestoreCheck& m_restoreCheck;
+    interp::ObjectBlend& m_objects;
     frame::RecordingSnapshot& m_snapshot;
     frame::PresentPacing& m_pacing;
     std::unique_ptr<lucent::http::Server> m_server;

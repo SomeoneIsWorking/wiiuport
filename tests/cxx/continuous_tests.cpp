@@ -4,11 +4,13 @@
 #include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/frame/FrameReplayer.h"
+#include "wiiuport/frame/GuestStateGuard.h"
 #include "wiiuport/frame/RecordingSnapshot.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/interp/ContinuousInterpolator.h"
 #include "wiiuport/interp/CutDetector.h"
 #include "wiiuport/interp/ObjectBlend.h"
+#include "wiiuport/interp/RestoreCheck.h"
 #include "wiiuport/interp/Transform3x4.h"
 #include "wiiuport/interp/TransformSearch.h"
 #include "wiiuport/interp/TransformSubstitution.h"
@@ -19,16 +21,19 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 using wiiuport::frame::FramePresenter;
 using wiiuport::frame::FrameRecording;
 using wiiuport::frame::FrameReplayer;
+using wiiuport::frame::GuestStateGuard;
 using wiiuport::frame::RecordedUniformAssembly;
 using wiiuport::frame::RecordingSnapshot;
 using wiiuport::interp::ContinuousInterpolator;
 using wiiuport::interp::CutDetector;
+using wiiuport::interp::RestoreCheck;
 using wiiuport::interp::Transform3x4;
 using wiiuport::interp::TransformSearch;
 using wiiuport::interp::TransformSubstitution;
@@ -86,6 +91,9 @@ Clock::time_point g_now{};
 constexpr std::chrono::milliseconds kReadStep{2};
 std::vector<std::string> g_sequence;
 bool g_presentAccepted = true;
+bool g_captureAccepted = true;
+// What the next restore reports: a copy that undid everything by default.
+LatteFrameHooks::GuestStateRestore g_restore{};
 
 Clock::time_point fakeNow() {
     g_now += kReadStep;
@@ -107,8 +115,18 @@ bool fakeCopy(const LatteFrameHooks::PresentArguments&) {
     return true;
 }
 
-bool refuseCapture(LatteFrameHooks::CaptureCallback) {
-    return false;
+void fakeGuard() {
+    g_sequence.emplace_back("guard");
+}
+
+LatteFrameHooks::GuestStateRestore fakeRestore() {
+    g_sequence.emplace_back("restore");
+    return g_restore;
+}
+
+bool fakeCapture(LatteFrameHooks::CaptureCallback) {
+    g_sequence.emplace_back("capture");
+    return g_captureAccepted;
 }
 
 LatteFrameHooks::PresentArguments tvScanBuffer() {
@@ -119,6 +137,8 @@ void resetFakes() {
     g_now = {};
     g_sequence.clear();
     g_presentAccepted = true;
+    g_captureAccepted = true;
+    g_restore = LatteFrameHooks::GuestStateRestore{.subresourcesRestored = 5};
 }
 
 // Everything the interpolator is wired to in the product, with the fakes in
@@ -130,10 +150,12 @@ struct Rig {
     wiiuport::interp::ObjectBlend objects{ContinuousInterpolator::kBlendPoint};
     FrameReplayer replayer{&fakeSubmitList};
     FramePresenter presenter{&fakePresent, &fakeCopy};
-    wiiuport::frame::FrameCapture capture{&refuseCapture};
+    wiiuport::frame::FrameCapture capture{&fakeCapture};
+    GuestStateGuard guard{&fakeGuard, &fakeRestore};
     wiiuport::frame::ReplayScheduler scheduler{replayer, presenter, capture};
-    ContinuousInterpolator continuous{tracker,   substitution, objects, replayer,
-                                      presenter, scheduler,    &fakeNow};
+    RestoreCheck restoreCheck{presenter, capture};
+    ContinuousInterpolator continuous{tracker, substitution, objects,      replayer, presenter,
+                                      guard,   scheduler,    restoreCheck, &fakeNow};
 
     Rig() {
         resetFakes();
@@ -326,10 +348,15 @@ void aTickIsSplitInTwoByAnInBetweenFrame() {
     rig.tick(viewAt(x + 1.0f, 0, 0));
     check::equal(rig.continuous.framesInterpolated(), uint64_t{3},
                  "every tick after the view is found and followed is interpolated");
-    std::vector<std::string> one = {"replay", "present", "replay", "copy"};
-    std::vector<std::string> last(g_sequence.end() - 4, g_sequence.end());
-    check::isTrue(last == one,
-                  "in-between frame replayed and shown, then the guest's frame put back");
+    std::vector<std::string> one = {"guard", "replay", "present", "restore", "copy"};
+    std::vector<std::string> last(g_sequence.end() - 5, g_sequence.end());
+    check::isTrue(last == one, "in-between frame replayed under the guard and shown, then the "
+                               "guest's frame copied back and to the scan buffer");
+    check::equal(rig.continuous.restoresByCopy(), uint64_t{3}, "every restore by copy");
+    check::equal(rig.continuous.restoresByReplay(), uint64_t{0}, "and none drawn again");
+    check::equal(rig.continuous.subresourcesRestored(), uint64_t{15},
+                 "with the subresources each copied back summed");
+    check::isTrue(!rig.guard.isOpen(), "and the guard closed after each");
     check::isTrue(!rig.substitution.isArmed() && !rig.objects.isArmed(),
                   "with both blends taken down after their replay");
     check::equal(rig.presenter.copiesSubmitted(), uint64_t{3}, "one restore per in-between frame");
@@ -368,6 +395,84 @@ void aRefusedPresentStillPutsTheGuestFrameBack() {
                  "a refused present is a skip");
     check::isTrue(!g_sequence.empty() && g_sequence.back() == "copy",
                   "and the guest's own frame is still restored over the blended one");
+}
+
+void aRestoreTheCopiesCannotFinishDrawsTheGuestFrameAgain() {
+    Rig rig;
+    float x = rig.walkUntilPaired();
+    g_sequence.clear();
+    g_restore = LatteFrameHooks::GuestStateRestore{
+        .subresourcesRestored = 5, .texturesCreated = 1, .streamoutWrites = 2};
+    rig.tick(viewAt(x, 0, 0));
+    std::vector<std::string> one = {"guard", "replay", "present", "restore", "replay", "copy"};
+    check::isTrue(g_sequence == one, "a texture made or a buffer streamed out is put back by "
+                                     "drawing the guest's frame again, after the copies");
+    check::equal(rig.continuous.restoresByReplay(), uint64_t{1}, "counted as a replay restore");
+    check::equal(rig.continuous.restoresByCopy(), rig.continuous.framesInterpolated() - 1,
+                 "and not as a copy");
+    check::equal(rig.continuous.notCopied().texturesCreated, uint64_t{1}, "with the texture");
+    check::equal(rig.continuous.notCopied().streamoutWrites, uint64_t{2}, "and the writes named");
+}
+
+void aRestoreCheckCapturesTheGuestFrameBeforeAndAfter() {
+    Rig rig;
+    float x = rig.walkUntilPaired();
+    check::isTrue(rig.restoreCheck.arm(RestoreCheck::Against::Restored), "a check is armed");
+    check::isTrue(!rig.restoreCheck.arm(RestoreCheck::Against::InBetween),
+                  "and a second one while it waits is refused");
+    g_sequence.clear();
+    rig.tick(viewAt(x, 0, 0));
+    std::vector<std::string> restored = {"capture", "present", "guard",   "replay",
+                                         "present", "restore", "capture", "copy"};
+    check::isTrue(g_sequence == restored,
+                  "the guest's frame is presented and captured before anything is drawn over "
+                  "it, and captured again at the copy that puts it back, which is where a "
+                  "capture is taken");
+    check::equal(rig.restoreCheck.completed(), uint64_t{1}, "one check completed");
+
+    check::isTrue(rig.restoreCheck.arm(RestoreCheck::Against::InBetween), "the control is armed");
+    g_sequence.clear();
+    rig.tick(viewAt(x + 1.0f, 0, 0));
+    std::vector<std::string> control = {"capture", "present", "guard",   "replay",
+                                        "capture", "present", "restore", "copy"};
+    check::isTrue(g_sequence == control, "the control captures the in-between frame instead");
+    check::equal(rig.restoreCheck.completed(), uint64_t{2}, "and completes too");
+
+    g_sequence.clear();
+    rig.tick(viewAt(x + 2.0f, 0, 0));
+    check::isTrue(g_sequence.front() == "guard", "an unarmed tick captures and presents nothing");
+}
+
+void aRestoreCheckWhoseCaptureIsRefusedSaysSo() {
+    Rig rig;
+    float x = rig.walkUntilPaired();
+    g_captureAccepted = false;
+    rig.restoreCheck.arm(RestoreCheck::Against::Restored);
+    rig.tick(viewAt(x, 0, 0));
+    check::equal(rig.restoreCheck.refused(), uint64_t{1},
+                 "a slot that was never armed would hold some other frame, so it is refused");
+    check::equal(rig.restoreCheck.completed(), uint64_t{0}, "and not completed");
+}
+
+void theGuardRefusesToOpenTwiceOrCloseUnopened() {
+    resetFakes();
+    GuestStateGuard guard{&fakeGuard, &fakeRestore};
+    bool refused = false;
+    try {
+        guard.restore();
+    } catch (const std::logic_error&) {
+        refused = true;
+    }
+    check::isTrue(refused, "a restore with nothing kept is refused");
+    guard.open();
+    refused = false;
+    try {
+        guard.open();
+    } catch (const std::logic_error&) {
+        refused = true;
+    }
+    check::isTrue(refused, "as is a second open, which would drop what the first kept");
+    check::equal(g_sequence.size(), size_t{1}, "and neither reached the fork");
 }
 
 void aSnapshotHoldsConsecutiveFramesAsRecorded() {
@@ -412,6 +517,10 @@ void runContinuousTests() {
     aTickIsSplitInTwoByAnInBetweenFrame();
     aCameraCutIsShownAsDrawn();
     aRefusedPresentStillPutsTheGuestFrameBack();
+    aRestoreTheCopiesCannotFinishDrawsTheGuestFrameAgain();
+    theGuardRefusesToOpenTwiceOrCloseUnopened();
+    aRestoreCheckCapturesTheGuestFrameBeforeAndAfter();
+    aRestoreCheckWhoseCaptureIsRefusedSaysSo();
     aSnapshotHoldsConsecutiveFramesAsRecorded();
 }
 

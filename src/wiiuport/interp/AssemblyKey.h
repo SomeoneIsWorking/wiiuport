@@ -19,9 +19,16 @@ namespace wiiuport::interp {
 // else -- but the n-th draw of one object from one set of blocks is, because
 // the engine issues an object's passes in its own fixed order.
 //
+// A block the title allocates afresh every frame -- measured: one of the three
+// blocks the most-drawn world shader sources is at an address no frame of the
+// four before used -- names no object, so it is keyed as fresh rather than by
+// its address.
+//
 // Held inline, so a frame of keys is built without an allocation per draw.
 struct AssemblyKey {
     static constexpr size_t kMaxSourceWords = LatteFrameHooks::kMaxUniformBlockSources * 2;
+    // Stands in for the address of a block no frame two back sourced.
+    static constexpr uint32_t kFreshBlock = UINT32_MAX;
 
     ShaderKey shader;
     uint32_t sourceCount{0};
@@ -38,6 +45,9 @@ struct AssemblyKey {
 
     // Everything but the occurrence: the same object's blocks, drawn again.
     bool sameDrawAs(const AssemblyKey& other) const;
+    // Whether a draw keyed by its real addresses is this key's draw, a fresh
+    // block standing for whatever address it had.
+    bool describes(const AssemblyKey& drawn) const;
 
     bool operator==(const AssemblyKey& other) const {
         return occurrence == other.occurrence && sameDrawAs(other);
