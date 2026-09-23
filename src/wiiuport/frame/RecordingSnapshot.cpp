@@ -67,7 +67,8 @@ void RecordingSnapshot::onFrameRecorded(const FrameRecording& recording) {
     if (m_wanted == 0) {
         return;
     }
-    m_filling.push_back(Frame{recording.isComplete(), recording.uniformAssemblies()});
+    std::span<const RecordedUniformAssembly> assemblies = recording.uniformAssemblies();
+    m_filling.push_back(Frame{recording.isComplete(), {assemblies.begin(), assemblies.end()}});
     if (m_filling.size() < m_wanted) {
         return;
     }

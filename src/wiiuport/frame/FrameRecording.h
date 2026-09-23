@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace wiiuport::frame {
@@ -20,6 +21,11 @@ namespace wiiuport::frame {
 // This type is pure: it knows nothing about the command processor, the hooks,
 // or what any of the recorded floats mean. It is the thing a replay reads and
 // the thing a substitution edits.
+//
+// Clearing keeps the storage: a frame records thousands of assemblies, and
+// allocating and freeing each one's vectors every frame was a fifth of the
+// rendering thread's time. A recording reused frame after frame allocates
+// only when a frame outgrows every one before it.
 struct RecordedDisplayList {
     uint32_t physicalAddress{0};
     std::vector<std::byte> data;
@@ -54,12 +60,12 @@ class FrameRecording {
 
     void clear();
 
-    const std::vector<RecordedDisplayList>& displayLists() const {
-        return m_displayLists;
+    std::span<const RecordedDisplayList> displayLists() const {
+        return {m_displayLists.data(), m_displayListCount};
     }
 
-    const std::vector<RecordedUniformAssembly>& uniformAssemblies() const {
-        return m_uniformAssemblies;
+    std::span<const RecordedUniformAssembly> uniformAssemblies() const {
+        return {m_uniformAssemblies.data(), m_uniformAssemblyCount};
     }
 
     size_t byteCount() const {
@@ -82,8 +88,12 @@ class FrameRecording {
     size_t m_byteBudget;
     size_t m_byteCount{0};
     size_t m_refusedOverBudget{0};
+    // The first counts of each are this frame's; the rest are storage kept
+    // from earlier frames.
     std::vector<RecordedDisplayList> m_displayLists;
+    size_t m_displayListCount{0};
     std::vector<RecordedUniformAssembly> m_uniformAssemblies;
+    size_t m_uniformAssemblyCount{0};
 };
 
 } // namespace wiiuport::frame

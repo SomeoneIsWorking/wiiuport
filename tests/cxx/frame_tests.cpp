@@ -83,6 +83,30 @@ void clearingReturnsTheRecordingToEmpty() {
     check::isTrue(recording.addDisplayList(3, data.data(), 16), "so recording can begin again");
 }
 
+void aReusedRecordingHoldsOnlyItsOwnFrame() {
+    RecordedUniformAssembly longer;
+    longer.blockSources = {4, 0xf4000000, 5, 0xf4001000};
+    longer.data = {1.0f, 2.0f, 3.0f, 4.0f};
+    FrameRecording recording;
+    recording.addUniformAssembly(longer);
+    recording.addUniformAssembly(longer);
+    recording.clear();
+
+    RecordedUniformAssembly shorter;
+    shorter.shaderBaseHash = 7;
+    shorter.blockSources = {6, 0xf4002000};
+    shorter.data = {9.0f};
+    recording.addUniformAssembly(shorter);
+
+    check::equal(recording.uniformAssemblies().size(), size_t{1},
+                 "the earlier frame's second draw is not this frame's");
+    check::equal(recording.uniformAssemblies()[0].data.size(), size_t{1},
+                 "a slot reused from a longer draw holds only this draw's values");
+    check::equal(recording.uniformAssemblies()[0].blockSources.size(), size_t{2},
+                 "and only this draw's blocks");
+    check::equal(recording.uniformAssemblies()[0].shaderBaseHash, uint64_t{7}, "and its shader");
+}
+
 // The observer is driven through the fork's own hook types rather than a
 // stand-in for them, so a change to that interface breaks this build instead
 // of leaving a test that agrees with a version nobody ships any more.
@@ -443,6 +467,7 @@ void runFrameTests() {
     goingOverBudgetRefusesRatherThanTruncating();
     aUniformAssemblyIsHeldByValue();
     clearingReturnsTheRecordingToEmpty();
+    aReusedRecordingHoldsOnlyItsOwnFrame();
     aFrameIsOnlyPublishedWhenItEnds();
     theNextFrameDoesNotAccumulateOntoTheLast();
     aReplaysOwnDrawsAreNotRecordedAsTheNextFrame();

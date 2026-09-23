@@ -292,7 +292,9 @@ void aFrameWithNoDrawsStillLeavesTheOneBeforeSearchable() {
 void aKeptSnapshotIsPlannedAgainAsTheProductPlansIt() {
     std::vector<wiiuport::frame::RecordingSnapshot::Frame> frames;
     for (const std::vector<Draw>* draws : {&kWalkTwoBack, &kWalkOneBack, &kWalkLatest}) {
-        frames.push_back({true, frameOf(*draws).uniformAssemblies()});
+        wiiuport::frame::FrameRecording frame = frameOf(*draws);
+        frames.push_back(
+            {true, {frame.uniformAssemblies().begin(), frame.uniformAssemblies().end()}});
     }
     auto report = wiiuport::interp::PlanReplay::run(frames, 3);
     check::equal(report.frames, uint64_t{3}, "every frame fed");
