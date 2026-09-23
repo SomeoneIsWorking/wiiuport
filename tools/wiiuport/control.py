@@ -71,6 +71,8 @@ class Counters:
     nestedListsSeen: int
     guestDrawsFromCommandBuffers: int
     guestDrawsFromRing: int
+    guestDrawsPrepared: int
+    guestDrawsWithoutVertexUniforms: int
     runtimeSubmissions: int
     runtimePacketsProcessed: int
     runtimeDrawsIssued: int
@@ -97,7 +99,9 @@ class Counters:
             f"{self.lastFrameUniformAssemblies} assemblies in {self.lastFrameBytes} bytes; "
             f"nested lists {self.nestedListsSeen}; the title drew "
             f"{self.guestDrawsFromCommandBuffers} times from command buffers and "
-            f"{self.guestDrawsFromRing} straight from the ring; "
+            f"{self.guestDrawsFromRing} straight from the ring, "
+            f"{self.guestDrawsWithoutVertexUniforms} of {self.guestDrawsPrepared} drawn "
+            "with no vertex uniforms, which no blend moves; "
             f"replays {self.replaysRun} submitting {self.replayListsSubmitted} lists "
             f"({self.replayListsRefused} refused) in {self.runtimeSubmissions} submissions "
             f"the command processor walked {self.runtimePacketsProcessed} packets of, "

@@ -6,6 +6,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <mutex>
 #include <span>
 #include <vector>
 
@@ -95,6 +97,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void OnFrameEnd() override;
     void OnDisplayed(bool fromRuntime) override;
     void OnGuestDraw(bool fromCommandBuffer) override;
+    void OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw) override;
     void OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) override;
 
     // Empty by default, so a build that installs no listener behaves as a
@@ -204,6 +207,29 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
         return m_guestDrawsFromRing;
     }
 
+    // The title's draws as the renderer issued them, and those whose vertex
+    // shader reads no uniforms: geometry placed by vertex data alone, which
+    // no uniform blend moves. They are the draws interpolation cannot reach.
+    uint64_t guestDrawsPrepared() const {
+        return m_guestDrawsPrepared;
+    }
+
+    uint64_t guestDrawsWithoutVertexUniforms() const {
+        return m_guestDrawsWithoutVertexUniforms;
+    }
+
+    struct VertexShader {
+        uint64_t baseHash;
+        uint64_t auxHash;
+
+        auto operator<=>(const VertexShader&) const = default;
+    };
+
+    // Those draws by vertex shader, since the start: which kind of geometry
+    // no blend reaches -- a full-screen pass, which never moves, or an effect.
+    // A copy, taken under the lock the rendering thread counts them under.
+    std::map<VertexShader, uint64_t> guestDrawsWithoutVertexUniformsByShader() const;
+
     uint64_t runtimeSubmissions() const {
         return m_runtimeSubmissions;
     }
@@ -243,6 +269,11 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     uint64_t m_nestedListsSeen{0};
     uint64_t m_guestDrawsFromCommandBuffers{0};
     uint64_t m_guestDrawsFromRing{0};
+    uint64_t m_guestDrawsPrepared{0};
+    uint64_t m_guestDrawsWithoutVertexUniforms{0};
+    // Taken only for a draw without vertex uniforms, a few in a hundred.
+    mutable std::mutex m_withoutUniformsMutex;
+    std::map<VertexShader, uint64_t> m_withoutUniformsByShader;
     uint64_t m_runtimeSubmissions{0};
     uint64_t m_runtimePacketsProcessed{0};
     uint64_t m_runtimeDrawsIssued{0};

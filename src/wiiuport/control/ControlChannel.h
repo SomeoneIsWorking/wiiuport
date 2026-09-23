@@ -115,6 +115,10 @@ class ControlChannel {
     // halves of them; a run of them can.
     std::string framesJson() const;
 
+    // The title's draws whose vertex shader reads no uniforms, by vertex
+    // shader, beside every draw it prepared: what no blend can move.
+    std::string drawsJson() const;
+
     // Whether every frame is being interpolated, and for every tick that was
     // not, why -- with the tracker, phase-time and withheld-packet counts beside
     // it, so a run that never interpolated says so in numbers.
