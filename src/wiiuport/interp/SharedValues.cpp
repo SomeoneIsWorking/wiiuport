@@ -1,6 +1,6 @@
 #include "wiiuport/interp/SharedValues.h"
 
-#include "wiiuport/interp/Blendable.h"
+#include "wiiuport/interp/Midpoint.h"
 
 #include <algorithm>
 #include <bit>
@@ -15,13 +15,12 @@ void SharedValues::addBlended(const ShaderKey& shader, std::span<const float> tw
                               std::span<const float> latest, std::span<const float> blended) {
     size_t common = std::min({twoBack.size(), latest.size(), blended.size()});
     for (size_t position = 0; position < common; ++position) {
-        auto before = std::bit_cast<uint32_t>(twoBack[position]);
-        auto after = std::bit_cast<uint32_t>(latest[position]);
-        if (before == after || !isNumber(twoBack[position]) || !isNumber(latest[position])) {
+        if (!Midpoint::movedIn(twoBack[position], latest[position])) {
             continue;
         }
-        m_held.push_back(Held{shader, static_cast<uint32_t>(position), before, after,
-                              std::bit_cast<uint32_t>(blended[position])});
+        m_held.push_back(Held{
+            shader, static_cast<uint32_t>(position), std::bit_cast<uint32_t>(twoBack[position]),
+            std::bit_cast<uint32_t>(latest[position]), std::bit_cast<uint32_t>(blended[position])});
     }
 }
 

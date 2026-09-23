@@ -70,14 +70,6 @@ struct FrameState {
 // Single-threaded and pure: whoever feeds it owns when that happens.
 class ObjectPlanner {
   public:
-    // How far the midpoint may land from the partner, against how far the
-    // object moved over the two frames. A partner that passed through the
-    // middle lands at 0; one that is really a different object, or the same
-    // one standing at either end, lands at 0.5. This is half way between the
-    // two. Measured on the sea: the median lands at 0.024 and 92% of moving
-    // objects within it.
-    static constexpr float kPartnerTolerance = 0.25f;
-
     // `t` is where the in-between frame sits on N-1..N.
     explicit ObjectPlanner(float t);
 
@@ -107,6 +99,10 @@ class ObjectPlanner {
     // blended entry was blended from, or the one a held entry's learned
     // blocks name there. None where it is not known.
     std::optional<size_t> partnerOf(size_t entry) const;
+    // The entry of N-2 that is the same object as an entry of N -- blended,
+    // held or unverified -- which is what checks the partner. None where the
+    // object has no draw there.
+    std::optional<size_t> earlierOf(size_t entry) const;
 
     // What each object in a planned frame came to. Their sum is the objects
     // planned; none is dropped without a reason.
@@ -232,7 +228,7 @@ class ObjectPlanner {
         // The partner's entry in N-1, by entry, blended or held; kNotBlended
         // where none is known.
         std::vector<uint32_t> partnerAt;
-        // The object's entry in N-2, by entry, blended or unverified;
+        // The object's entry in N-2, by entry, blended, held or unverified;
         // kNotBlended where none is known.
         std::vector<uint32_t> earlierAt;
         std::vector<float> floats;

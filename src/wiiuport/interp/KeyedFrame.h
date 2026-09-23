@@ -49,6 +49,10 @@ class KeyedFrame {
     }
 
     std::optional<size_t> find(const AssemblyKey& key) const;
+    // Whether another draw of the frame has this entry's shader and blocks,
+    // so that it is told from it by its place among them alone. Valid after
+    // finish().
+    bool sharesKey(size_t entry) const;
 
     // The draw of `shader` nearest the query's point, as DrawTree finds it;
     // none when the frame has no draw of that shader. Throws before

@@ -1,6 +1,7 @@
 #include "wiiuport/interp/ObjectPlanner.h"
 
 #include "wiiuport/interp/Blendable.h"
+#include "wiiuport/interp/Midpoint.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,61 +12,21 @@ namespace wiiuport::interp {
 
 namespace {
 
-// Whether an object moved in a value between N-2 and N: a number at both ends
-// with other bits. Only such a value says where the object passed through; one
-// the same at both ends is drawn at N whatever N-1 holds, and one N-1 holds
-// otherwise is flipping with the title's double buffering -- packed data, as
-// one shader's, that reads as floats up to 2^97 and would swamp any measure.
 bool movedAt(std::span<const float> before, std::span<const float> after, size_t index) {
-    return isNumber(before[index]) && isNumber(after[index]) &&
-           std::memcmp(&before[index], &after[index], sizeof(float)) != 0;
+    return Midpoint::movedIn(before[index], after[index]);
 }
 
-// How far an object moved over two frames, and how far its midpoint lands
-// from `between`, over the values it moved in that are its own -- not frame
-// state -- and numbers in `between`; how many values that is, and how many
-// of its own it moved in at all.
-struct Distances {
-    double step{0.0};
-    double residual{0.0};
-    size_t compared{0};
-    size_t moved{0};
-};
-
-Distances measure(std::span<const float> before, std::span<const float> after,
-                  std::span<const float> between, const FrameState& state) {
-    Distances squared;
+// The object's midpoint test against `between`, over the values it moved in
+// that are its own -- not frame state, which every candidate holds alike.
+Midpoint measure(std::span<const float> before, std::span<const float> after,
+                 std::span<const float> between, const FrameState& state) {
+    Midpoint midpoint;
     for (size_t index = 0; index < after.size(); ++index) {
-        float a = before[index];
-        float b = after[index];
-        float c = between[index];
-        if (!movedAt(before, after, index) || state.at(index)) {
-            continue;
+        if (!state.at(index)) {
+            midpoint.add(before[index], between[index], after[index]);
         }
-        ++squared.moved;
-        if (!isNumber(c)) {
-            continue;
-        }
-        double moved = static_cast<double>(b) - a;
-        double off = ((static_cast<double>(a) + b) / 2.0) - c;
-        squared.step += moved * moved;
-        squared.residual += off * off;
-        ++squared.compared;
     }
-    return {std::sqrt(squared.step), std::sqrt(squared.residual), squared.compared, squared.moved};
-}
-
-// Whether the candidate is the object's partner: the object's own moved
-// values -- the only values taken from the partner that are not the frame's --
-// pass through it, and it has a number at one of them at least, or the check
-// would pass on anything. An object that moved in no value of its own draws
-// the same whichever candidate is taken, so any is.
-bool landsOn(const Distances& distances) {
-    if (distances.moved == 0) {
-        return true;
-    }
-    return distances.compared > 0 &&
-           distances.residual <= ObjectPlanner::kPartnerTolerance * distances.step;
+    return midpoint;
 }
 
 // Whether `blended` lies strictly between the object's two neighbours:
@@ -264,8 +225,9 @@ std::optional<size_t> ObjectPlanner::searchPartner(const AssemblyKey& key,
     }
     // An object that moved in no value of its own draws the same with any
     // candidate: the nearest in what it held is taken, however far.
-    double limit = moved ? static_cast<double>(kPartnerTolerance) * kPartnerTolerance * stepSquared
-                         : std::numeric_limits<double>::infinity();
+    double limit =
+        moved ? static_cast<double>(Midpoint::kTolerance) * Midpoint::kTolerance * stepSquared
+              : std::numeric_limits<double>::infinity();
     DrawTree::Nearest found = m_frames[0].nearest(key.shader, {m_point, limit, std::nullopt});
     m_partnerCandidates += found.compared;
     if (found.entry.has_value() || !held) {
@@ -313,7 +275,7 @@ std::optional<size_t> ObjectPlanner::derivedPartner(const AssemblyKey& key,
     }
     std::optional<size_t> entry = between.find(*derived);
     if (entry.has_value() && between.values(*entry).size() == after.size() &&
-        landsOn(measure(before, after, between.values(*entry), frameState(key.shader)))) {
+        measure(before, after, between.values(*entry), frameState(key.shader)).landsOn()) {
         return entry;
     }
     return std::nullopt;
@@ -341,7 +303,7 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
             std::span<const float> before = twoBack.values(*earlier);
             std::optional<size_t> found = searchPartner(key, before, after);
             if (found.has_value() &&
-                landsOn(measure(before, after, between.values(*found), frameState(key.shader)))) {
+                measure(before, after, between.values(*found), frameState(key.shader)).landsOn()) {
                 m_searchAgainAt.erase(hash);
                 learn(key, between.key(*found));
                 return Found{*earlier, *found};
@@ -365,7 +327,7 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
         }
         std::optional<size_t> found = searchPartner(key, before, after);
         if (found.has_value() &&
-            landsOn(measure(before, after, between.values(*found), frameState(key.shader)))) {
+            measure(before, after, between.values(*found), frameState(key.shader)).landsOn()) {
             ++m_partnersReidentified;
             return Found{*nearest, *found};
         }
@@ -384,6 +346,7 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
         earlier.reset();
     }
     if (earlier.has_value() && equalValues(twoBack.values(*earlier), after)) {
+        m_buildingPlan.earlierAt[entry] = static_cast<uint32_t>(*earlier);
         // Standing still in its uniforms, it may yet move in the vertices the
         // title poses for it: its draw a frame before is named for that.
         if (std::optional<size_t> partner = derivedPartner(key, twoBack.values(*earlier), after)) {
@@ -400,6 +363,7 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
         m_buildingPlan.earlierAt[entry] = static_cast<uint32_t>(*earlier);
         return Outcome::Unverified;
     }
+    m_buildingPlan.earlierAt[entry] = static_cast<uint32_t>(found->earlier);
     if (!found->partner.has_value()) {
         return Outcome::Held;
     }
@@ -441,7 +405,6 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     m_valuesAlternating += alternating;
     m_buildingPlan.blendedAt[entry] = static_cast<uint32_t>(start);
     m_buildingPlan.partnerAt[entry] = static_cast<uint32_t>(*found->partner);
-    m_buildingPlan.earlierAt[entry] = static_cast<uint32_t>(found->earlier);
     return Outcome::Blended;
 }
 
@@ -507,6 +470,17 @@ std::optional<size_t> ObjectPlanner::partnerOf(size_t entry) const {
         return std::nullopt;
     }
     uint32_t at = m_plan.partnerAt[entry];
+    if (at == kNotBlended) {
+        return std::nullopt;
+    }
+    return at;
+}
+
+std::optional<size_t> ObjectPlanner::earlierOf(size_t entry) const {
+    if (entry >= m_plan.earlierAt.size()) {
+        return std::nullopt;
+    }
+    uint32_t at = m_plan.earlierAt[entry];
     if (at == kNotBlended) {
         return std::nullopt;
     }

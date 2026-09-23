@@ -84,6 +84,7 @@ add_library(wiiuport STATIC
   interp/SharedValues.cpp
   interp/SharedValues.h
   interp/RestoreCheck.h
+  interp/Midpoint.h
   interp/ObjectPlanner.cpp
   interp/ObjectPlanner.h
   interp/PlanReplay.cpp
