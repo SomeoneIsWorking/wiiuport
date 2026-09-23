@@ -282,14 +282,12 @@ Midpoint vertexMidpoint(const VertexLayout& layout, std::span<const std::byte> t
 }
 
 VertexBlend::VertexBlend(const ObjectBlend& objects, float t)
-    : m_objects(objects), m_t(t), m_thread([this](std::stop_token stop) {
-          blendHandedOver(stop);
+    : m_objects(objects), m_t(t), m_pool(kBlendWorkers, [this](size_t slot, size_t worker) {
+          blendSlot(slot, m_scratch[worker]);
       }) {
 }
 
-VertexBlend::~VertexBlend() {
-    m_thread.request_stop();
-}
+VertexBlend::~VertexBlend() = default;
 
 VertexBlend::Draw& VertexBlend::Frame::appendDraw() {
     if (drawCount == drawSlots.size()) {
@@ -373,7 +371,7 @@ void VertexBlend::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) {
 
 void VertexBlend::onFrameRecorded(const frame::FrameRecording& /*recording*/) {
     // The frames it blends are about to move.
-    waitUntilBlended();
+    m_pool.waitAll();
     publishCounts();
     m_building.frameIndex = m_objects.framesEnded();
     std::swap(m_twoBack, m_previous);
@@ -385,10 +383,10 @@ void VertexBlend::onFrameRecorded(const frame::FrameRecording& /*recording*/) {
 
 void VertexBlend::startBlending() {
     m_drawBlends.assign(m_latest.draws().size(), std::nullopt);
-    m_jobs.clear();
+    m_drawSlots.assign(m_latest.draws().size(), std::nullopt);
+    m_pairSlots.clear();
     if (m_previous.frameIndex + 1 != m_latest.frameIndex ||
         m_twoBack.frameIndex + 2 != m_latest.frameIndex) {
-        m_blendedThrough.store(m_latest.draws().size(), std::memory_order_release);
         return;
     }
     // The plan is the latest frame's until the next frame ends: read here,
@@ -447,24 +445,31 @@ void VertexBlend::startBlending() {
                 job != nullptr ? VertexOutcome::ShapeDiffers : std::get<VertexOutcome>(planned), 0};
         }
     }
+    // Each mesh's place, in the order the replay first draws it, so nothing
+    // blended moves.
+    m_meshSlots.assign(meshCount, std::nullopt);
+    size_t bytes = 0;
     for (size_t index = 0; index < m_latest.draws().size(); ++index) {
         const Draw& drawn = m_latest.draws()[index];
         if (!drawn.vertexEntry.has_value() || !m_meshJobs[drawn.mesh].has_value()) {
             continue;
         }
-        Job job = *m_meshJobs[drawn.mesh];
-        job.draw = index;
-        m_jobs.push_back(job);
+        std::optional<size_t>& slot = m_meshSlots[drawn.mesh];
+        if (!slot.has_value()) {
+            const Job& job = *m_meshJobs[drawn.mesh];
+            slot = m_pairSlots.size();
+            m_pairSlots.push_back(PairSlot{job, bytes});
+            for (const VertexLayout::Buffer& buffer : job.layout->buffers) {
+                bytes += buffer.sizeInBytes;
+            }
+        }
+        m_drawSlots[index] = slot;
         m_drawBlends[index].reset();
     }
-    if (m_jobs.empty()) {
-        m_blendedThrough.store(m_latest.draws().size(), std::memory_order_release);
-        return;
+    if (m_blended.size() < bytes) {
+        m_blended.resize(bytes);
     }
-    m_blendedThrough.store(0, std::memory_order_release);
-    std::lock_guard lock(m_mutex);
-    m_jobHandedOver = true;
-    m_handedOver.notify_one();
+    m_pool.start(m_pairSlots.size());
 }
 
 std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index) const {
@@ -498,71 +503,29 @@ std::optional<size_t> VertexBlend::drawOf(const Frame& frame, size_t entry, cons
     return found->second;
 }
 
-void VertexBlend::blendHandedOver(std::stop_token stop) {
-    std::unique_lock lock(m_mutex);
-    while (m_handedOver.wait(lock, stop, [this] {
-        return m_jobHandedOver;
-    })) {
-        lock.unlock();
+void VertexBlend::blendSlot(size_t slot, Scratch& scratch) {
+    PairSlot& pair = m_pairSlots[slot];
+    Job job = pair.job;
+    if (job.identity == PartnerIdentity::ByPlace) {
+        placeByVertices(job, scratch);
+    }
+    pair.outcome =
+        blendPair(m_twoBack.draws()[job.earlier], m_previous.draws()[job.partner],
+                  m_latest.draws()[job.draw], *job.layout, job.identity, pair.start, scratch);
+}
+
+std::optional<VertexBlend::PairBlend> VertexBlend::blendOf(size_t index) {
+    const std::optional<size_t>& slot = m_drawSlots[index];
+    if (!slot.has_value()) {
+        return m_drawBlends[index];
+    }
+    if (!m_pool.done(*slot)) {
         auto started = std::chrono::steady_clock::now();
-        // Each mesh's place first, so nothing blended moves.
-        m_meshSlots.assign(m_latest.meshes.size(), std::nullopt);
-        m_pairSlots.clear();
-        m_jobPairs.clear();
-        size_t bytes = 0;
-        for (const Job& job : m_jobs) {
-            std::optional<size_t>& slot = m_meshSlots[m_latest.draws()[job.draw].mesh];
-            if (!slot.has_value()) {
-                slot = m_pairSlots.size();
-                m_pairSlots.push_back({bytes, std::nullopt});
-                for (const VertexLayout::Buffer& buffer : job.layout->buffers) {
-                    bytes += buffer.sizeInBytes;
-                }
-            }
-            m_jobPairs.push_back(*slot);
-        }
-        if (m_blended.size() < bytes) {
-            m_blended.resize(bytes);
-        }
-        for (size_t index = 0; index < m_jobs.size(); ++index) {
-            Job& job = m_jobs[index];
-            PairSlot& slot = m_pairSlots[m_jobPairs[index]];
-            if (!slot.outcome.has_value()) {
-                if (job.identity == PartnerIdentity::ByPlace) {
-                    placeByVertices(job);
-                }
-                slot.outcome =
-                    blendPair(m_twoBack.draws()[job.earlier], m_previous.draws()[job.partner],
-                              m_latest.draws()[job.draw], *job.layout, job.identity, slot.start);
-            }
-            m_drawBlends[job.draw] = PairBlend{*slot.outcome, slot.start};
-            m_blendedThrough.store(job.draw + 1, std::memory_order_release);
-            m_blendedThrough.notify_all();
-        }
-        m_blendedThrough.store(m_latest.draws().size(), std::memory_order_release);
-        m_blendedThrough.notify_all();
-        m_blendingNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                     std::chrono::steady_clock::now() - started)
-                                     .count();
-        lock.lock();
-        m_jobHandedOver = false;
-        m_blendedAll.notify_all();
+        m_pool.waitFor(*slot);
+        m_waiting += std::chrono::steady_clock::now() - started;
     }
-}
-
-void VertexBlend::waitUntilBlendedThrough(size_t index) {
-    size_t through = m_blendedThrough.load(std::memory_order_acquire);
-    while (through <= index) {
-        m_blendedThrough.wait(through, std::memory_order_acquire);
-        through = m_blendedThrough.load(std::memory_order_acquire);
-    }
-}
-
-void VertexBlend::waitUntilBlended() {
-    std::unique_lock lock(m_mutex);
-    m_blendedAll.wait(lock, [this] {
-        return !m_jobHandedOver;
-    });
+    const PairSlot& pair = m_pairSlots[*slot];
+    return PairBlend{pair.outcome, pair.start};
 }
 
 void VertexBlend::count(uint64_t shaderBaseHash, VertexOutcome outcome) {
@@ -639,12 +602,7 @@ bool VertexBlend::onRuntimeDraw(const LatteFrameHooks::DrawPrepared& draw,
         count(drawn.vertexShaderBaseHash, VertexOutcome::ShapeDiffers);
         return false;
     }
-    if (m_blendedThrough.load(std::memory_order_acquire) <= index) {
-        auto started = std::chrono::steady_clock::now();
-        waitUntilBlendedThrough(index);
-        m_waiting += std::chrono::steady_clock::now() - started;
-    }
-    const std::optional<PairBlend>& blended = m_drawBlends[index];
+    std::optional<PairBlend> blended = blendOf(index);
     if (!blended.has_value()) {
         return false;
     }
@@ -662,7 +620,7 @@ bool VertexBlend::onRuntimeDraw(const LatteFrameHooks::DrawPrepared& draw,
 
 VertexOutcome VertexBlend::blendPair(const Draw& earlier, const Draw& partner, const Draw& drawn,
                                      const VertexLayout& layout, PartnerIdentity identity,
-                                     size_t start) {
+                                     size_t start, Scratch& scratch) {
     bool changed = false;
     for (size_t buffer = 0; buffer < layout.buffers.size() && !changed; ++buffer) {
         std::span<const std::byte> was = bufferBytes(m_previous, partner, buffer);
@@ -672,11 +630,12 @@ VertexOutcome VertexBlend::blendPair(const Draw& earlier, const Draw& partner, c
     if (!changed) {
         return VertexOutcome::Unchanged;
     }
-    gather(m_twoBack, earlier, m_twoBackBytes);
-    gather(m_previous, partner, m_before);
-    gather(m_latest, drawn, m_after);
-    return blendVertexBytes(layout, m_twoBackBytes, m_before, m_after, m_t, identity,
-                            std::span<std::byte>(m_blended.data() + start, m_after.size()));
+    gather(m_twoBack, earlier, scratch.twoBack);
+    gather(m_previous, partner, scratch.before);
+    gather(m_latest, drawn, scratch.after);
+    // Each slot's bytes are its own: workers write m_blended apart.
+    return blendVertexBytes(layout, scratch.twoBack, scratch.before, scratch.after, m_t, identity,
+                            std::span<std::byte>(m_blended.data() + start, scratch.after.size()));
 }
 
 void VertexBlend::gather(const Frame& frame, const Draw& draw, std::vector<std::byte>& into) const {
@@ -688,9 +647,9 @@ void VertexBlend::gather(const Frame& frame, const Draw& draw, std::vector<std::
 }
 
 size_t VertexBlend::mostResembling(const Draw& drawn, const VertexLayout& layout,
-                                   const Frame& frame, size_t planned) {
-    gather(frame, frame.draws()[planned], m_candidate);
-    Resemblance closest = resemblance(layout, m_candidate, m_after);
+                                   const Frame& frame, size_t planned, Scratch& scratch) const {
+    gather(frame, frame.draws()[planned], scratch.candidate);
+    Resemblance closest = resemblance(layout, scratch.candidate, scratch.after);
     size_t found = planned;
     auto shader = frame.byShader.find({drawn.vertexShaderBaseHash, drawn.vertexShaderAuxHash});
     if (shader == frame.byShader.end()) {
@@ -700,8 +659,8 @@ size_t VertexBlend::mostResembling(const Draw& drawn, const VertexLayout& layout
         if (index == planned || frame.draws()[index].layout.buffers != layout.buffers) {
             continue;
         }
-        gather(frame, frame.draws()[index], m_candidate);
-        Resemblance candidate = resemblance(layout, m_candidate, m_after);
+        gather(frame, frame.draws()[index], scratch.candidate);
+        Resemblance candidate = resemblance(layout, scratch.candidate, scratch.after);
         if (candidate.closerThan(closest)) {
             closest = candidate;
             found = index;
@@ -710,13 +669,13 @@ size_t VertexBlend::mostResembling(const Draw& drawn, const VertexLayout& layout
     return found;
 }
 
-void VertexBlend::placeByVertices(Job& job) {
+void VertexBlend::placeByVertices(Job& job, Scratch& scratch) {
     const Draw& drawn = m_latest.draws()[job.plannedBy];
     size_t plannedEarlier = job.earlier;
     size_t plannedPartner = job.partner;
-    gather(m_latest, drawn, m_after);
-    job.earlier = mostResembling(drawn, *job.layout, m_twoBack, job.earlier);
-    job.partner = mostResembling(drawn, *job.layout, m_previous, job.partner);
+    gather(m_latest, drawn, scratch.after);
+    job.earlier = mostResembling(drawn, *job.layout, m_twoBack, job.earlier, scratch);
+    job.partner = mostResembling(drawn, *job.layout, m_previous, job.partner, scratch);
     if (job.earlier != plannedEarlier || job.partner != plannedPartner) {
         ++m_partnersFoundByVertices;
     }

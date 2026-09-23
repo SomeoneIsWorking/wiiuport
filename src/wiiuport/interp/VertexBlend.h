@@ -5,6 +5,7 @@
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/interp/Midpoint.h"
 #include "wiiuport/interp/ObjectBlend.h"
+#include "wiiuport/interp/SlotPool.h"
 
 #include <array>
 #include <chrono>
@@ -171,14 +172,22 @@ Midpoint vertexMidpoint(const VertexLayout& layout, std::span<const std::byte> t
 // for the rest of that frame, counted.
 //
 // The partners are known once a frame ends, so its vertices are blended then,
-// on a thread of their own: the thread that replays is the thread that
-// renders, which the title waits on. The replay waits only for what is not
-// yet blended, and says how long.
+// mesh by mesh on threads of their own: the thread that replays is the thread
+// that renders, which the title waits on. The replay waits only for the mesh
+// it draws, if that is not yet blended, and says how long.
 class VertexBlend final : public frame::AssemblyRecordedListener,
                           public frame::DrawRecordedListener,
                           public frame::FrameEndListener,
                           public frame::VertexFilter {
   public:
+    // Threads the meshes are blended on. While Link walked the island, one
+    // thread took 11.7 ms of each frame's 33 and the replay, which draws the
+    // meshes in the order they are blended, waited 7 ms of it: the guest fell
+    // to 26 frames a second. Meshes blend independently, so a few threads
+    // take a fraction of that each, and the replay's first meshes are done
+    // soonest.
+    static constexpr size_t kBlendWorkers = 4;
+
     // Reads the plan and the replay's place from `objects`, which must be
     // notified of a frame's end before this is.
     VertexBlend(const ObjectBlend& objects, float t);
@@ -244,7 +253,8 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
 
     // What keeping and blending vertices costs: bytes copied from the
     // guest's draws and the time the copies took, the time the blending
-    // thread took over the frames, and the time replays waited for it.
+    // threads took over the frames, summed, and the time replays waited for
+    // them.
     uint64_t bytesCopied() const {
         return m_bytesCopied;
     }
@@ -254,7 +264,7 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     }
 
     std::chrono::nanoseconds blending() const {
-        return std::chrono::nanoseconds{m_blendingNanoseconds.load()};
+        return m_pool.busy();
     }
 
     std::chrono::nanoseconds waiting() const {
@@ -337,15 +347,6 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         size_t start;
     };
 
-    // A mesh's place in m_blended, laid out before any is blended so the
-    // buffer never moves under a replay reading it. Every draw of a mesh
-    // shares one job (startBlending), so a mesh is one pair of draws and is
-    // blended once, however often it is drawn.
-    struct PairSlot {
-        size_t start;
-        std::optional<VertexOutcome> outcome;
-    };
-
     // A draw of the latest frame to blend against its partner's, which
     // the frame before holds, and the same object's draw two frames back.
     struct Job {
@@ -370,32 +371,55 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         bool refused{false};
     };
 
-    // Ties each of the latest frame's kept draws to its partner's and hands
-    // the blending to its thread.
+    // A mesh's job and its place in m_blended, laid out before any is
+    // blended so the buffer never moves under a replay reading it. Every
+    // draw of a mesh shares its job (startBlending), so a mesh is one pair
+    // of draws and is blended once, however often it is drawn. Its outcome
+    // is written by the worker that blends it, and read once the pool says
+    // the slot is done.
+    struct PairSlot {
+        Job job;
+        size_t start;
+        VertexOutcome outcome{VertexOutcome::Blended};
+    };
+
+    // A blending thread's storage: a pair's buffers one after another, as
+    // blendVertexBytes reads them, and a candidate's as mostResembling does.
+    // Kept for their capacity.
+    struct Scratch {
+        std::vector<std::byte> twoBack;
+        std::vector<std::byte> before;
+        std::vector<std::byte> after;
+        std::vector<std::byte> candidate;
+    };
+
+    // Ties each of the latest frame's kept draws to its partner's, lays each
+    // mesh's slot out and hands the slots to the pool.
     void startBlending();
     // The latest frame's kept draw at `index` tied to its partner's, or why
     // it has none.
     std::variant<Job, VertexOutcome> planDraw(size_t index) const;
-    void blendHandedOver(std::stop_token stop);
-    void waitUntilBlended();
-    // Waits until the blending thread has come to the latest frame's draw
-    // at `index`.
-    void waitUntilBlendedThrough(size_t index);
+    // Blends the mesh of a slot, on a worker.
+    void blendSlot(size_t slot, Scratch& scratch);
+    // What the latest frame's draw at `index` came to, waiting for its mesh
+    // if a worker is still blending it; none for a draw not kept.
+    std::optional<PairBlend> blendOf(size_t index);
     // Blends one pair into m_blended at `start`, its bytes laid out there,
     // checked against the object's draw two frames back.
     VertexOutcome blendPair(const Draw& earlier, const Draw& partner, const Draw& drawn,
-                            const VertexLayout& layout, PartnerIdentity identity, size_t start);
+                            const VertexLayout& layout, PartnerIdentity identity, size_t start,
+                            Scratch& scratch);
     // A place-identified job's draws two frames back and a frame before:
     // those of its shader and layout its vertices most resemble, the
     // planner's where none more. Done as its mesh is blended, not ahead of
     // every mesh, so the replay's first draws do not wait on the frame's
     // every search.
-    void placeByVertices(Job& job);
+    void placeByVertices(Job& job, Scratch& scratch);
     // Of `planned` and the draws of `drawn`'s shader with its buffers in
-    // `frame`, the one `drawn` -- gathered into m_after -- most resembles
-    // under `layout`.
+    // `frame`, the one `drawn` -- gathered into scratch.after -- most
+    // resembles under `layout`.
     size_t mostResembling(const Draw& drawn, const VertexLayout& layout, const Frame& frame,
-                          size_t planned);
+                          size_t planned, Scratch& scratch) const;
     // A draw's buffers one after another into `into`, as the blend reads them.
     void gather(const Frame& frame, const Draw& draw, std::vector<std::byte>& into) const;
     // The draw a frame holds for an object's entry and a draw's place among
@@ -417,31 +441,24 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     uint64_t m_replayFrame{0};
     bool m_replayArmed{false};
     bool m_replayStopped{false};
-    // The latest frame's blended buffers, each pair's one after another, the
-    // distinct pairs, and what each draw came to; none for a draw not kept.
-    // The blending thread works through the jobs in draw order, publishing
-    // in m_blendedThrough the draws it has done, so a replay reads a draw's
-    // blend as soon as it is made rather than once the frame's all are.
+    // The latest frame's blended buffers, each pair's one after another;
+    // what each draw not blended came to, and the slot of each that is. The
+    // slots are in the order the replay first draws their meshes, so it
+    // reads a mesh's blend as soon as it is made rather than once the
+    // frame's all are.
     std::vector<std::byte> m_blended;
     std::vector<std::optional<PairBlend>> m_drawBlends;
-    std::vector<Job> m_jobs;
-    std::vector<std::byte> m_candidate;
+    std::vector<std::optional<size_t>> m_drawSlots;
     // The latest frame's meshes: their layouts, the merged ones' storage,
     // whether a reader's shader was excluded, the job all their draws share,
-    // and their slots in m_blended. Kept for their capacity.
+    // and their slots. Kept for their capacity.
     std::vector<MeshLayout> m_meshLayouts;
     std::deque<VertexLayout> m_mergedLayouts;
     std::vector<uint8_t> m_meshExcluded;
     std::vector<std::optional<Job>> m_meshJobs;
     std::vector<std::optional<size_t>> m_meshSlots;
     std::vector<PairSlot> m_pairSlots;
-    std::vector<size_t> m_jobPairs;
-    std::atomic<size_t> m_blendedThrough{0};
-    // A changed pair's buffers, one after another, as blendVertexBytes reads
-    // them; kept for their capacity.
-    std::vector<std::byte> m_twoBackBytes;
-    std::vector<std::byte> m_before;
-    std::vector<std::byte> m_after;
+    std::vector<Scratch> m_scratch{kBlendWorkers};
     std::array<uint64_t, kVertexOutcomeCount> m_outcomes{};
     // Counted on the rendering thread without a lock, and published under
     // one once a frame: a lock and a map search per replayed draw was a
@@ -454,19 +471,13 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     uint64_t m_bytesCopied{0};
     std::chrono::nanoseconds m_copying{0};
     std::chrono::nanoseconds m_waiting{0};
-    std::atomic<int64_t> m_blendingNanoseconds{0};
     std::atomic<uint64_t> m_partnersFoundByVertices{0};
     std::atomic<bool> m_blendingEnabled{true};
     std::mutex m_excludedMutex;
     std::optional<uint64_t> m_excluded;
 
-    std::mutex m_mutex;
-    std::condition_variable_any m_handedOver;
-    std::condition_variable m_blendedAll;
-    bool m_jobHandedOver{false};
-
-    // Last, so it starts after and stops before everything it uses.
-    std::jthread m_thread;
+    // Last, so its threads start after and stop before everything they use.
+    SlotPool m_pool;
 };
 
 } // namespace wiiuport::interp
