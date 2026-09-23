@@ -42,6 +42,9 @@ class Midpoint {
         if (!isNumber(between)) {
             return;
         }
+        if (std::bit_cast<uint32_t>(between) == std::bit_cast<uint32_t>(before)) {
+            ++m_stood;
+        }
         double moved = static_cast<double>(after) - before;
         double off = ((static_cast<double>(before) + after) / 2.0) - between;
         m_stepSquared += moved * moved;
@@ -56,6 +59,13 @@ class Midpoint {
 
     size_t compared() const {
         return m_compared;
+    }
+
+    // The candidate holds every value the object moved in bit for bit as it
+    // was at N-2: the object stood still until N, and its move has no step
+    // before it to be checked against.
+    bool stoodAtStart() const {
+        return m_moved > 0 && m_stood == m_moved;
     }
 
     // The candidate is the object's partner: what moved passes through it,
@@ -75,6 +85,7 @@ class Midpoint {
     double m_residualSquared{0.0};
     size_t m_compared{0};
     size_t m_moved{0};
+    size_t m_stood{0};
 };
 
 } // namespace wiiuport::interp

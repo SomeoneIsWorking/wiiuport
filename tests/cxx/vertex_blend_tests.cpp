@@ -213,6 +213,23 @@ void aMeshBackWhereItStoodTwoFramesAgoIsHeld() {
     check::isTrue(out == stood, "and drawn as N");
 }
 
+void aMeshThatStoodStillUntilNIsDrawnAsTheTitleDrewIt() {
+    // Parked out of sight from N-2 to N-1, then placed: no step to check
+    // the move against, so no half way between the two places.
+    std::vector<std::byte> parked = bytesOf({{{3.0f, -4757.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> placed = bytesOf({{{9.0f, 6028.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> out(placed.size());
+    VertexOutcome outcome =
+        blendVertexBytes(layoutOf(1, kBigEndian), parked, parked, placed, kHalfway, kByBlocks, out);
+    check::isTrue(outcome == VertexOutcome::Started, "a mesh that stood still until N started");
+    check::isTrue(out == placed, "and is drawn as N");
+    // One value that moved already by N-1 is a step under way.
+    std::vector<std::byte> setOff = bytesOf({{{3.0f, 600.0f, 0.0f}, 0}}, kBigEndian);
+    outcome =
+        blendVertexBytes(layoutOf(1, kBigEndian), parked, setOff, placed, kHalfway, kByBlocks, out);
+    check::isTrue(outcome == VertexOutcome::Blended, "a mesh already moving is blended");
+}
+
 // --- VertexBlend, fed as the runtime feeds it ---
 
 constexpr uint64_t kActorShader = 0xdddd;
@@ -230,6 +247,9 @@ struct ActorDraw {
     // The earlier draw of the frame whose buffer it reads, as a second pass
     // over one mesh does; its own `mesh` is then that draw's.
     std::optional<size_t> passOver{};
+    // Its mesh's values a vertex, and the one its shader fetches.
+    uint32_t valuesPerVertex{1};
+    uint32_t valueFetched{0};
 };
 
 // Where a guest's draw keeps its mesh: each frame's vertices in their own
@@ -263,15 +283,19 @@ RecordedUniformAssembly assemblyOf(const ActorDraw& draw) {
     return assembly;
 }
 
-LatteFrameHooks::DrawPrepared preparedOf(const std::vector<std::byte>& mesh, bool fromRuntime) {
+LatteFrameHooks::DrawPrepared preparedOf(const std::vector<std::byte>& mesh, bool fromRuntime,
+                                         const ActorDraw& draw) {
     LatteFrameHooks::DrawPrepared prepared{};
     prepared.vertexShaderBaseHash = kActorShader;
     prepared.vertexUniforms = true;
     prepared.fromRuntime = fromRuntime;
     prepared.vertexReplaceable = fromRuntime;
-    prepared.vertexBuffers[0] = {mesh.data(), static_cast<uint32_t>(mesh.size()), sizeof(float), 0};
+    prepared.vertexBuffers[0] = {mesh.data(), static_cast<uint32_t>(mesh.size()),
+                                 static_cast<uint32_t>(draw.valuesPerVertex * sizeof(float)), 0};
     prepared.vertexBufferCount = 1;
-    prepared.vertexAttributes[0] = {0, 0, 4, kFloat1, kBigEndian, 0, false};
+    prepared.vertexAttributes[0] = {
+        0,    static_cast<uint32_t>(draw.valueFetched * sizeof(float)), 4, kFloat1, kBigEndian, 0,
+        false};
     prepared.vertexAttributeCount = 1;
     return prepared;
 }
@@ -287,7 +311,7 @@ struct Blends {
             RecordedUniformAssembly assembly = assemblyOf(frame.draws[index]);
             objects.onAssemblyRecorded(assembly);
             vertices.onAssemblyRecorded(assembly);
-            vertices.onDrawRecorded(preparedOf(frame.meshOf(index), false));
+            vertices.onDrawRecorded(preparedOf(frame.meshOf(index), false, frame.draws[index]));
             recording.addUniformAssembly(assembly);
         }
         objects.onFrameRecorded(recording);
@@ -312,7 +336,7 @@ struct Blends {
             assembly.fromRuntime = true;
             objects.apply(assembly);
             LatteFrameHooks::VertexReplacements replacements;
-            vertices.onRuntimeDraw(preparedOf(frame.meshOf(index), true), replacements);
+            vertices.onRuntimeDraw(preparedOf(frame.meshOf(index), true, draw), replacements);
             const auto* bytes = static_cast<const std::byte*>(replacements.data[0] != nullptr
                                                                   ? replacements.data[0]
                                                                   : frame.meshOf(index).data());
@@ -374,6 +398,25 @@ void everyPassOverAMeshDrawsItAlike() {
     std::vector<std::vector<float>> drawn = blends.replay(latest);
     check::equal(drawn[0][0], 13.0f, "the first pass draws the mesh half way");
     check::equal(drawn[1][0], 13.0f, "and so does the pass with no partner of its own");
+    check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{2}, "both blended");
+}
+
+void aMeshTwoShadersFetchOtherwiseIsDrawnAlikeByBoth() {
+    // One buffer of two values a vertex, the first fetched by the walker's
+    // shader and the second by a shadow's, whose uniforms no frame before
+    // drew. Keyed by its layout too, the shadow's read was drawn at N
+    // beside the walker's half way: a shadow volume torn open darkened the
+    // pier.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    blends.record(GuestFrame({{kBlockA, {0.0f, 7.0f}, {10.0f, 100.0f}, {}, 2, 0}}));
+    blends.record(GuestFrame({{kBlockB, {1.0f, 7.0f}, {12.0f, 102.0f}, {}, 2, 0}}));
+    GuestFrame latest({{kBlockA, {2.0f, 7.0f}, {14.0f, 104.0f}, {}, 2, 0},
+                       {kOtherA, {9.0f}, {14.0f, 104.0f}, 0, 2, 1}});
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 13.0f, "the walker's shader draws its value half way");
+    check::equal(drawn[1][1], 103.0f, "and the shadow's draws the value it fetches half way");
     check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{2}, "both blended");
 }
 
@@ -562,7 +605,8 @@ void aReplayOutOfStepStopsReplacing() {
     blends.objects.armOnce();
     // A draw with no assembly before it: the replay is not the recording's.
     LatteFrameHooks::VertexReplacements replacements;
-    bool replaced = blends.vertices.onRuntimeDraw(preparedOf(latest.meshes[0], true), replacements);
+    bool replaced = blends.vertices.onRuntimeDraw(
+        preparedOf(latest.meshes[0], true, latest.draws[0]), replacements);
     check::isTrue(!replaced, "a draw out of step is drawn as the title drew it");
     check::isTrue(replacements.data[0] == nullptr, "with nothing handed over");
     check::equal(blends.vertices.replaysDiverged(), uint64_t{1}, "and counted");
@@ -597,9 +641,11 @@ void runVertexBlendTests() {
     anotherMeshAFrameBeforeIsNotBlendedTowards();
     aMeshItsBlocksNameIsBlendedThoughItTurnedBack();
     aMeshBackWhereItStoodTwoFramesAgoIsHeld();
+    aMeshThatStoodStillUntilNIsDrawnAsTheTitleDrewIt();
     aWalkingActorsMeshIsDrawnBetweenItsPartnersAndItsOwn();
     anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore();
     everyPassOverAMeshDrawsItAlike();
+    aMeshTwoShadersFetchOtherwiseIsDrawnAlikeByBoth();
     cloudsTheTitleReordersAreBlendedFromTheCloudTheyPassed();
     cloudsReorderedSinceTwoFramesBackAreBlendedFromTheirOwn();
     aMeshTheTitleDrewUnderOtherBlocksAFrameBeforeIsBlendedFromThere();

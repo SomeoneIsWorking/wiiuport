@@ -47,6 +47,10 @@ struct VertexLayout {
 
     static VertexLayout of(const LatteFrameHooks::DrawPrepared& draw);
 
+    // Takes in the attributes another reader of the same buffers fetches;
+    // false, and unchanged, when it lays the buffers out otherwise.
+    bool absorb(const VertexLayout& other);
+
     auto operator<=>(const VertexLayout&) const = default;
 };
 
@@ -75,6 +79,13 @@ enum class VertexOutcome : uint32_t {
     Outside,
     // Its vertices changed only in values that are not floats to blend.
     NotFloats,
+    // Everything it moved in by N stood bit for bit still from N-2 to N-1:
+    // three frames hold no step to check the move against, and a mesh the
+    // title parked out of sight and placed, or handed to another object, is
+    // not told from one setting off. Blended half way, a quad parked under
+    // the sea and placed in the sky was drawn on the water. Drawn as the
+    // title drew it.
+    Started,
     Count
 };
 
@@ -305,6 +316,10 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         size_t partner;
         size_t earlier;
         PartnerIdentity identity;
+        // The draw of its mesh whose partner was taken, and every attribute
+        // the mesh's readers at N fetch: all of them draw the same bytes.
+        size_t plannedBy;
+        VertexLayout layout;
     };
 
     // Ties each of the latest frame's kept draws to its partner's and hands
@@ -321,14 +336,16 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // Blends one pair into m_blended at `start`, its bytes laid out there,
     // checked against the object's draw two frames back.
     VertexOutcome blendPair(const Draw& earlier, const Draw& partner, const Draw& drawn,
-                            PartnerIdentity identity, size_t start);
+                            const VertexLayout& layout, PartnerIdentity identity, size_t start);
     // A place-identified job's draws two frames back and a frame before:
     // those of its shader and layout its vertices most resemble, the
     // planner's where none more.
     void placeByVertices(Job& job);
-    // Of `planned` and the draws of `drawn`'s shader and layout in `frame`,
-    // the one `drawn` -- gathered into m_after -- most resembles.
-    size_t mostResembling(const Draw& drawn, const Frame& frame, size_t planned);
+    // Of `planned` and the draws of `drawn`'s shader with its buffers in
+    // `frame`, the one `drawn` -- gathered into m_after -- most resembles
+    // under `layout`.
+    size_t mostResembling(const Draw& drawn, const VertexLayout& layout, const Frame& frame,
+                          size_t planned);
     // A draw's buffers one after another into `into`, as the blend reads them.
     void gather(const Frame& frame, const Draw& draw, std::vector<std::byte>& into) const;
     // The draw a frame holds for an object's entry and a draw's place among
