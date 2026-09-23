@@ -55,6 +55,17 @@ class Interpolation:
     objectValuesAlternating: int
     objectDrawsWritten: int
     objectReplaysDiverged: int
+    # Replayed draws whose vertices the title rewrote, by what blending them
+    # came to, over the runtime's draws that could take new vertices at all.
+    vertexDraws: dict[str, int]
+    runtimeDrawsReplaceable: int
+    runtimeDrawsReplaced: int
+    vertexReplaysDiverged: int
+    vertexReplaysUnaligned: int
+    vertexBytesCopied: int
+    vertexCopyingNanoseconds: int
+    vertexBlendingNanoseconds: int
+    vertexWaitingNanoseconds: int
     # Frame times at the display since the last POST /pacing: a measurement
     # over its own window, not a counter, so a window of a run keeps it whole.
     pacing: dict[str, int]
@@ -83,6 +94,7 @@ class Interpolation:
                 "withheld",
                 "phaseNanoseconds",
                 "objects",
+                "vertexDraws",
                 "notCopied",
                 "pacing",
             }
@@ -91,6 +103,7 @@ class Interpolation:
             enabled=self.enabled,
             pacing=self.pacing,
             objects={k: v - earlier.objects.get(k, 0) for k, v in self.objects.items()},
+            vertexDraws={k: v - earlier.vertexDraws.get(k, 0) for k, v in self.vertexDraws.items()},
             notCopied={k: v - earlier.notCopied.get(k, 0) for k, v in self.notCopied.items()},
             skipped={k: v - earlier.skipped.get(k, 0) for k, v in self.skipped.items()},
             withheld={k: v - earlier.withheld.get(k, 0) for k, v in self.withheld.items()},
@@ -151,6 +164,7 @@ class Interpolation:
                     f"and the planning thread {self.planning_busy_ms():.2f} ms a frame before it, "
                     f"over {self.objectFramesEnded} frames"
                 ),
+                self.render_vertices(),
                 (
                     f"  view: {self.viewFramesTracked} frames tracked, "
                     f"{self.viewFramesLost} lost, "
@@ -159,6 +173,21 @@ class Interpolation:
                 f"  withheld from runtime submissions: {withheld or 'none'}",
                 self.render_pacing(),
             ]
+        )
+
+    def render_vertices(self) -> str:
+        ended = max(1, self.objectFramesEnded)
+        per_frame = max(1, self.framesInterpolated)
+        return (
+            "  vertices: "
+            + ", ".join(f"{name} {count}" for name, count in self.vertexDraws.items())
+            + f"; {self.runtimeDrawsReplaced} of {self.runtimeDrawsReplaceable} replaceable "
+            f"runtime draws replaced; {self.vertexReplaysDiverged} replays out of step, "
+            f"{self.vertexReplaysUnaligned} not the plan's frames; "
+            f"{self.vertexBytesCopied / ended / 1e6:.2f} MB kept a frame in "
+            f"{self.vertexCopyingNanoseconds / ended / 1e6:.2f} ms; the blending thread "
+            f"{self.vertexBlendingNanoseconds / ended / 1e6:.2f} ms a frame, and a replay "
+            f"waited {self.vertexWaitingNanoseconds / per_frame / 1e6:.2f} ms a tick for it"
         )
 
     def render_pacing(self) -> str:

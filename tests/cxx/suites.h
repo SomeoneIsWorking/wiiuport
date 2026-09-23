@@ -18,5 +18,6 @@ void runSubstitutionTests();
 void runContinuousTests();
 void runObjectBlendTests();
 void runDrawTreeTests();
+void runVertexBlendTests();
 
 } // namespace wiiuport::tests

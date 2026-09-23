@@ -20,6 +20,7 @@
 #include "wiiuport/interp/RestoreCheck.h"
 #include "wiiuport/interp/TransformSearch.h"
 #include "wiiuport/interp/TransformSubstitution.h"
+#include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
 
 namespace wiiuport {
@@ -113,6 +114,7 @@ class Runtime {
     interp::TransformSubstitution m_substitution;
     interp::ObjectBlend m_objectBlend{interp::ContinuousInterpolator::kBlendPoint};
     interp::ReplayBlend m_replayBlend{m_objectBlend, m_substitution};
+    interp::VertexBlend m_vertexBlend{m_objectBlend, interp::ContinuousInterpolator::kBlendPoint};
     interp::FrameInterpolator m_interpolator{m_search, m_substitution, m_scheduler};
     interp::ViewTracker m_viewTracker{m_search};
     interp::RestoreCheck m_restoreCheck{m_presenter, m_capture};
@@ -134,6 +136,7 @@ class Runtime {
         .continuous = m_continuous,
         .restoreCheck = m_restoreCheck,
         .objects = m_objectBlend,
+        .vertices = m_vertexBlend,
         .snapshot = m_snapshot,
         .pacing = m_pacing,
         .vertexChanges = m_recorder.vertexChanges(),

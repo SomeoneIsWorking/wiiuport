@@ -79,6 +79,27 @@ class AssemblyFilter {
     virtual bool onRuntimeAssembly(const LatteFrameHooks::UniformAssembly& assembly) = 0;
 };
 
+// Notified for each of the guest's draws once it is prepared, in the order it
+// drew them, between the uniform assemblies it was drawn with and the next
+// draw's. The draw's vertex bytes are the guest's and last only the call.
+class DrawRecordedListener {
+  public:
+    virtual ~DrawRecordedListener() = default;
+    virtual void onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) = 0;
+};
+
+// Something that may give a runtime draw vertex bytes of its own. As with
+// AssemblyFilter, only the runtime's replayed draws are offered.
+class VertexFilter {
+  public:
+    virtual ~VertexFilter() = default;
+
+    // Returns whether it replaced anything, which the recorder counts. The
+    // replacements must outlive the call only until it returns.
+    virtual bool onRuntimeDraw(const LatteFrameHooks::DrawPrepared& draw,
+                               LatteFrameHooks::VertexReplacements& replacements) = 0;
+};
+
 // Fills a FrameRecording from the fork's hooks, and nothing else.
 //
 // Kept separate from FrameRecording so the recording stays testable without
@@ -96,7 +117,8 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void OnFrameEnd() override;
     void OnDisplayed(bool fromRuntime) override;
     void OnGuestDraw(bool fromCommandBuffer) override;
-    void OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw) override;
+    void OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw,
+                        LatteFrameHooks::VertexReplacements& replacements) override;
     void OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) override;
 
     // Empty by default, so a build that installs no listener behaves as a
@@ -133,10 +155,31 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
         }
     }
 
+    void addDrawRecordedListener(DrawRecordedListener* listener) {
+        if (listener != nullptr) {
+            m_drawListeners.push_back(listener);
+        }
+    }
+
     // At most one, because two things editing the same buffer would each be
     // overwriting the other without either being able to report it.
     void setAssemblyFilter(AssemblyFilter* filter) {
         m_assemblyFilter = filter;
+    }
+
+    // At most one, for the same reason.
+    void setVertexFilter(VertexFilter* filter) {
+        m_vertexFilter = filter;
+    }
+
+    // The runtime's draws the renderer would take vertex bytes for, and those
+    // the vertex filter gave some.
+    uint64_t runtimeDrawsReplaceable() const {
+        return m_runtimeDrawsReplaceable;
+    }
+
+    uint64_t runtimeDrawsReplaced() const {
+        return m_runtimeDrawsReplaced;
     }
 
     uint64_t presentsSeen() const {
@@ -252,6 +295,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     std::vector<FrameShownListener*> m_shownListeners;
     std::vector<PresentListener*> m_presentListeners;
     std::vector<DisplayedListener*> m_displayedListeners;
+    std::vector<DrawRecordedListener*> m_drawListeners;
     FrameRecording m_inFlight;
     FrameRecording m_completed;
     FrameRecording m_previous;
@@ -273,6 +317,9 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     uint64_t m_runtimePacketsProcessed{0};
     uint64_t m_runtimeDrawsIssued{0};
     AssemblyFilter* m_assemblyFilter{nullptr};
+    VertexFilter* m_vertexFilter{nullptr};
+    uint64_t m_runtimeDrawsReplaceable{0};
+    uint64_t m_runtimeDrawsReplaced{0};
 };
 
 } // namespace wiiuport::frame

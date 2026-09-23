@@ -75,6 +75,8 @@ add_library(wiiuport STATIC
   interp/KeyedFrame.h
   interp/ObjectBlend.cpp
   interp/ObjectBlend.h
+  interp/VertexBlend.cpp
+  interp/VertexBlend.h
   interp/ObjectCensus.cpp
   interp/ObjectCensus.h
   interp/RestoreCheck.cpp

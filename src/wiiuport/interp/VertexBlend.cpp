@@ -1,0 +1,402 @@
+#include "wiiuport/interp/VertexBlend.h"
+
+#include "wiiuport/interp/Blendable.h"
+
+#include <algorithm>
+#include <bit>
+#include <cstring>
+
+namespace wiiuport::interp {
+
+namespace {
+
+// Latte's float vertex formats (LatteReg.h) and how many floats each holds.
+std::optional<uint32_t> floatsIn(uint8_t format) {
+    switch (format) {
+    case 0x0E:
+        return 1;
+    case 0x1E:
+        return 2;
+    case 0x30:
+        return 3;
+    case 0x23:
+        return 4;
+    default:
+        return std::nullopt;
+    }
+}
+
+// LatteConst::VertexFetchEndianMode: the guest's own big-endian words, or
+// words already in the host's order.
+enum class Endian : uint8_t {
+    None = 0,
+    SwapU32 = 2
+};
+
+uint32_t swapBytes(uint32_t word) {
+    return (word >> 24) | ((word >> 8) & 0x0000ff00u) | ((word << 8) & 0x00ff0000u) | (word << 24);
+}
+
+uint32_t readWord(const std::byte* at, Endian endian) {
+    uint32_t word = 0;
+    std::memcpy(&word, at, sizeof(word));
+    return endian == Endian::SwapU32 ? swapBytes(word) : word;
+}
+
+void writeWord(std::byte* at, uint32_t word, Endian endian) {
+    word = endian == Endian::SwapU32 ? swapBytes(word) : word;
+    std::memcpy(at, &word, sizeof(word));
+}
+
+// Strictly between two different values, or equal to both.
+bool liesBetween(float a, float blended, float b) {
+    if (a == b) {
+        return blended == a;
+    }
+    return std::min(a, b) < blended && blended < std::max(a, b);
+}
+
+} // namespace
+
+std::string_view vertexOutcomeName(VertexOutcome outcome) {
+    switch (outcome) {
+    case VertexOutcome::Blended:
+        return "blended";
+    case VertexOutcome::Unchanged:
+        return "unchanged";
+    case VertexOutcome::NoPartner:
+        return "noPartner";
+    case VertexOutcome::ShapeDiffers:
+        return "shapeDiffers";
+    case VertexOutcome::Outside:
+        return "outside";
+    case VertexOutcome::NotFloats:
+        return "notFloats";
+    case VertexOutcome::Count:
+        break;
+    }
+    return "unknown";
+}
+
+VertexLayout VertexLayout::of(const LatteFrameHooks::DrawPrepared& draw) {
+    VertexLayout layout;
+    for (uint32_t index = 0; index < draw.vertexBufferCount; ++index) {
+        layout.buffers.push_back(
+            {draw.vertexBuffers[index].sizeInBytes, draw.vertexBuffers[index].stride});
+    }
+    for (uint32_t index = 0; index < draw.vertexAttributeCount; ++index) {
+        const LatteFrameHooks::DrawPrepared::VertexAttribute& attribute =
+            draw.vertexAttributes[index];
+        layout.attributes.push_back({attribute.buffer, attribute.offset, attribute.sizeInBytes,
+                                     attribute.format, attribute.endianSwap});
+    }
+    return layout;
+}
+
+VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::byte> before,
+                               std::span<const std::byte> after, float t,
+                               std::span<std::byte> out) {
+    std::copy(after.begin(), after.end(), out.begin());
+    if (std::equal(before.begin(), before.end(), after.begin(), after.end())) {
+        return VertexOutcome::Unchanged;
+    }
+    // Where each buffer starts in the bytes, one after another.
+    std::vector<size_t> starts;
+    size_t start = 0;
+    for (const VertexLayout::Buffer& buffer : layout.buffers) {
+        starts.push_back(start);
+        start += buffer.sizeInBytes;
+    }
+    uint64_t blended = 0;
+    for (const VertexLayout::Attribute& attribute : layout.attributes) {
+        std::optional<uint32_t> floats = floatsIn(attribute.format);
+        auto endian = static_cast<Endian>(attribute.endianSwap);
+        if (!floats.has_value() || (endian != Endian::None && endian != Endian::SwapU32)) {
+            continue;
+        }
+        const VertexLayout::Buffer& buffer = layout.buffers[attribute.buffer];
+        size_t base = starts[attribute.buffer];
+        for (uint64_t at = attribute.offset; at + attribute.sizeInBytes <= buffer.sizeInBytes;
+             at += buffer.stride) {
+            for (uint32_t component = 0; component < *floats; ++component) {
+                size_t word = base + at + (component * sizeof(float));
+                uint32_t aBits = readWord(before.data() + word, endian);
+                uint32_t bBits = readWord(after.data() + word, endian);
+                if (aBits == bBits) {
+                    continue;
+                }
+                auto a = std::bit_cast<float>(aBits);
+                auto b = std::bit_cast<float>(bBits);
+                if (!isNumber(a) || !isNumber(b)) {
+                    continue;
+                }
+                float value = a + ((b - a) * t);
+                if (!liesBetween(a, value, b)) {
+                    return VertexOutcome::Outside;
+                }
+                writeWord(out.data() + word, std::bit_cast<uint32_t>(value), endian);
+                ++blended;
+            }
+            if (buffer.stride == 0) {
+                break;
+            }
+        }
+    }
+    return blended > 0 ? VertexOutcome::Blended : VertexOutcome::NotFloats;
+}
+
+VertexBlend::VertexBlend(const ObjectBlend& objects, float t)
+    : m_objects(objects), m_t(t), m_thread([this](std::stop_token stop) {
+          blendHandedOver(stop);
+      }) {
+}
+
+VertexBlend::~VertexBlend() {
+    m_thread.request_stop();
+}
+
+void VertexBlend::Frame::clear() {
+    draws.clear();
+    bytes.clear();
+    copied.clear();
+    byEntry.clear();
+    frameIndex = 0;
+    assemblies = 0;
+    lastVertexEntry.reset();
+    lastVertexShaderBaseHash = 0;
+    lastVertexShaderAuxHash = 0;
+}
+
+void VertexBlend::onAssemblyRecorded(const frame::RecordedUniformAssembly& assembly) {
+    if (assembly.stageIndex == 0) {
+        m_building.lastVertexEntry = m_building.assemblies;
+        m_building.lastVertexShaderBaseHash = assembly.shaderBaseHash;
+        m_building.lastVertexShaderAuxHash = assembly.shaderAuxHash;
+    }
+    ++m_building.assemblies;
+}
+
+void VertexBlend::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) {
+    Draw recorded{draw.vertexShaderBaseHash,
+                  draw.vertexShaderAuxHash,
+                  m_building.assemblies,
+                  std::nullopt,
+                  0,
+                  {},
+                  {}};
+    // Kept when the vertex-stage uniforms last assembled are this draw's
+    // own: a draw without them has no object to take a partner from.
+    bool ownUniforms = draw.vertexUniforms && m_building.lastVertexEntry.has_value() &&
+                       m_building.lastVertexShaderBaseHash == draw.vertexShaderBaseHash &&
+                       m_building.lastVertexShaderAuxHash == draw.vertexShaderAuxHash;
+    if (ownUniforms && m_objects.isPlanning()) {
+        auto started = std::chrono::steady_clock::now();
+        recorded.vertexEntry = m_building.lastVertexEntry;
+        recorded.layout = VertexLayout::of(draw);
+        for (uint32_t index = 0; index < draw.vertexBufferCount; ++index) {
+            const LatteFrameHooks::DrawPrepared::VertexBuffer& buffer = draw.vertexBuffers[index];
+            auto [copy, fresh] = m_building.copied.try_emplace(
+                std::pair{buffer.data, buffer.sizeInBytes}, m_building.bytes.size());
+            if (fresh) {
+                const auto* bytes = static_cast<const std::byte*>(buffer.data);
+                m_building.bytes.insert(m_building.bytes.end(), bytes, bytes + buffer.sizeInBytes);
+                m_bytesCopied += buffer.sizeInBytes;
+            }
+            recorded.bufferStarts.push_back(copy->second);
+        }
+        auto [slot, fresh] = m_building.byEntry.try_emplace(std::pair{*recorded.vertexEntry, 0u},
+                                                            m_building.draws.size());
+        // Draws sharing one vertex-stage assembly take their place among it.
+        while (!fresh) {
+            ++recorded.ordinal;
+            std::tie(slot, fresh) = m_building.byEntry.try_emplace(
+                std::pair{*recorded.vertexEntry, recorded.ordinal}, m_building.draws.size());
+        }
+        m_copying += std::chrono::steady_clock::now() - started;
+    }
+    m_building.draws.push_back(std::move(recorded));
+}
+
+void VertexBlend::onFrameRecorded(const frame::FrameRecording& /*recording*/) {
+    // The frames it blends are about to move.
+    waitUntilBlended();
+    m_building.frameIndex = m_objects.framesEnded();
+    std::swap(m_previous, m_latest);
+    std::swap(m_latest, m_building);
+    m_building.clear();
+    startBlending();
+}
+
+void VertexBlend::startBlending() {
+    m_drawBlends.assign(m_latest.draws.size(), std::nullopt);
+    m_jobs.clear();
+    if (m_previous.frameIndex + 1 != m_latest.frameIndex) {
+        return;
+    }
+    // The plan is the latest frame's until the next frame ends: read here,
+    // not on the blending thread, which the next frame's end does not wait
+    // for before planning goes on.
+    for (size_t index = 0; index < m_latest.draws.size(); ++index) {
+        const Draw& drawn = m_latest.draws[index];
+        if (!drawn.vertexEntry.has_value()) {
+            continue;
+        }
+        std::optional<size_t> partnerEntry = m_objects.planner().partnerOf(*drawn.vertexEntry);
+        if (!partnerEntry.has_value()) {
+            m_drawBlends[index] = PairBlend{VertexOutcome::NoPartner, 0};
+            continue;
+        }
+        auto found = m_previous.byEntry.find({static_cast<uint32_t>(*partnerEntry), drawn.ordinal});
+        if (found == m_previous.byEntry.end() ||
+            m_previous.draws[found->second].layout != drawn.layout) {
+            m_drawBlends[index] = PairBlend{VertexOutcome::ShapeDiffers, 0};
+            continue;
+        }
+        m_jobs.push_back({index, found->second});
+    }
+    if (m_jobs.empty()) {
+        return;
+    }
+    std::lock_guard lock(m_mutex);
+    m_jobHandedOver = true;
+    m_handedOver.notify_one();
+}
+
+void VertexBlend::blendHandedOver(std::stop_token stop) {
+    std::unique_lock lock(m_mutex);
+    while (m_handedOver.wait(lock, stop, [this] {
+        return m_jobHandedOver;
+    })) {
+        lock.unlock();
+        auto started = std::chrono::steady_clock::now();
+        m_blended.clear();
+        m_pairs.clear();
+        for (const Job& job : m_jobs) {
+            const Draw& drawn = m_latest.draws[job.draw];
+            const Draw& partner = m_previous.draws[job.partner];
+            PairKey key{partner.bufferStarts, drawn.bufferStarts, drawn.layout};
+            auto known = m_pairs.find(key);
+            if (known == m_pairs.end()) {
+                known = m_pairs.emplace(std::move(key), blendPair(partner, drawn)).first;
+            }
+            m_drawBlends[job.draw] = known->second;
+        }
+        m_blendingNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     std::chrono::steady_clock::now() - started)
+                                     .count();
+        lock.lock();
+        m_jobHandedOver = false;
+        m_blendedAll.notify_all();
+    }
+}
+
+void VertexBlend::waitUntilBlended() {
+    std::unique_lock lock(m_mutex);
+    m_blendedAll.wait(lock, [this] {
+        return !m_jobHandedOver;
+    });
+}
+
+void VertexBlend::count(VertexOutcome outcome) {
+    ++m_outcomes[static_cast<size_t>(outcome)];
+}
+
+std::span<const std::byte> VertexBlend::bufferBytes(const Frame& frame, const Draw& draw,
+                                                    size_t buffer) const {
+    return {frame.bytes.data() + draw.bufferStarts[buffer],
+            draw.layout.buffers[buffer].sizeInBytes};
+}
+
+bool VertexBlend::onRuntimeDraw(const LatteFrameHooks::DrawPrepared& draw,
+                                LatteFrameHooks::VertexReplacements& replacements) {
+    if (!m_objects.isArmed()) {
+        m_replayArmed = false;
+        return false;
+    }
+    if (!m_replayArmed || m_replayFrame != m_objects.armings()) {
+        // A new replay: of the latest frame, which must be the one the plan
+        // is for, with the frame before it held too.
+        m_replayArmed = true;
+        m_replayFrame = m_objects.armings();
+        m_replayDraw = 0;
+        m_replayStopped = m_latest.frameIndex != m_objects.framesEnded() ||
+                          m_previous.frameIndex + 1 != m_latest.frameIndex;
+        if (m_replayStopped) {
+            ++m_replaysUnaligned;
+        } else {
+            auto started = std::chrono::steady_clock::now();
+            waitUntilBlended();
+            m_waiting += std::chrono::steady_clock::now() - started;
+        }
+    }
+    if (m_replayStopped) {
+        return false;
+    }
+    if (m_replayDraw >= m_latest.draws.size()) {
+        ++m_replaysDiverged;
+        m_replayStopped = true;
+        return false;
+    }
+    size_t index = m_replayDraw++;
+    const Draw& drawn = m_latest.draws[index];
+    if (drawn.vertexShaderBaseHash != draw.vertexShaderBaseHash ||
+        drawn.vertexShaderAuxHash != draw.vertexShaderAuxHash ||
+        drawn.assembliesBefore != m_objects.replayCursor()) {
+        ++m_replaysDiverged;
+        m_replayStopped = true;
+        return false;
+    }
+    if (!drawn.vertexEntry.has_value()) {
+        return false;
+    }
+    if (VertexLayout::of(draw) != drawn.layout) {
+        count(VertexOutcome::ShapeDiffers);
+        return false;
+    }
+    const std::optional<PairBlend>& blended = m_drawBlends[index];
+    if (!blended.has_value()) {
+        return false;
+    }
+    count(blended->outcome);
+    if (blended->outcome != VertexOutcome::Blended) {
+        return false;
+    }
+    size_t start = blended->start;
+    for (size_t buffer = 0; buffer < drawn.layout.buffers.size(); ++buffer) {
+        replacements.data[buffer] = m_blended.data() + start;
+        start += drawn.layout.buffers[buffer].sizeInBytes;
+    }
+    return true;
+}
+
+VertexBlend::PairBlend VertexBlend::blendPair(const Draw& partner, const Draw& drawn) {
+    bool changed = false;
+    for (size_t buffer = 0; buffer < drawn.layout.buffers.size() && !changed; ++buffer) {
+        std::span<const std::byte> was = bufferBytes(m_previous, partner, buffer);
+        std::span<const std::byte> is = bufferBytes(m_latest, drawn, buffer);
+        changed = std::memcmp(was.data(), is.data(), is.size()) != 0;
+    }
+    if (!changed) {
+        return {VertexOutcome::Unchanged, 0};
+    }
+    // The buffers one after another, as blendVertexBytes reads them.
+    m_before.clear();
+    m_after.clear();
+    for (size_t buffer = 0; buffer < drawn.layout.buffers.size(); ++buffer) {
+        std::span<const std::byte> was = bufferBytes(m_previous, partner, buffer);
+        std::span<const std::byte> is = bufferBytes(m_latest, drawn, buffer);
+        m_before.insert(m_before.end(), was.begin(), was.end());
+        m_after.insert(m_after.end(), is.begin(), is.end());
+    }
+    size_t start = m_blended.size();
+    m_blended.resize(start + m_after.size());
+    VertexOutcome outcome =
+        blendVertexBytes(drawn.layout, m_before, m_after, m_t,
+                         std::span<std::byte>(m_blended.data() + start, m_after.size()));
+    if (outcome != VertexOutcome::Blended) {
+        m_blended.resize(start);
+    }
+    return {outcome, start};
+}
+
+} // namespace wiiuport::interp

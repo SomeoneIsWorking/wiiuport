@@ -55,6 +55,21 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
         return m_armed;
     }
 
+    bool isPlanning() const {
+        return m_planning.load();
+    }
+
+    // Times armed: each is one replay.
+    uint64_t armings() const {
+        return m_armings;
+    }
+
+    // The entry of the latest frame the replay's next assembly is: how many
+    // of its assemblies the replay has drawn.
+    size_t replayCursor() const {
+        return m_replayCursor;
+    }
+
     // Writes one replayed draw's blend, if it has one.
     bool apply(const LatteFrameHooks::UniformAssembly& assembly);
 
@@ -140,6 +155,7 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
     bool m_planningBatch{false};
 
     size_t m_replayCursor{0};
+    uint64_t m_armings{0};
     bool m_armed{false};
     ObjectPlanner::Outcomes m_outcomes{};
     uint64_t m_drawsWritten{0};

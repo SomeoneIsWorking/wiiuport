@@ -100,6 +100,9 @@ class ObjectPlanner {
     // The values N's entry is drawn with in the in-between frame; empty when
     // it is drawn as the title drew it.
     std::span<const float> blendOf(size_t entry) const;
+    // The entry of N-1 a blended entry of N was blended from: the same
+    // object a frame before. None for an entry drawn as the title drew it.
+    std::optional<size_t> partnerOf(size_t entry) const;
 
     // What each object in a planned frame came to. Their sum is the objects
     // planned; none is dropped without a reason.
@@ -202,6 +205,8 @@ class ObjectPlanner {
     // One frame's blends, and what each of its objects came to.
     struct Plan {
         std::vector<uint32_t> blendedAt;
+        // The partner's entry in N-1, by entry; kNotBlended where none.
+        std::vector<uint32_t> partnerAt;
         std::vector<float> floats;
         // What each entry came to, by entry.
         std::vector<Outcome> outcomeOf;
