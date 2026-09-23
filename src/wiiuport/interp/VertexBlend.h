@@ -3,6 +3,7 @@
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/frame/RecordingObserver.h"
+#include "wiiuport/interp/Midpoint.h"
 #include "wiiuport/interp/ObjectBlend.h"
 
 #include <array>
@@ -79,6 +80,12 @@ enum class VertexOutcome : uint32_t {
 inline constexpr size_t kVertexOutcomeCount = static_cast<size_t>(VertexOutcome::Count);
 std::string_view vertexOutcomeName(VertexOutcome outcome);
 
+// One vertex shader's replayed draws by what their vertices came to.
+struct ShaderVertexOutcomes {
+    uint64_t shaderBaseHash;
+    std::array<uint64_t, kVertexOutcomeCount> draws{};
+};
+
 // How far the partner's draw is known to be the same mesh.
 enum class PartnerIdentity : uint8_t {
     // Its object is told apart by the blocks it sourced.
@@ -98,6 +105,11 @@ enum class PartnerIdentity : uint8_t {
 VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::byte> twoBack,
                                std::span<const std::byte> before, std::span<const std::byte> after,
                                float t, PartnerIdentity identity, std::span<std::byte> out);
+
+// Whether a draw's vertices passed through `between` on their way from
+// `twoBack` to `after`, over every float value the layout reads. Pure.
+Midpoint vertexMidpoint(const VertexLayout& layout, std::span<const std::byte> twoBack,
+                        std::span<const std::byte> between, std::span<const std::byte> after);
 
 // Draws the vertices the title positions on the CPU each frame -- skinned
 // characters, effects -- between the title's two frames, as ObjectBlend does
@@ -119,8 +131,14 @@ VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::
 // reorders. So for such a draw the one a frame before is taken only if the
 // object's own vertices, from its draw two frames back to N, pass through it:
 // the planner's midpoint test, on vertices. One that does not is some other
-// mesh, and blending towards it drew the clouds rearranged. A draw whose
-// blocks are its own keeps its partner: its animation turning back fails the
+// mesh, and blending towards it drew the clouds rearranged. Its place names
+// no draw better than any sibling's -- those with its shader, blocks and
+// layout -- so its draws two frames back and a frame before are the siblings
+// its vertices at N most resemble, keeping most of their values bit for bit,
+// then nearest, and the midpoint test checks that one pair: a step taken from
+// another cloud has a midpoint any cloud between the two lands on, and among
+// every sibling in turn one happens to stand half way. A draw whose blocks are its
+// own keeps its planner's draws: its animation turning back fails the
 // midpoint test while the mesh is its own.
 //
 // The replay re-issues the recorded frame, so its n-th draw is the
@@ -166,6 +184,17 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // whose vertex shader reads uniforms.
     uint64_t draws(VertexOutcome outcome) const {
         return m_outcomes[static_cast<size_t>(outcome)];
+    }
+
+    // The same, vertex shader by vertex shader: which meshes step at the
+    // title's rate, and why. Safe from any thread.
+    std::vector<ShaderVertexOutcomes> drawsByShader() const;
+
+    // Draws told apart only by their place whose draw two frames back or a
+    // frame before their vertices found among their siblings, other than the
+    // planner's.
+    uint64_t partnersFoundByVertices() const {
+        return m_partnersFoundByVertices.load();
     }
 
     // Replayed draws out of step with the recording, and replays that stopped
@@ -263,6 +292,12 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         std::optional<VertexOutcome> outcome;
     };
 
+    // Where some draws' indices sit in m_siblings.
+    struct Siblings {
+        size_t begin;
+        size_t end;
+    };
+
     // A draw of the latest frame to blend against its partner's, which
     // the frame before holds, and the same object's draw two frames back.
     struct Job {
@@ -270,6 +305,10 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         size_t partner;
         size_t earlier;
         PartnerIdentity identity;
+        // Its siblings two frames back and a frame before, in m_siblings,
+        // when told apart by place.
+        Siblings earlierSiblings;
+        Siblings partnerSiblings;
     };
 
     // Ties each of the latest frame's kept draws to its partner's and hands
@@ -284,10 +323,22 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // checked against the object's draw two frames back.
     VertexOutcome blendPair(const Draw& earlier, const Draw& partner, const Draw& drawn,
                             PartnerIdentity identity, size_t start);
+    // A place-identified job's draws two frames back and a frame before: the
+    // siblings its vertices most resemble, the planner's where none more.
+    void placeByVertices(Job& job);
+    // Of `planned` and `siblings` in `frame`, the draw `drawn` -- gathered
+    // into m_after -- most resembles.
+    size_t mostResembling(const Draw& drawn, const Frame& frame, size_t planned, Siblings siblings);
+    // A place-identified draw's siblings in `keyed`'s frame, as `frame`
+    // keeps their draws, but for `excluded`, appended to m_siblings.
+    Siblings siblingsOf(const KeyedFrame& keyed, AssemblyKey key, const Frame& frame,
+                        const Draw& drawn, size_t excluded);
+    // A draw's buffers one after another into `into`, as the blend reads them.
+    void gather(const Frame& frame, const Draw& draw, std::vector<std::byte>& into) const;
     // The draw a frame holds for an object's entry and a draw's place among
     // it, if it was kept and is laid out as `drawn` is.
     static std::optional<size_t> drawOf(const Frame& frame, size_t entry, const Draw& drawn);
-    void count(VertexOutcome outcome);
+    void count(uint64_t shaderBaseHash, VertexOutcome outcome);
 
     const ObjectBlend& m_objects;
     float m_t;
@@ -310,6 +361,14 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::vector<std::byte> m_blended;
     std::vector<std::optional<PairBlend>> m_drawBlends;
     std::vector<Job> m_jobs;
+    std::vector<size_t> m_siblings;
+    // The draws two frames back and a frame before found for each (N-2,
+    // N-1, N) buffers the planner named for a place-identified draw this
+    // frame: its passes share them.
+    std::map<std::tuple<std::vector<size_t>, std::vector<size_t>, std::vector<size_t>>,
+             std::pair<size_t, size_t>>
+        m_placed;
+    std::vector<std::byte> m_candidate;
     std::map<PairKey, size_t> m_pairs;
     std::vector<PairSlot> m_pairSlots;
     std::vector<size_t> m_jobPairs;
@@ -320,12 +379,15 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::vector<std::byte> m_before;
     std::vector<std::byte> m_after;
     std::array<uint64_t, kVertexOutcomeCount> m_outcomes{};
+    mutable std::mutex m_byShaderMutex;
+    std::map<uint64_t, std::array<uint64_t, kVertexOutcomeCount>> m_byShader;
     uint64_t m_replaysDiverged{0};
     uint64_t m_replaysUnaligned{0};
     uint64_t m_bytesCopied{0};
     std::chrono::nanoseconds m_copying{0};
     std::chrono::nanoseconds m_waiting{0};
     std::atomic<int64_t> m_blendingNanoseconds{0};
+    std::atomic<uint64_t> m_partnersFoundByVertices{0};
     std::atomic<bool> m_blendingEnabled{true};
 
     std::mutex m_mutex;

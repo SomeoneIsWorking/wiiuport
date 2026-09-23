@@ -340,6 +340,13 @@ void aWalkingActorsMeshIsDrawnBetweenItsPartnersAndItsOwn() {
                  "one draw's vertices were blended");
     check::equal(blends.vertices.draws(VertexOutcome::NoPartner), uint64_t{1},
                  "and the held actor, with no partner, is counted rather than dropped");
+    std::vector<wiiuport::interp::ShaderVertexOutcomes> byShader = blends.vertices.drawsByShader();
+    check::equal(byShader.size(), size_t{1}, "one vertex shader was replayed");
+    check::equal(byShader[0].shaderBaseHash, kActorShader, "the actors'");
+    check::equal(byShader[0].draws[static_cast<size_t>(VertexOutcome::Blended)], uint64_t{1},
+                 "with its blended draw");
+    check::equal(byShader[0].draws[static_cast<size_t>(VertexOutcome::NoPartner)], uint64_t{1},
+                 "and the one with no partner");
     check::equal(blends.vertices.replaysDiverged(), uint64_t{0}, "the replay kept in step");
 }
 
@@ -361,26 +368,122 @@ void anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore() {
     check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{1}, "counted blended");
 }
 
-// A block every cloud's draw sources alike, the same every frame.
+// The block every cloud's draw sources alike, at the address of each
+// frame's parity, as the title double-buffers it.
 constexpr uint32_t kSkyBlock = 0xf4003000;
+constexpr uint32_t kSkyBlockB = 0xf4083000;
 
-void cloudsTheTitleReordersAreNotBlendedIntoEachOther() {
-    // Two clouds drawn with the same uniforms from the same block, told
-    // apart only by their place: N-1 draws them the other way round, so the
-    // first draw's partner a frame before is the other cloud.
+void cloudsTheTitleReordersAreBlendedFromTheCloudTheyPassed() {
+    // Two clouds drawn with the same uniforms from the same double-buffered
+    // block, told apart only by their place. They drift in their uniforms,
+    // which teaches the planner the block's pair, then hold there while
+    // their meshes move on; N-1 draws them the other way round, so the
+    // first draw's planner partner is the other cloud.
     Blends blends;
     blends.objects.setPlanning(true);
-    blends.record(GuestFrame({{kSkyBlock, {1.0f}, {100.0f}}, {kSkyBlock, {1.0f}, {500.0f}}}));
-    blends.record(GuestFrame({{kSkyBlock, {1.0f}, {501.0f}}, {kSkyBlock, {1.0f}, {101.0f}}}));
-    GuestFrame latest({{kSkyBlock, {1.0f}, {102.0f}}, {kSkyBlock, {1.0f}, {502.0f}}});
+    blends.record(GuestFrame({{kSkyBlock, {1.0f}, {90.0f}}, {kSkyBlock, {1.0f}, {490.0f}}}));
+    blends.record(GuestFrame({{kSkyBlockB, {2.0f}, {95.0f}}, {kSkyBlockB, {2.0f}, {495.0f}}}));
+    blends.record(GuestFrame({{kSkyBlock, {3.0f}, {100.0f}}, {kSkyBlock, {3.0f}, {500.0f}}}));
+    blends.record(GuestFrame({{kSkyBlockB, {3.0f}, {501.0f}}, {kSkyBlockB, {3.0f}, {101.0f}}}));
+    GuestFrame latest({{kSkyBlock, {3.0f}, {102.0f}}, {kSkyBlock, {3.0f}, {502.0f}}});
     blends.record(latest);
     std::vector<std::vector<float>> drawn = blends.replay(latest);
     check::equal(blends.objects.objects(ObjectBlend::Outcome::Held), uint64_t{2},
                  "both clouds are held in their uniforms");
-    check::equal(drawn[0][0], 102.0f, "the first cloud is not drawn towards the second");
-    check::equal(drawn[1][0], 502.0f, "nor the second towards the first");
+    check::equal(drawn[0][0], 101.5f, "the first cloud is drawn from where it was, not the second");
+    check::equal(drawn[1][0], 501.5f, "and the second from where it was");
+    check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{2}, "both blended");
+    check::equal(blends.vertices.partnersFoundByVertices(), uint64_t{2},
+                 "each partner found by its vertices");
+}
+
+void cloudsReorderedSinceTwoFramesBackAreBlendedFromTheirOwn() {
+    // Three clouds a hundred apart drift one a frame. N draws them the other
+    // way round from N-2, so the first draw's N-2 by place is another cloud
+    // two hundred away, and half way between them stands the third: were
+    // the step taken from there, the first cloud would be drawn between the
+    // others.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    auto clouds = [](uint32_t block, float uniform, std::array<float, 3> meshes) {
+        return GuestFrame({{block, {uniform}, {meshes[0]}},
+                           {block, {uniform}, {meshes[1]}},
+                           {block, {uniform}, {meshes[2]}}});
+    };
+    blends.record(clouds(kSkyBlock, 1.0f, {98.0f, 198.0f, 298.0f}));
+    blends.record(clouds(kSkyBlockB, 2.0f, {99.0f, 199.0f, 299.0f}));
+    blends.record(clouds(kSkyBlock, 3.0f, {100.0f, 200.0f, 300.0f}));
+    blends.record(clouds(kSkyBlockB, 3.0f, {101.0f, 201.0f, 301.0f}));
+    GuestFrame latest = clouds(kSkyBlock, 3.0f, {302.0f, 202.0f, 102.0f});
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 301.5f, "the first draw's cloud is drawn from where it was");
+    check::equal(drawn[1][0], 201.5f, "and the second's");
+    check::equal(drawn[2][0], 101.5f, "and the third's");
+}
+
+void aCloudIsToldFromOneBesideItByWhatItKeeps() {
+    // Two cloud quads a step and a half apart, drifting one a frame, each
+    // with its own texture cell that it keeps. Two frames on, the other
+    // stands nearer the first's place than the first's own draw did, and
+    // only the texture cell tells them apart; N draws them the other way
+    // round from N-2.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    auto clouds = [](uint32_t block, float uniform, float first, float second, bool swapped) {
+        ActorDraw one{block, {uniform}, {first, 0.25f}};
+        ActorDraw other{block, {uniform}, {second, 0.75f}};
+        return swapped ? GuestFrame({other, one}) : GuestFrame({one, other});
+    };
+    blends.record(clouds(kSkyBlock, 1.0f, 98.0f, 99.5f, false));
+    blends.record(clouds(kSkyBlockB, 2.0f, 99.0f, 100.5f, false));
+    blends.record(clouds(kSkyBlock, 3.0f, 100.0f, 101.5f, false));
+    blends.record(clouds(kSkyBlockB, 3.0f, 101.0f, 102.5f, true));
+    GuestFrame latest = clouds(kSkyBlock, 3.0f, 102.0f, 103.5f, true);
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[1][0], 101.5f, "the first cloud is drawn from where it was");
+    check::equal(drawn[1][1], 0.25f, "in its own texture cell");
+    check::equal(drawn[0][0], 103.0f, "and so is the other");
+    check::equal(drawn[0][1], 0.75f, "in its own");
+}
+
+void aCloudThatHappensToStandHalfWayIsNotTakenForAnother() {
+    // The first draw's cloud is new two frames back, so its step is taken
+    // from another cloud, 600 away; a third cloud a frame before happens to
+    // stand half way. Taking whichever sibling lands would draw the new
+    // cloud flying from it; the one it resembles a frame before does not
+    // land, so it is drawn as the title drew it.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    auto clouds = [](uint32_t block, float uniform, float first, float second) {
+        return GuestFrame({{block, {uniform}, {first}}, {block, {uniform}, {second}}});
+    };
+    blends.record(clouds(kSkyBlock, 1.0f, -2.0f, 398.0f));
+    blends.record(clouds(kSkyBlockB, 2.0f, -1.0f, 399.0f));
+    blends.record(clouds(kSkyBlock, 3.0f, 0.0f, 400.0f));
+    blends.record(clouds(kSkyBlockB, 3.0f, 700.0f, 1001.0f));
+    GuestFrame latest = clouds(kSkyBlock, 3.0f, 1002.0f, 3.0f);
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 1002.0f, "the new cloud is not drawn flying from another");
+    check::equal(drawn[1][0], 3.0f, "nor is the other");
+}
+
+void aCloudNoSiblingPassedIsDrawnAsTheTitleDrewIt() {
+    // A frame before, neither cloud was on the way from N-2 to N.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    blends.record(GuestFrame({{kSkyBlock, {1.0f}, {100.0f}}, {kSkyBlock, {1.0f}, {500.0f}}}));
+    blends.record(GuestFrame({{kSkyBlock, {1.0f}, {300.0f}}, {kSkyBlock, {1.0f}, {700.0f}}}));
+    GuestFrame latest({{kSkyBlock, {1.0f}, {102.0f}}, {kSkyBlock, {1.0f}, {502.0f}}});
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 102.0f, "the first cloud is drawn as N");
+    check::equal(drawn[1][0], 502.0f, "and so is the second");
     check::equal(blends.vertices.draws(VertexOutcome::Unverified), uint64_t{2},
-                 "and both are counted unverified");
+                 "both counted unverified");
+    check::equal(blends.vertices.partnersFoundByVertices(), uint64_t{0}, "none found");
 }
 
 void nothingIsReplacedBeforeThreeFramesArePlanned() {
@@ -443,7 +546,11 @@ void runVertexBlendTests() {
     aMeshBackWhereItStoodTwoFramesAgoIsHeld();
     aWalkingActorsMeshIsDrawnBetweenItsPartnersAndItsOwn();
     anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore();
-    cloudsTheTitleReordersAreNotBlendedIntoEachOther();
+    cloudsTheTitleReordersAreBlendedFromTheCloudTheyPassed();
+    cloudsReorderedSinceTwoFramesBackAreBlendedFromTheirOwn();
+    aCloudIsToldFromOneBesideItByWhatItKeeps();
+    aCloudThatHappensToStandHalfWayIsNotTakenForAnother();
+    aCloudNoSiblingPassedIsDrawnAsTheTitleDrewIt();
     nothingIsReplacedBeforeThreeFramesArePlanned();
     aReplayOutOfStepStopsReplacing();
     verticesSwitchedOffAreDrawnAsTheTitleDrewThemAndBlendAgainOnceOn();
