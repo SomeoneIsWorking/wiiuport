@@ -212,6 +212,13 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         size_t start;
     };
 
+    // A distinct pair's place in m_blended, laid out before any is blended
+    // so the buffer never moves under a replay reading it.
+    struct PairSlot {
+        size_t start;
+        std::optional<VertexOutcome> outcome;
+    };
+
     // A draw of the latest frame to blend against its partner's, which
     // the frame before holds.
     struct Job {
@@ -224,7 +231,11 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     void startBlending();
     void blendHandedOver(std::stop_token stop);
     void waitUntilBlended();
-    PairBlend blendPair(const Draw& partner, const Draw& drawn);
+    // Waits until the blending thread has come to the latest frame's draw
+    // at `index`.
+    void waitUntilBlendedThrough(size_t index);
+    // Blends one pair into m_blended at `start`, its bytes laid out there.
+    VertexOutcome blendPair(const Draw& partner, const Draw& drawn, size_t start);
     void count(VertexOutcome outcome);
 
     const ObjectBlend& m_objects;
@@ -240,13 +251,17 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     bool m_replayArmed{false};
     bool m_replayStopped{false};
     // The latest frame's blended buffers, each pair's one after another, the
-    // pairs blended, and what each draw came to; none for a draw not kept.
-    // Written by the blending thread while a job is handed over, read by the
-    // replay after it.
+    // distinct pairs, and what each draw came to; none for a draw not kept.
+    // The blending thread works through the jobs in draw order, publishing
+    // in m_blendedThrough the draws it has done, so a replay reads a draw's
+    // blend as soon as it is made rather than once the frame's all are.
     std::vector<std::byte> m_blended;
     std::vector<std::optional<PairBlend>> m_drawBlends;
     std::vector<Job> m_jobs;
-    std::map<PairKey, PairBlend> m_pairs;
+    std::map<PairKey, size_t> m_pairs;
+    std::vector<PairSlot> m_pairSlots;
+    std::vector<size_t> m_jobPairs;
+    std::atomic<size_t> m_blendedThrough{0};
     // A changed pair's buffers, one after another, as blendVertexBytes reads
     // them; kept for their capacity.
     std::vector<std::byte> m_before;

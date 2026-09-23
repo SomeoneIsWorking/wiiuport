@@ -265,7 +265,8 @@ void aFrameWithNoDrawsStillLeavesTheOneBeforeSearchable() {
     // there by its values.
     wiiuport::interp::ObjectPlanner planner{kHalfway};
     auto feed = [&planner](const std::vector<Draw>& draws) {
-        for (const RecordedUniformAssembly& assembly : frameOf(draws).uniformAssemblies()) {
+        FrameRecording frame = frameOf(draws);
+        for (const RecordedUniformAssembly& assembly : frame.uniformAssemblies()) {
             planner.add(assembly);
         }
         planner.endFrame();
