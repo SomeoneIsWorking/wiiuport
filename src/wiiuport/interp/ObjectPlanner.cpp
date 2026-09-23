@@ -381,6 +381,12 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
         earlier.reset();
     }
     if (earlier.has_value() && equalValues(twoBack.values(*earlier), after)) {
+        // Standing still in its uniforms, it may yet move in the vertices the
+        // title poses for it: its draw a frame before is named for that.
+        if (std::optional<size_t> partner = derivedPartner(key, twoBack.values(*earlier), after)) {
+            m_buildingPlan.partnerAt[entry] = static_cast<uint32_t>(*partner);
+            ++m_heldPartnersDerived;
+        }
         return Outcome::Held;
     }
     std::optional<Found> found = findPartner(key, earlier, after);
