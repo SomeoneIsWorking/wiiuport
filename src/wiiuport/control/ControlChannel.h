@@ -10,6 +10,7 @@
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/RecordingSnapshot.h"
 #include "wiiuport/frame/ReplayScheduler.h"
+#include "wiiuport/frame/VertexChanges.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/interp/ContinuousInterpolator.h"
 #include "wiiuport/interp/FrameInterpolator.h"
@@ -65,6 +66,7 @@ class ControlChannel {
         interp::ObjectBlend& objects;
         frame::RecordingSnapshot& snapshot;
         frame::PresentPacing& pacing;
+        frame::VertexChanges& vertexChanges;
     };
 
     explicit ControlChannel(const Sources& sources);
@@ -162,6 +164,7 @@ class ControlChannel {
     interp::ObjectBlend& m_objects;
     frame::RecordingSnapshot& m_snapshot;
     frame::PresentPacing& m_pacing;
+    frame::VertexChanges& m_vertexChanges;
     std::unique_ptr<lucent::http::Server> m_server;
 };
 

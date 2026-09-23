@@ -136,6 +136,7 @@ class Runtime {
         .objects = m_objectBlend,
         .snapshot = m_snapshot,
         .pacing = m_pacing,
+        .vertexChanges = m_recorder.vertexChanges(),
     }};
     bool m_hooksInstalled{false};
 };

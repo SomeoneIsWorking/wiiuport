@@ -2,7 +2,7 @@
 
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/FrameRecording.h"
-#include "wiiuport/frame/UniformlessDraws.h"
+#include "wiiuport/frame/VertexChanges.h"
 
 #include <array>
 #include <cstddef>
@@ -217,9 +217,14 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
         return m_guestDrawsWithoutVertexUniforms;
     }
 
-    // Those draws by vertex shader, and whether their vertex data changes.
-    const UniformlessDraws& uniformlessDraws() const {
-        return m_uniformlessDraws;
+    // Whether the title's draws read vertex bytes it rewrote, by vertex
+    // shader: those without uniforms always, the rest over a census.
+    VertexChanges& vertexChanges() {
+        return m_vertexChanges;
+    }
+
+    const VertexChanges& vertexChanges() const {
+        return m_vertexChanges;
     }
 
     uint64_t runtimeSubmissions() const {
@@ -263,7 +268,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     uint64_t m_guestDrawsFromRing{0};
     uint64_t m_guestDrawsPrepared{0};
     uint64_t m_guestDrawsWithoutVertexUniforms{0};
-    UniformlessDraws m_uniformlessDraws;
+    VertexChanges m_vertexChanges;
     uint64_t m_runtimeSubmissions{0};
     uint64_t m_runtimePacketsProcessed{0};
     uint64_t m_runtimeDrawsIssued{0};

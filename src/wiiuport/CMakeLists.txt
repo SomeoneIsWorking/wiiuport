@@ -58,9 +58,9 @@ add_library(wiiuport STATIC
   frame/ReplayScheduler.h
   frame/SearchFeed.cpp
   frame/SearchFeed.h
-  frame/UniformlessDraws.cpp
-  frame/UniformlessDraws.h
-  input/InputDriver.cpp
+  frame/VertexChanges.cpp
+  frame/VertexChanges.h
+    input/InputDriver.cpp
   input/InputDriver.h
   interp/ContinuousInterpolator.cpp
   interp/ContinuousInterpolator.h
