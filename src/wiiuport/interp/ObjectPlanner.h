@@ -100,8 +100,9 @@ class ObjectPlanner {
     // The values N's entry is drawn with in the in-between frame; empty when
     // it is drawn as the title drew it.
     std::span<const float> blendOf(size_t entry) const;
-    // The entry of N-1 a blended entry of N was blended from: the same
-    // object a frame before. None for an entry drawn as the title drew it.
+    // The entry of N-1 that is the same object as an entry of N: the one a
+    // blended entry was blended from, or the one a held entry's learned
+    // blocks name there. None where it is not known.
     std::optional<size_t> partnerOf(size_t entry) const;
 
     // What each object in a planned frame came to. Their sum is the objects
@@ -136,6 +137,13 @@ class ObjectPlanner {
     // What one of N's objects came to.
     Outcome outcomeOf(size_t entry) const {
         return m_plan.outcomeOf[entry];
+    }
+
+    // Held objects whose draw in N-1 their learned block pairs named: their
+    // uniforms are drawn as N's, and their partner is what the vertex blend
+    // draws their vertices from.
+    uint64_t heldPartnersDerived() const {
+        return m_heldPartnersDerived;
     }
 
     // Partners derived from learned block pairs and confirmed, against
@@ -205,7 +213,8 @@ class ObjectPlanner {
     // One frame's blends, and what each of its objects came to.
     struct Plan {
         std::vector<uint32_t> blendedAt;
-        // The partner's entry in N-1, by entry; kNotBlended where none.
+        // The partner's entry in N-1, by entry, blended or held; kNotBlended
+        // where none is known.
         std::vector<uint32_t> partnerAt;
         std::vector<float> floats;
         // What each entry came to, by entry.
@@ -266,6 +275,7 @@ class ObjectPlanner {
     size_t m_framesHeld{0};
     bool m_latestUnindexed{false};
     uint64_t m_framesPlanned{0};
+    uint64_t m_heldPartnersDerived{0};
     std::unordered_map<uint32_t, uint32_t> m_blockPartner;
     // Key hash of an object whose search failed, and the planned frame it may
     // be searched for again.

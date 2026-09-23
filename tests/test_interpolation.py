@@ -81,6 +81,7 @@ def report(ticks: int, interpolated: int, no_view: int) -> Interpolation:
         objectFrameEndPlanningNanoseconds=0,
         objectPlanningBusyNanoseconds=0,
         objectSearchesDeferred=0,
+        objectHeldPartnersDerived=0,
         objectValuesNotBlended=0,
         objectValuesAlternating=0,
         objectDrawsWritten=interpolated,

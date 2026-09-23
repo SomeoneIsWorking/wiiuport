@@ -51,6 +51,7 @@ class Interpolation:
     objectFrameEndPlanningNanoseconds: int
     objectPlanningBusyNanoseconds: int
     objectSearchesDeferred: int
+    objectHeldPartnersDerived: int
     objectValuesNotBlended: int
     objectValuesAlternating: int
     objectDrawsWritten: int
@@ -152,7 +153,8 @@ class Interpolation:
                     + f"; partners {self.objectPartnersDerived} derived, "
                     f"{self.objectPartnersSearched} searched "
                     f"({self.objectPartnersReidentified} found by their values), "
-                    f"{self.objectSearchesDeferred} searches deferred; "
+                    f"{self.objectSearchesDeferred} searches deferred, "
+                    f"{self.objectHeldPartnersDerived} held objects' draws a frame before named; "
                     f"{self.objectPartnerCandidates} draws compared for partners over "
                     f"{self.objectPartnersSearched} searches, {self.objectNearestCandidates} "
                     f"for identity over {self.objectReidentifyAttempts} searches by values; "

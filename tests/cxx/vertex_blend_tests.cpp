@@ -292,6 +292,24 @@ void aWalkingActorsMeshIsDrawnBetweenItsPartnersAndItsOwn() {
     check::equal(blends.vertices.replaysDiverged(), uint64_t{0}, "the replay kept in step");
 }
 
+void anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore() {
+    Blends blends;
+    blends.objects.setPlanning(true);
+    // It walks, which teaches the planner its blocks' pairs, then stops
+    // while the title goes on posing its mesh: its uniforms are held.
+    blends.record(GuestFrame({{kBlockA, {0.0f, 7.0f}, {10.0f}}}));
+    blends.record(GuestFrame({{kBlockB, {1.0f, 7.0f}, {12.0f}}}));
+    blends.record(GuestFrame({{kBlockA, {2.0f, 7.0f}, {14.0f}}}));
+    blends.record(GuestFrame({{kBlockB, {2.0f, 7.0f}, {20.0f}}}));
+    GuestFrame latest({{kBlockA, {2.0f, 7.0f}, {22.0f}}});
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(blends.objects.objects(ObjectBlend::Outcome::Held), uint64_t{1},
+                 "the idling actor is held in its uniforms");
+    check::equal(drawn[0][0], 21.0f, "and its mesh lies half way from its pose a frame before");
+    check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{1}, "counted blended");
+}
+
 void nothingIsReplacedBeforeThreeFramesArePlanned() {
     Blends blends;
     blends.objects.setPlanning(true);
@@ -333,6 +351,7 @@ void runVertexBlendTests() {
     aMoveTooSmallToHalveIsOutside();
     aValueThatIsNotANumberIsTakenFromN();
     aWalkingActorsMeshIsDrawnBetweenItsPartnersAndItsOwn();
+    anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore();
     nothingIsReplacedBeforeThreeFramesArePlanned();
     aReplayOutOfStepStopsReplacing();
 }
