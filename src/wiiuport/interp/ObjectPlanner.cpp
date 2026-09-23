@@ -103,6 +103,7 @@ void ObjectPlanner::Plan::clear() {
     earlierAt.clear();
     floats.clear();
     outcomeOf.clear();
+    leftAtN.clear();
     outcomes = {};
 }
 
@@ -131,7 +132,11 @@ void ObjectPlanner::endFrame() {
     // to become N-1 and be searched.
     indexLatest();
     m_building.finish();
-    seeUnblendedThroughTheCamera();
+    // A frame planned against no two whole frames blended nothing to see
+    // its objects through.
+    if (m_framesHeld >= 2) {
+        seeUnblendedThroughTheCamera();
+    }
     ++m_framesPlanned;
     // Swapping keeps every frame's storage, so a steady scene allocates
     // nothing frame to frame.
@@ -204,9 +209,9 @@ void ObjectPlanner::learn(const AssemblyKey& key, const AssemblyKey& partner) {
     }
 }
 
-std::optional<size_t> ObjectPlanner::searchPartner(const AssemblyKey& key,
-                                                   std::span<const float> before,
-                                                   std::span<const float> after) {
+ObjectPlanner::SearchPoint ObjectPlanner::placeSearchPoint(const AssemblyKey& key,
+                                                           std::span<const float> before,
+                                                           std::span<const float> after) {
     // The midpoint over the values the object moved in, and the values it
     // held where it held them: those pick out the object itself when it drew
     // in N-1, and let the search skip everything standing elsewhere. Frame
@@ -214,6 +219,10 @@ std::optional<size_t> ObjectPlanner::searchPartner(const AssemblyKey& key,
     FrameState state = frameState(key.shader);
     m_point.assign(after.size(), std::numeric_limits<double>::quiet_NaN());
     double stepSquared = 0.0;
+    // The title's rounding of each value it draws at N-1, which the check
+    // forgives (Midpoint): a candidate it accepts lies within the tolerance
+    // plus this of the point.
+    double roundingSquared = 0.0;
     bool moved = false;
     bool held = false;
     for (size_t index = 0; index < after.size(); ++index) {
@@ -228,13 +237,23 @@ std::optional<size_t> ObjectPlanner::searchPartner(const AssemblyKey& key,
         } else if (isNumber(after[index])) {
             m_point[index] = after[index];
             held = true;
+        } else {
+            continue;
         }
+        double rounding =
+            Midpoint::unitInLastPlace(std::max(std::abs(before[index]), std::abs(after[index])));
+        roundingSquared += rounding * rounding;
     }
     // An object that moved in no value of its own draws the same with any
     // candidate: the nearest in what it held is taken, however far.
-    double limit =
-        moved ? static_cast<double>(Midpoint::kTolerance) * Midpoint::kTolerance * stepSquared
-              : std::numeric_limits<double>::infinity();
+    double reach = (Midpoint::kTolerance * std::sqrt(stepSquared)) + std::sqrt(roundingSquared);
+    return {moved ? reach * reach : std::numeric_limits<double>::infinity(), held};
+}
+
+std::optional<size_t> ObjectPlanner::searchPartner(const AssemblyKey& key,
+                                                   std::span<const float> before,
+                                                   std::span<const float> after) {
+    auto [limit, held] = placeSearchPoint(key, before, after);
     DrawTree::Nearest found = m_frames[0].nearest(key.shader, {m_point, limit, std::nullopt});
     m_partnerCandidates += found.compared;
     if (found.entry.has_value() || !held) {
@@ -274,15 +293,28 @@ std::optional<size_t> ObjectPlanner::nearestEarlier(const AssemblyKey& key,
 
 std::optional<size_t> ObjectPlanner::derivedPartner(const AssemblyKey& key,
                                                     std::span<const float> before,
-                                                    std::span<const float> after) const {
+                                                    std::span<const float> after) {
     const KeyedFrame& between = m_frames[0];
     std::optional<AssemblyKey> derived = derivedKey(key);
     if (!derived.has_value()) {
         return std::nullopt;
     }
     std::optional<size_t> entry = between.find(*derived);
-    if (entry.has_value() && between.values(*entry).size() == after.size() &&
-        measure(before, after, between.values(*entry), frameState(key.shader)).landsOn()) {
+    if (!entry.has_value() || between.values(*entry).size() != after.size()) {
+        return std::nullopt;
+    }
+    if (measure(before, after, between.values(*entry), frameState(key.shader)).landsOn()) {
+        return entry;
+    }
+    // A start, a stop or a turn at N-1 sets the object's own draw off its
+    // midpoint. Blocks reused by another object name a draw standing
+    // elsewhere; the object's own is the one nearest it by its values too.
+    placeSearchPoint(key, before, after);
+    DrawTree::Nearest nearest =
+        between.nearest(key.shader, {m_point, std::numeric_limits<double>::infinity(),
+                                     static_cast<uint32_t>(*entry)});
+    m_partnerCandidates += nearest.compared;
+    if (nearest.entry == entry) {
         return entry;
     }
     return std::nullopt;
@@ -296,6 +328,9 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
     if (earlier.has_value()) {
         if (std::optional<size_t> derived = derivedPartner(key, twoBack.values(*earlier), after)) {
             ++m_partnersDerived;
+            if (equalValues(between.values(*derived), after)) {
+                return Found{*earlier, std::nullopt};
+            }
             return Found{*earlier, *derived};
         }
     }
@@ -437,12 +472,22 @@ void ObjectPlanner::seeUnblendedThroughTheCamera() {
     m_shared.clear();
     m_transforms.clear();
     for (size_t entry = 0; entry < m_building.size(); ++entry) {
-        if (drawnAtN(entry) && plan.earlierAt[entry] != kNotBlended) {
+        if (!drawnAtN(entry)) {
+            continue;
+        }
+        if (plan.earlierAt[entry] != kNotBlended) {
             m_shared.addWanted(twoBack.values(plan.earlierAt[entry]), m_building.values(entry));
+        } else {
+            m_shared.addWantedAtLatest(m_building.values(entry));
         }
     }
     for (size_t entry = 0; entry < m_building.size(); ++entry) {
         if (plan.outcomeOf[entry] != Outcome::Blended) {
+            // Drawn with its values at N unmoved: a value it holds is not
+            // one every draw moves alike.
+            if (!drawnAtN(entry)) {
+                m_shared.addHeld(m_building.values(entry));
+            }
             continue;
         }
         const ShaderKey& shader = m_building.key(entry).shader;
@@ -463,13 +508,15 @@ void ObjectPlanner::seeUnblendedThroughTheCamera() {
         size_t start = plan.floats.size();
         m_sharedAt.assign(after.size(), 0);
         uint64_t shared = 0;
-        // Shared values are known only from the object's own draw at N-2.
+        // Shared values are known by both ends where the object's own draw at
+        // N-2 is, and by the value at N where it is new.
         bool twoBackKnown = plan.earlierAt[entry] != kNotBlended;
         std::span<const float> before =
             twoBackKnown ? twoBack.values(plan.earlierAt[entry]) : std::span<const float>{};
         for (size_t index = 0; index < after.size(); ++index) {
-            std::optional<float> blended =
-                twoBackKnown ? m_shared.blendOf(before[index], after[index]) : std::nullopt;
+            std::optional<float> blended = twoBackKnown
+                                               ? m_shared.blendOf(before[index], after[index])
+                                               : m_shared.blendOfLatest(after[index]);
             if (blended.has_value()) {
                 ++shared;
                 m_sharedAt[index] = 1;
@@ -480,6 +527,8 @@ void ObjectPlanner::seeUnblendedThroughTheCamera() {
             shader, after, m_sharedAt, std::span<float>(plan.floats.data() + start, after.size()));
         if (shared == 0 && carried == 0) {
             plan.floats.resize(start);
+            plan.leftAtN.push_back(static_cast<uint32_t>(entry));
+            ++m_leftAtN;
             continue;
         }
         plan.blendedAt[entry] = static_cast<uint32_t>(start);

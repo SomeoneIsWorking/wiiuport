@@ -2,10 +2,12 @@
 
 #include "wiiuport/interp/Blendable.h"
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace wiiuport::interp {
 
@@ -33,6 +35,14 @@ class Midpoint {
                std::bit_cast<uint32_t>(before) != std::bit_cast<uint32_t>(after);
     }
 
+    // The distance from a float to the next one away from zero.
+    static double unitInLastPlace(float value) {
+        float magnitude = std::abs(value);
+        return static_cast<double>(
+                   std::nextafter(magnitude, std::numeric_limits<float>::infinity())) -
+               magnitude;
+    }
+
     // One value at N-2, its candidate's at N-1, and N.
     void add(float before, float between, float after) {
         if (!movedIn(before, after)) {
@@ -46,7 +56,13 @@ class Midpoint {
             ++m_stood;
         }
         double moved = static_cast<double>(after) - before;
-        double off = ((static_cast<double>(before) + after) / 2.0) - between;
+        // The title rounds the value it draws at N-1 to a float: within one
+        // unit in its last place of the candidate, the object is on it. Far
+        // from the origin a move is a few of those units, and rounding alone
+        // would otherwise set the object off its own path.
+        double off =
+            std::max(0.0, std::abs(((static_cast<double>(before) + after) / 2.0) - between) -
+                              unitInLastPlace(between));
         m_stepSquared += moved * moved;
         m_residualSquared += off * off;
         ++m_compared;

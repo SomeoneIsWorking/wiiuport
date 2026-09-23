@@ -34,6 +34,7 @@ class ShaderReport:
     stageIndex: int
     outcomes: dict[str, int]
     compared: int
+    leftAtN: int
 
     @property
     def name(self) -> str:
@@ -44,7 +45,8 @@ class ShaderReport:
         objects = sum(self.outcomes.values())
         return (
             f"{self.name}: {objects} objects, {self.outcomes['unverified']} unverified, "
-            f"{self.outcomes['unmatched']} unmatched, {self.compared} draws compared"
+            f"{self.outcomes['unmatched']} unmatched, {self.leftAtN} left at N, "
+            f"{self.compared} draws compared"
         )
 
 
@@ -60,6 +62,7 @@ class PlanReplayReport:
     partnerCandidates: int
     nearestCandidates: int
     shaders: tuple[ShaderReport, ...]
+    leftAtNByFrame: list[int]
     planningNanoseconds: int
 
     @classmethod
@@ -100,6 +103,10 @@ class PlanReplayReport:
                 *self._ranked(lambda shader: shader.compared),
                 "most unverified:",
                 *self._ranked(lambda shader: shader.outcomes["unverified"]),
+                # Drawn where N's camera put them, against a world drawn between.
+                f"left at N by frame: {' '.join(str(left) for left in self.leftAtNByFrame)}",
+                "most left at N:",
+                *self._ranked(lambda shader: shader.leftAtN),
             ]
         )
 

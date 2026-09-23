@@ -242,6 +242,18 @@ class ObjectPlanner {
         return m_transformsCarried;
     }
 
+    // Objects drawn at N with nothing shared and nothing carried: while the
+    // camera moves, each stands where N's camera put it, a jump against the
+    // world drawn between.
+    uint64_t leftAtN() const {
+        return m_leftAtN;
+    }
+
+    // The latest frame's entries left at N, in entry order.
+    std::span<const uint32_t> leftAtNEntries() const {
+        return m_plan.leftAtN;
+    }
+
   private:
     // Where an entry's blend sits in a plan's floats; none when drawn as is.
     static constexpr uint32_t kNotBlended = UINT32_MAX;
@@ -258,6 +270,8 @@ class ObjectPlanner {
         std::vector<float> floats;
         // What each entry came to, by entry.
         std::vector<Outcome> outcomeOf;
+        // The entries left at N, in entry order.
+        std::vector<uint32_t> leftAtN;
         Outcomes outcomes{};
 
         void clear();
@@ -288,9 +302,10 @@ class ObjectPlanner {
     std::optional<Found> findPartner(const AssemblyKey& key, std::optional<size_t> earlier,
                                      std::span<const float> after);
     // The partner of the object at `before` in N-2 derived from learned block
-    // pairs, if they still pass.
+    // pairs, if they still pass: its midpoint lands on the draw, or the draw
+    // is also the one nearest it by its values.
     std::optional<size_t> derivedPartner(const AssemblyKey& key, std::span<const float> before,
-                                         std::span<const float> after) const;
+                                         std::span<const float> after);
     // The key of `key`'s draw in N-1 under the learned block pairs, if every
     // block it sourced is either paired or shared by both frames.
     std::optional<AssemblyKey> derivedKey(const AssemblyKey& key) const;
@@ -305,6 +320,18 @@ class ObjectPlanner {
     // and N-1's trees of their draws (DrawTree).
     std::optional<size_t> searchPartner(const AssemblyKey& key, std::span<const float> before,
                                         std::span<const float> after);
+
+    // What the searches in N-1 look for, placed in m_point: the midpoint in
+    // the values the object moved in, and the values it held.
+    struct SearchPoint {
+        // How far from the point a partner may lie; unbounded when the object
+        // moved in nothing.
+        double limitSquared;
+        bool held;
+    };
+
+    SearchPoint placeSearchPoint(const AssemblyKey& key, std::span<const float> before,
+                                 std::span<const float> after);
     void learn(const AssemblyKey& key, const AssemblyKey& partner);
     // Indexes N's values, once, before anything searches it.
     void indexLatest();
@@ -338,6 +365,7 @@ class ObjectPlanner {
     std::vector<uint8_t> m_sharedAt;
     uint64_t m_unblendedCarried{0};
     uint64_t m_transformsCarried{0};
+    uint64_t m_leftAtN{0};
     uint64_t m_unverifiedSharingValues{0};
     uint64_t m_valuesShared{0};
     uint64_t m_partnersDerived{0};

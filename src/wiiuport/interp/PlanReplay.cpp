@@ -50,6 +50,10 @@ PlanReplay::Report PlanReplay::run(std::span<const frame::RecordingSnapshot::Fra
                 ++shader.outcomes[static_cast<size_t>(planner.outcomeOf(entry))];
                 shader.compared += compared[entry];
             }
+            for (uint32_t entry : planner.leftAtNEntries()) {
+                ++counted.shaders[planner.latest().key(entry).shader].leftAtN;
+            }
+            counted.leftAtNByFrame.push_back(planner.leftAtNEntries().size());
         }
         auto took = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - started);
