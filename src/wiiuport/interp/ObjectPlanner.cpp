@@ -11,8 +11,18 @@ namespace wiiuport::interp {
 
 namespace {
 
+// Whether an object moved in a value between N-2 and N: a number at both ends
+// with other bits. Only such a value says where the object passed through; one
+// the same at both ends is drawn at N whatever N-1 holds, and one N-1 holds
+// otherwise is flipping with the title's double buffering -- packed data, as
+// one shader's, that reads as floats up to 2^97 and would swamp any measure.
+bool movedAt(std::span<const float> before, std::span<const float> after, size_t index) {
+    return isNumber(before[index]) && isNumber(after[index]) &&
+           std::memcmp(&before[index], &after[index], sizeof(float)) != 0;
+}
+
 // How far an object moved over two frames, and how far its midpoint lands
-// from `between`, over the values that are numbers in all three.
+// from `between`, over the values it moved in that are numbers in `between`.
 struct Distances {
     double step{0.0};
     double residual{0.0};
@@ -25,7 +35,7 @@ Distances measure(std::span<const float> before, std::span<const float> after,
         float a = before[index];
         float b = after[index];
         float c = between[index];
-        if (!isNumber(a) || !isNumber(b) || !isNumber(c)) {
+        if (!movedAt(before, after, index) || !isNumber(c)) {
             continue;
         }
         double moved = static_cast<double>(b) - a;
@@ -45,11 +55,12 @@ bool landsOn(const Distances& distances) {
 }
 
 // Whether `blended` lies strictly between the object's two neighbours:
-// nearer each of them than they are to each other, over the values that are
-// numbers in all three. This is what an in-between frame promises, so it is
-// checked on the values drawn rather than assumed from the partner check.
-bool liesBetween(std::span<const float> oneBack, std::span<const float> blended,
-                 std::span<const float> latest) {
+// nearer each of them than they are to each other, over the values it moved
+// in that are numbers in all three. This is what an in-between frame
+// promises, so it is checked on the values drawn rather than assumed from the
+// partner check; a value it did not move in is drawn at N by design.
+bool liesBetween(std::span<const float> before, std::span<const float> oneBack,
+                 std::span<const float> blended, std::span<const float> latest) {
     double apart = 0.0;
     double fromOneBack = 0.0;
     double fromLatest = 0.0;
@@ -57,7 +68,7 @@ bool liesBetween(std::span<const float> oneBack, std::span<const float> blended,
         float p = oneBack[index];
         float v = blended[index];
         float b = latest[index];
-        if (!isNumber(p) || !isNumber(v) || !isNumber(b)) {
+        if (!movedAt(before, latest, index) || !isNumber(p) || !isNumber(v)) {
             continue;
         }
         double pb = static_cast<double>(b) - p;
@@ -205,19 +216,37 @@ void ObjectPlanner::learn(const AssemblyKey& key, const AssemblyKey& partner) {
 std::optional<size_t> ObjectPlanner::searchPartner(const AssemblyKey& key,
                                                    std::span<const float> before,
                                                    std::span<const float> after) {
-    // The midpoint, where the object's values are numbers at both ends.
+    // The midpoint over the values the object moved in, and the values it
+    // held where it held them: those pick out the object itself when it drew
+    // in N-1, and let the search skip everything standing elsewhere.
     m_point.assign(after.size(), std::numeric_limits<double>::quiet_NaN());
     double stepSquared = 0.0;
+    bool held = false;
     for (size_t index = 0; index < after.size(); ++index) {
-        if (!isNumber(before[index]) || !isNumber(after[index])) {
-            continue;
+        if (movedAt(before, after, index)) {
+            double moved = static_cast<double>(after[index]) - before[index];
+            stepSquared += moved * moved;
+            m_point[index] = (static_cast<double>(before[index]) + after[index]) / 2.0;
+        } else if (isNumber(after[index])) {
+            m_point[index] = after[index];
+            held = true;
         }
-        double moved = static_cast<double>(after[index]) - before[index];
-        stepSquared += moved * moved;
-        m_point[index] = (static_cast<double>(before[index]) + after[index]) / 2.0;
     }
     double limit = static_cast<double>(kPartnerTolerance) * kPartnerTolerance * stepSquared;
     DrawTree::Nearest found = m_frames[0].nearest(key.shader, {m_point, limit, std::nullopt});
+    m_partnerCandidates += found.compared;
+    if (found.entry.has_value() || !held) {
+        return found.entry;
+    }
+    // A held value N-1 does not share is flipping with the title's double
+    // buffering, or belongs to another object; only what moved is taken from
+    // the partner, so the search is run again over that alone.
+    for (size_t index = 0; index < after.size(); ++index) {
+        if (!movedAt(before, after, index)) {
+            m_point[index] = std::numeric_limits<double>::quiet_NaN();
+        }
+    }
+    found = m_frames[0].nearest(key.shader, {m_point, limit, std::nullopt});
     m_partnerCandidates += found.compared;
     return found.entry;
 }
@@ -359,7 +388,7 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
         floats.push_back(b);
     }
     std::span<const float> blended(floats.data() + start, after.size());
-    if (!liesBetween(oneBack, blended, after)) {
+    if (!liesBetween(before, oneBack, blended, after)) {
         floats.resize(start);
         return Outcome::Outside;
     }

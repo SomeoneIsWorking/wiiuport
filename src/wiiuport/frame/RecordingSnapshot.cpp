@@ -1,6 +1,7 @@
 #include "wiiuport/frame/RecordingSnapshot.h"
 
 #include <cstring>
+#include <stdexcept>
 #include <utility>
 
 namespace wiiuport::frame {
@@ -13,6 +14,41 @@ template <typename T> void append(std::string& out, const T& value) {
 void appendU32(std::string& out, size_t value) {
     append(out, static_cast<uint32_t>(value));
 }
+
+// Takes values off the front of a framed snapshot, refusing to read past it.
+class Reader {
+  public:
+    explicit Reader(std::string_view bytes) : m_bytes(bytes) {
+    }
+
+    template <typename T> T take() {
+        T value{};
+        std::memcpy(&value, claim(sizeof(T)), sizeof(T));
+        return value;
+    }
+
+    template <typename T> std::vector<T> takeArray(uint32_t count) {
+        std::vector<T> values(count);
+        std::memcpy(values.data(), claim(size_t{count} * sizeof(T)), size_t{count} * sizeof(T));
+        return values;
+    }
+
+    bool finished() const {
+        return m_bytes.empty();
+    }
+
+  private:
+    const char* claim(size_t size) {
+        if (size > m_bytes.size()) {
+            throw std::invalid_argument("the snapshot ends in the middle of a frame");
+        }
+        const char* start = m_bytes.data();
+        m_bytes.remove_prefix(size);
+        return start;
+    }
+
+    std::string_view m_bytes;
+};
 
 } // namespace
 
@@ -64,6 +100,30 @@ std::string RecordingSnapshot::framed() const {
         }
     }
     return out;
+}
+
+std::vector<RecordingSnapshot::Frame> RecordingSnapshot::parse(std::string_view framed) {
+    std::string_view magic(kMagic);
+    if (!framed.starts_with(magic)) {
+        throw std::invalid_argument("the snapshot does not start with WIIUREC1");
+    }
+    Reader reader(framed.substr(magic.size()));
+    std::vector<Frame> frames(reader.take<uint32_t>());
+    for (Frame& frame : frames) {
+        frame.complete = reader.take<uint32_t>() != 0;
+        frame.assemblies.resize(reader.take<uint32_t>());
+        for (RecordedUniformAssembly& assembly : frame.assemblies) {
+            assembly.shaderBaseHash = reader.take<uint64_t>();
+            assembly.shaderAuxHash = reader.take<uint64_t>();
+            assembly.stageIndex = reader.take<uint32_t>();
+            assembly.blockSources = reader.takeArray<uint32_t>(reader.take<uint32_t>());
+            assembly.data = reader.takeArray<float>(reader.take<uint32_t>());
+        }
+    }
+    if (!reader.finished()) {
+        throw std::invalid_argument("the snapshot has bytes after its last frame");
+    }
+    return frames;
 }
 
 uint64_t RecordingSnapshot::snapshotsCompleted() const {
