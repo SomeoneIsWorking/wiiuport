@@ -243,6 +243,7 @@ void VertexBlend::Frame::clear() {
     bytes.clear();
     copied.clear();
     byEntry.clear();
+    byShader.clear();
     frameIndex = 0;
     assemblies = 0;
     lastVertexEntry.reset();
@@ -295,6 +296,8 @@ void VertexBlend::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) {
             std::tie(slot, fresh) = m_building.byEntry.try_emplace(
                 std::pair{*recorded.vertexEntry, recorded.ordinal}, m_building.draws.size());
         }
+        m_building.byShader[{draw.vertexShaderBaseHash, draw.vertexShaderAuxHash}].push_back(
+            m_building.draws.size());
         m_copying += std::chrono::steady_clock::now() - started;
     }
     m_building.draws.push_back(std::move(recorded));
@@ -314,7 +317,6 @@ void VertexBlend::onFrameRecorded(const frame::FrameRecording& /*recording*/) {
 void VertexBlend::startBlending() {
     m_drawBlends.assign(m_latest.draws.size(), std::nullopt);
     m_jobs.clear();
-    m_siblings.clear();
     if (m_previous.frameIndex + 1 != m_latest.frameIndex ||
         m_twoBack.frameIndex + 2 != m_latest.frameIndex) {
         m_blendedThrough.store(m_latest.draws.size(), std::memory_order_release);
@@ -348,19 +350,7 @@ void VertexBlend::startBlending() {
         PartnerIdentity identity = planner.latest().sharesKey(*drawn.vertexEntry)
                                        ? PartnerIdentity::ByPlace
                                        : PartnerIdentity::ByBlocks;
-        Siblings earlierSiblings{m_siblings.size(), m_siblings.size()};
-        Siblings partnerSiblings = earlierSiblings;
-        if (identity == PartnerIdentity::ByPlace) {
-            // Each frame by its own keys: the title double-buffers its
-            // blocks, so the frame before keys the same objects by the other
-            // addresses.
-            earlierSiblings =
-                siblingsOf(planner.twoBack(), planner.latest().key(*drawn.vertexEntry), m_twoBack,
-                           drawn, *earlier);
-            partnerSiblings = siblingsOf(planner.previous(), planner.previous().key(*partnerEntry),
-                                         m_previous, drawn, *partner);
-        }
-        m_jobs.push_back({index, *partner, *earlier, identity, earlierSiblings, partnerSiblings});
+        m_jobs.push_back({index, *partner, *earlier, identity});
     }
     if (m_jobs.empty()) {
         m_blendedThrough.store(m_latest.draws.size(), std::memory_order_release);
@@ -562,35 +552,23 @@ void VertexBlend::gather(const Frame& frame, const Draw& draw, std::vector<std::
     }
 }
 
-VertexBlend::Siblings VertexBlend::siblingsOf(const KeyedFrame& keyed, AssemblyKey key,
-                                              const Frame& frame, const Draw& drawn,
-                                              size_t excluded) {
-    Siblings siblings{m_siblings.size(), m_siblings.size()};
-    for (key.occurrence = 0;; ++key.occurrence) {
-        std::optional<size_t> entry = keyed.find(key);
-        if (!entry.has_value()) {
-            break;
-        }
-        std::optional<size_t> draw = drawOf(frame, *entry, drawn);
-        if (draw.has_value() && *draw != excluded) {
-            m_siblings.push_back(*draw);
-        }
-    }
-    siblings.end = m_siblings.size();
-    return siblings;
-}
-
-size_t VertexBlend::mostResembling(const Draw& drawn, const Frame& frame, size_t planned,
-                                   Siblings siblings) {
+size_t VertexBlend::mostResembling(const Draw& drawn, const Frame& frame, size_t planned) {
     gather(frame, frame.draws[planned], m_candidate);
     Resemblance closest = resemblance(drawn.layout, m_candidate, m_after);
     size_t found = planned;
-    for (size_t index = siblings.begin; index < siblings.end; ++index) {
-        gather(frame, frame.draws[m_siblings[index]], m_candidate);
+    auto shader = frame.byShader.find({drawn.vertexShaderBaseHash, drawn.vertexShaderAuxHash});
+    if (shader == frame.byShader.end()) {
+        return found;
+    }
+    for (size_t index : shader->second) {
+        if (index == planned || frame.draws[index].layout != drawn.layout) {
+            continue;
+        }
+        gather(frame, frame.draws[index], m_candidate);
         Resemblance candidate = resemblance(drawn.layout, m_candidate, m_after);
         if (candidate.closerThan(closest)) {
             closest = candidate;
-            found = m_siblings[index];
+            found = index;
         }
     }
     return found;
@@ -609,8 +587,8 @@ void VertexBlend::placeByVertices(Job& job) {
     size_t plannedEarlier = job.earlier;
     size_t plannedPartner = job.partner;
     gather(m_latest, drawn, m_after);
-    job.earlier = mostResembling(drawn, m_twoBack, job.earlier, job.earlierSiblings);
-    job.partner = mostResembling(drawn, m_previous, job.partner, job.partnerSiblings);
+    job.earlier = mostResembling(drawn, m_twoBack, job.earlier);
+    job.partner = mostResembling(drawn, m_previous, job.partner);
     if (job.earlier != plannedEarlier || job.partner != plannedPartner) {
         ++m_partnersFoundByVertices;
     }
