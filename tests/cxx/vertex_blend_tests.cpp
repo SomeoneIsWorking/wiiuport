@@ -300,6 +300,25 @@ LatteFrameHooks::DrawPrepared preparedOf(const std::vector<std::byte>& mesh, boo
     return prepared;
 }
 
+void aLayoutDescribesOnlyTheDrawItWasTakenFrom() {
+    std::vector<std::byte> mesh(16);
+    ActorDraw pair{kBlockA, {}, {}, std::nullopt, 2, 0};
+    LatteFrameHooks::DrawPrepared prepared = preparedOf(mesh, true, pair);
+    VertexLayout layout = VertexLayout::of(prepared);
+    check::isTrue(layout.describes(prepared), "a layout describes the draw it was taken from");
+
+    LatteFrameHooks::DrawPrepared otherStride = prepared;
+    otherStride.vertexBuffers[0].stride = 4;
+    check::isTrue(!layout.describes(otherStride), "not one whose buffer has another stride");
+    LatteFrameHooks::DrawPrepared otherFetch = prepared;
+    otherFetch.vertexAttributes[0].offset = 4;
+    check::isTrue(!layout.describes(otherFetch), "nor one fetching another value");
+    LatteFrameHooks::DrawPrepared moreAttributes = prepared;
+    moreAttributes.vertexAttributes[1] = prepared.vertexAttributes[0];
+    moreAttributes.vertexAttributeCount = 2;
+    check::isTrue(!layout.describes(moreAttributes), "nor one fetching more");
+}
+
 struct Blends {
     ObjectBlend objects{kHalfway};
     VertexBlend vertices{objects, kHalfway};
@@ -373,6 +392,9 @@ void aWalkingActorsMeshIsDrawnBetweenItsPartnersAndItsOwn() {
                  "one draw's vertices were blended");
     check::equal(blends.vertices.draws(VertexOutcome::NoPartner), uint64_t{1},
                  "and the held actor, with no partner, is counted rather than dropped");
+    check::equal(blends.vertices.drawsByShader().size(), size_t{0},
+                 "shader by shader, the replay is published at the next frame's end");
+    blends.record(latest);
     std::vector<wiiuport::interp::ShaderVertexOutcomes> byShader = blends.vertices.drawsByShader();
     check::equal(byShader.size(), size_t{1}, "one vertex shader was replayed");
     check::equal(byShader[0].shaderBaseHash, kActorShader, "the actors'");
@@ -650,6 +672,7 @@ void verticesSwitchedOffAreDrawnAsTheTitleDrewThemAndBlendAgainOnceOn() {
 namespace wiiuport::tests {
 
 void runVertexBlendTests() {
+    aLayoutDescribesOnlyTheDrawItWasTakenFrom();
     aMovedMeshIsBlendedValueByValueInEitherByteOrder();
     aMeshThatDidNotMoveIsUnchangedAndByteIdentical();
     aMeshWhoseOnlyChangeIsNotFloatsIsNotBlended();
