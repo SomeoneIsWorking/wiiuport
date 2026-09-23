@@ -152,6 +152,9 @@ class TransformSearch {
         // actually used, with no overlap.
         uint32_t lastFrame{0};
         bool everDrew{false};
+        // The frame being observed when it first drew in it, plus one: zero
+        // before it ever drew.
+        uint32_t seenInFrame{0};
     };
 
     bool drewInLastFrame(const ShaderState& state) const;
@@ -181,6 +184,9 @@ class TransformSearch {
     float m_rotationTolerance;
     uint32_t m_framesObserved{0};
     std::map<ShaderKey, ShaderState> m_shaders;
+    // The shaders that drew in the frame being observed; kept for its
+    // capacity.
+    std::vector<ShaderState*> m_seenThisFrame;
 };
 
 } // namespace wiiuport::interp

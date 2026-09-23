@@ -250,6 +250,9 @@ struct ActorDraw {
     // Its mesh's values a vertex, and the one its shader fetches.
     uint32_t valuesPerVertex{1};
     uint32_t valueFetched{0};
+    // Drawn with the uniforms the draw before it assembled, as a title draws
+    // several meshes of one object: no assembly of its own.
+    bool sharesUniforms{false};
 };
 
 // Where a guest's draw keeps its mesh: each frame's vertices in their own
@@ -327,11 +330,13 @@ struct Blends {
     void record(const GuestFrame& frame) {
         FrameRecording recording;
         for (size_t index = 0; index < frame.draws.size(); ++index) {
-            RecordedUniformAssembly assembly = assemblyOf(frame.draws[index]);
-            objects.onAssemblyRecorded(assembly);
-            vertices.onAssemblyRecorded(assembly);
+            if (!frame.draws[index].sharesUniforms) {
+                RecordedUniformAssembly assembly = assemblyOf(frame.draws[index]);
+                objects.onAssemblyRecorded(assembly);
+                vertices.onAssemblyRecorded(assembly);
+                recording.addUniformAssembly(assembly);
+            }
             vertices.onDrawRecorded(preparedOf(frame.meshOf(index), false, frame.draws[index]));
-            recording.addUniformAssembly(assembly);
         }
         objects.onFrameRecorded(recording);
         vertices.onFrameRecorded(recording);
@@ -353,7 +358,9 @@ struct Blends {
             assembly.blockAddresses = sources.data();
             assembly.blockAddressCount = 1;
             assembly.fromRuntime = true;
-            objects.apply(assembly);
+            if (!draw.sharesUniforms) {
+                objects.apply(assembly);
+            }
             LatteFrameHooks::VertexReplacements replacements;
             vertices.onRuntimeDraw(preparedOf(frame.meshOf(index), true, draw), replacements);
             const auto* bytes = static_cast<const std::byte*>(replacements.data[0] != nullptr
@@ -403,6 +410,26 @@ void aWalkingActorsMeshIsDrawnBetweenItsPartnersAndItsOwn() {
     check::equal(byShader[0].draws[static_cast<size_t>(VertexOutcome::NoPartner)], uint64_t{1},
                  "and the one with no partner");
     check::equal(blends.vertices.replaysDiverged(), uint64_t{0}, "the replay kept in step");
+}
+
+void eachMeshOfOneObjectIsBlendedFromItsOwnDrawAFrameBefore() {
+    // One object's uniforms draw two meshes, each moving its own way: the
+    // second is told from the first only by its place among the object's
+    // draws, which must name its own draws a frame and two frames before.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    auto walker = [](uint32_t block, float uniform, float body, float cape) {
+        ActorDraw second{block, {}, {cape}};
+        second.sharesUniforms = true;
+        return GuestFrame({{block, {uniform, 7.0f}, {body}}, second});
+    };
+    blends.record(walker(kBlockA, 0.0f, 10.0f, 100.0f));
+    blends.record(walker(kBlockB, 1.0f, 12.0f, 120.0f));
+    GuestFrame latest = walker(kBlockA, 2.0f, 14.0f, 140.0f);
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 13.0f, "the object's first mesh is drawn half way");
+    check::equal(drawn[1][0], 130.0f, "and its second from its own draw a frame before");
 }
 
 void everyPassOverAMeshDrawsItAlike() {
@@ -686,6 +713,7 @@ void runVertexBlendTests() {
     aWalkingActorsMeshIsDrawnBetweenItsPartnersAndItsOwn();
     anIdlingActorsMeshIsBlendedFromItsDrawAFrameBefore();
     everyPassOverAMeshDrawsItAlike();
+    eachMeshOfOneObjectIsBlendedFromItsOwnDrawAFrameBefore();
     aMeshTwoShadersFetchOtherwiseIsDrawnAlikeByBoth();
     aMeshAnExcludedShaderReadsIsDrawnAsTheTitleDrewIt();
     cloudsTheTitleReordersAreBlendedFromTheCloudTheyPassed();

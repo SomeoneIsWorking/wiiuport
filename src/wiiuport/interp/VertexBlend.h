@@ -288,6 +288,16 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         // The mesh it reads, by the frame's meshes: draws reading the same
         // copies share one.
         uint32_t mesh{0};
+        // The next kept draw with its vertex entry, if any.
+        uint32_t nextOfEntry{0};
+    };
+
+    // The kept draws of one vertex entry: the first, the last, and how many,
+    // chained through Draw::nextOfEntry.
+    struct EntryDraws {
+        uint32_t first{0};
+        uint32_t last{0};
+        uint32_t count{0};
     };
 
     // Hashes a pair of keys, for the per-draw lookups of a frame: the two
@@ -318,8 +328,9 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         // Each buffer copied, by where the guest keeps it: draws sharing a
         // mesh share its copy.
         std::unordered_map<std::pair<const void*, uint32_t>, size_t, PairHash> copied;
-        // The draw of each (vertex entry, ordinal).
-        std::unordered_map<std::pair<uint32_t, uint32_t>, size_t, PairHash> byEntry;
+        // The kept draws of each vertex entry, by entry: a hash map of
+        // (entry, ordinal) allocated a node for every kept draw of the frame.
+        std::vector<EntryDraws> entryDraws;
         // The kept draws of each vertex shader (base, aux hash): an object
         // told apart only by its place may be drawn anywhere among them the
         // frame before, under other blocks.

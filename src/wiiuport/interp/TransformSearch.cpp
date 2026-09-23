@@ -94,20 +94,29 @@ void TransformSearch::observe(const frame::FrameRecording& recording) {
     if (!recording.isComplete()) {
         return;
     }
-    std::map<ShaderKey, bool> seenThisFrame;
+    // Looked up once per run of one shader's assemblies, and marked seen in
+    // the state itself: three map searches per assembly were a tenth of the
+    // bookkeeping the rendering thread does between frames.
+    m_seenThisFrame.clear();
+    ShaderState* found = nullptr;
+    ShaderKey foundKey{};
     for (const auto& assembly : recording.uniformAssemblies()) {
         if (assembly.data.empty()) {
             continue;
         }
         ShaderKey key{assembly.shaderBaseHash, assembly.shaderAuxHash, assembly.stageIndex};
-        auto& state = m_shaders[key];
+        if (found == nullptr || key != foundKey) {
+            found = &m_shaders[key];
+            foundKey = key;
+        }
+        ShaderState& state = *found;
         narrowTo(state, assembly.data.size());
         state.draws += 1;
         state.lastFrame = m_framesObserved;
         state.everDrew = true;
-        auto first = !seenThisFrame[key];
-        if (first) {
-            seenThisFrame[key] = true;
+        if (state.seenInFrame != m_framesObserved + 1) {
+            state.seenInFrame = m_framesObserved + 1;
+            m_seenThisFrame.push_back(&state);
             std::copy_n(assembly.data.begin(), state.width, state.currentFrame.begin());
             continue;
         }
@@ -117,10 +126,8 @@ void TransformSearch::observe(const frame::FrameRecording& recording) {
             }
         }
     }
-    for (auto& [key, seen] : seenThisFrame) {
-        if (seen) {
-            closeFrame(m_shaders[key]);
-        }
+    for (ShaderState* state : m_seenThisFrame) {
+        closeFrame(*state);
     }
     m_framesObserved += 1;
 }
