@@ -17,6 +17,7 @@
 #include <string_view>
 #include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace wiiuport::interp {
@@ -309,6 +310,9 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // Ties each of the latest frame's kept draws to its partner's and hands
     // the blending to its thread.
     void startBlending();
+    // The latest frame's kept draw at `index` tied to its partner's, or why
+    // it has none.
+    std::variant<Job, VertexOutcome> planDraw(size_t index) const;
     void blendHandedOver(std::stop_token stop);
     void waitUntilBlended();
     // Waits until the blending thread has come to the latest frame's draw
