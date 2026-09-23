@@ -1,6 +1,7 @@
 #include "wiiuport/interp/KeyedFrame.h"
 
 #include <algorithm>
+#include <cstring>
 #include <stdexcept>
 
 namespace wiiuport::interp {
@@ -100,6 +101,7 @@ void KeyedFrame::indexValues() {
         return m_keys[l].shader < m_keys[r].shader;
     });
     m_groups.clear();
+    m_shared.clear();
     m_tree.clear();
     DrawValues drawn = values();
     for (uint32_t begin = 0; begin < m_byShader.size();) {
@@ -109,7 +111,11 @@ void KeyedFrame::indexValues() {
             ++end;
         }
         std::span<const uint32_t> group(m_byShader.data() + begin, end - begin);
-        m_groups.emplace_back(m_keys[m_byShader[begin]].shader, m_tree.build(group, drawn));
+        auto sharedBegin = static_cast<uint32_t>(m_shared.size());
+        flagShared(group);
+        m_groups.push_back(Group{m_keys[m_byShader[begin]].shader, m_tree.build(group, drawn),
+                                 sharedBegin,
+                                 static_cast<uint32_t>(m_shared.size()) - sharedBegin});
         begin = end;
     }
     m_indexed = true;
@@ -126,18 +132,51 @@ std::optional<size_t> KeyedFrame::find(const AssemblyKey& key) const {
     return std::nullopt;
 }
 
-DrawTree::Nearest KeyedFrame::nearest(const ShaderKey& shader, const DrawTree::Query& query) const {
+void KeyedFrame::flagShared(std::span<const uint32_t> group) {
+    if (group.size() < 2) {
+        return;
+    }
+    size_t common = values(group[0]).size();
+    for (uint32_t entry : group) {
+        common = std::min(common, values(entry).size());
+    }
+    std::span<const float> first = values(group[0]);
+    for (size_t position = 0; position < common; ++position) {
+        bool shared = std::all_of(group.begin(), group.end(), [&](uint32_t entry) {
+            return std::memcmp(&values(entry)[position], &first[position], sizeof(float)) == 0;
+        });
+        m_shared.push_back(shared ? 1 : 0);
+    }
+}
+
+const KeyedFrame::Group* KeyedFrame::group(const ShaderKey& shader) const {
     if (!m_indexed) {
         throw std::logic_error("a frame's draws were searched before its values were indexed");
     }
-    auto group = std::lower_bound(m_groups.begin(), m_groups.end(), shader,
-                                  [](const auto& l, const ShaderKey& r) {
-                                      return l.first < r;
+    auto found = std::lower_bound(m_groups.begin(), m_groups.end(), shader,
+                                  [](const Group& l, const ShaderKey& r) {
+                                      return l.shader < r;
                                   });
-    if (group == m_groups.end() || group->first != shader) {
+    if (found == m_groups.end() || found->shader != shader) {
+        return nullptr;
+    }
+    return &*found;
+}
+
+DrawTree::Nearest KeyedFrame::nearest(const ShaderKey& shader, const DrawTree::Query& query) const {
+    const Group* found = group(shader);
+    if (found == nullptr) {
         return {};
     }
-    return m_tree.nearest(group->second, values(), query);
+    return m_tree.nearest(found->tree, values(), query);
+}
+
+std::span<const uint8_t> KeyedFrame::sharedValues(const ShaderKey& shader) const {
+    const Group* found = group(shader);
+    if (found == nullptr) {
+        return {};
+    }
+    return {m_shared.data() + found->sharedBegin, found->sharedCount};
 }
 
 bool KeyedFrame::sourced(uint32_t address) const {

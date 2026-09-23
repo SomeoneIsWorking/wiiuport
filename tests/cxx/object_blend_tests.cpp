@@ -476,6 +476,44 @@ void aFlippingValueFarLargerThanTheMoveDoesNotHideThePartner() {
     check::equal(uploaded[0][1], packed, "and the packed data drawn as the title wrote it");
 }
 
+void aValueEveryDrawHoldsDoesNotDecideThePartner() {
+    // The second value is the frame's -- both objects are handed it -- and it
+    // sways unevenly with the camera: 100, 90, 102. Over it neither object's
+    // midpoint lands anywhere; over their own values both do.
+    std::vector<Draw> latest{{kBlockA, {2.0f, 102.0f}}, {kOtherA, {12.0f, 102.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {0.0f, 100.0f}}, {kOtherA, {10.0f, 100.0f}}},
+             {{kBlockB, {1.0f, 90.0f}}, {kOtherB, {11.0f, 90.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{2}, "both are blended");
+    check::equal(uploaded[0][0], 1.5f, "each by its own move");
+    check::equal(uploaded[1][0], 11.5f, "the other too");
+    check::equal(uploaded[0][1], 96.0f, "and the frame's value half way from N-1 to N");
+}
+
+void drawsTheFrameAloneMovesAreBlendedWithAnyCandidate() {
+    // Every draw of the shader holds the same values, which only the frame
+    // moves: whichever is taken as the partner, the same is drawn.
+    std::vector<Draw> latest{{kBlockA, {102.0f}}, {kOtherA, {102.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {100.0f}}, {kOtherA, {100.0f}}},
+             {{kBlockB, {90.0f}}, {kOtherB, {90.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{2}, "both are blended");
+    check::equal(uploaded[1][0], 96.0f, "half way from N-1 to N");
+}
+
+void aLoneDrawsValuesAreItsOwn() {
+    // One draw of the shader holds nothing in common with another, so what
+    // moved is its own, and it passed nowhere near the middle.
+    std::vector<Draw> latest{{kBlockA, {2.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {0.0f}}}, {{kBlockB, {9.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Unverified), uint64_t{1}, "it is unverified");
+    check::equal(uploaded[0][0], 2.0f, "and drawn as the title drew it");
+}
+
 void aMoveTooSmallToHalveIsNotDrawnBetween() {
     // One ulp from N-1 to N: half way rounds back onto N-1, which is not a
     // frame between the two.
@@ -656,6 +694,9 @@ void runObjectBlendTests() {
     aValueFlippingEveryFrameIsNotAveraged();
     aMoveTooSmallToHalveIsNotDrawnBetween();
     aFlippingValueFarLargerThanTheMoveDoesNotHideThePartner();
+    aValueEveryDrawHoldsDoesNotDecideThePartner();
+    drawsTheFrameAloneMovesAreBlendedWithAnyCandidate();
+    aLoneDrawsValuesAreItsOwn();
     aPartnerWhoseMovingValuesAreNotNumbersIsNoPartner();
     anObjectThatStoppedAtNMinusOneIsDrawnWhereItStopped();
     aHeldStillWorldReplaysByteIdenticalToTheTitlesFrame();

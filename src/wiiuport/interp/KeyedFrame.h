@@ -55,6 +55,13 @@ class KeyedFrame {
     // indexValues(): the tree would still be some earlier frame's.
     DrawTree::Nearest nearest(const ShaderKey& shader, const DrawTree::Query& query) const;
 
+    // By position, 1 where every draw of `shader` holds the same bits and it
+    // has two draws or more: what the title hands the whole shader, such as
+    // the view, rather than any one object. As long as the values every draw
+    // has; empty when the frame has fewer than two draws of that shader.
+    // Throws before indexValues().
+    std::span<const uint8_t> sharedValues(const ShaderKey& shader) const;
+
     // Whether any draw of the frame sourced a block at this address, fresh
     // or not.
     bool sourced(uint32_t address) const;
@@ -98,8 +105,23 @@ class KeyedFrame {
 
     // Entries grouped by shader, for building each shader's tree.
     std::vector<uint32_t> m_byShader;
-    // Each shader's group in m_tree, sorted by shader.
-    std::vector<std::pair<ShaderKey, uint32_t>> m_groups;
+
+    struct Group {
+        ShaderKey shader;
+        // Its handle in m_tree.
+        uint32_t tree;
+        // Its flags in m_shared.
+        uint32_t sharedBegin;
+        uint32_t sharedCount;
+    };
+
+    // The shader's group; none when the frame has no draw of it.
+    const Group* group(const ShaderKey& shader) const;
+    void flagShared(std::span<const uint32_t> group);
+
+    // Each shader's group, sorted by shader.
+    std::vector<Group> m_groups;
+    std::vector<uint8_t> m_shared;
     DrawTree m_tree;
     bool m_indexed{false};
     // Sorted and unique.

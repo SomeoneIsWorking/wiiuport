@@ -22,35 +22,49 @@ bool movedAt(std::span<const float> before, std::span<const float> after, size_t
 }
 
 // How far an object moved over two frames, and how far its midpoint lands
-// from `between`, over the values it moved in that are numbers in `between`.
+// from `between`, over the values it moved in that are its own -- not frame
+// state -- and numbers in `between`; how many values that is, and how many
+// of its own it moved in at all.
 struct Distances {
     double step{0.0};
     double residual{0.0};
+    size_t compared{0};
+    size_t moved{0};
 };
 
 Distances measure(std::span<const float> before, std::span<const float> after,
-                  std::span<const float> between) {
+                  std::span<const float> between, const FrameState& state) {
     Distances squared;
     for (size_t index = 0; index < after.size(); ++index) {
         float a = before[index];
         float b = after[index];
         float c = between[index];
-        if (!movedAt(before, after, index) || !isNumber(c)) {
+        if (!movedAt(before, after, index) || state.at(index)) {
+            continue;
+        }
+        ++squared.moved;
+        if (!isNumber(c)) {
             continue;
         }
         double moved = static_cast<double>(b) - a;
         double off = ((static_cast<double>(a) + b) / 2.0) - c;
         squared.step += moved * moved;
         squared.residual += off * off;
+        ++squared.compared;
     }
-    return {std::sqrt(squared.step), std::sqrt(squared.residual)};
+    return {std::sqrt(squared.step), std::sqrt(squared.residual), squared.compared, squared.moved};
 }
 
-// A candidate is only a partner if the object moved in values it can be
-// checked on: one whose every moving value is not a number in the candidate
-// would land on anything.
+// Whether the candidate is the object's partner: the object's own moved
+// values -- the only values taken from the partner that are not the frame's --
+// pass through it, and it has a number at one of them at least, or the check
+// would pass on anything. An object that moved in no value of its own draws
+// the same whichever candidate is taken, so any is.
 bool landsOn(const Distances& distances) {
-    return distances.step > 0.0 &&
+    if (distances.moved == 0) {
+        return true;
+    }
+    return distances.compared > 0 &&
            distances.residual <= ObjectPlanner::kPartnerTolerance * distances.step;
 }
 
@@ -114,6 +128,10 @@ std::string_view ObjectPlanner::outcomeName(Outcome outcome) {
 }
 
 ObjectPlanner::ObjectPlanner(float t) : m_t(t) {
+}
+
+FrameState ObjectPlanner::frameState(const ShaderKey& shader) const {
+    return {m_frames[0].sharedValues(shader), m_frames[1].sharedValues(shader)};
 }
 
 void ObjectPlanner::Plan::clear() {
@@ -218,21 +236,31 @@ std::optional<size_t> ObjectPlanner::searchPartner(const AssemblyKey& key,
                                                    std::span<const float> after) {
     // The midpoint over the values the object moved in, and the values it
     // held where it held them: those pick out the object itself when it drew
-    // in N-1, and let the search skip everything standing elsewhere.
+    // in N-1, and let the search skip everything standing elsewhere. Frame
+    // state is the same in every candidate and is left out.
+    FrameState state = frameState(key.shader);
     m_point.assign(after.size(), std::numeric_limits<double>::quiet_NaN());
     double stepSquared = 0.0;
+    bool moved = false;
     bool held = false;
     for (size_t index = 0; index < after.size(); ++index) {
+        if (state.at(index)) {
+            continue;
+        }
         if (movedAt(before, after, index)) {
-            double moved = static_cast<double>(after[index]) - before[index];
-            stepSquared += moved * moved;
+            double step = static_cast<double>(after[index]) - before[index];
+            stepSquared += step * step;
             m_point[index] = (static_cast<double>(before[index]) + after[index]) / 2.0;
+            moved = true;
         } else if (isNumber(after[index])) {
             m_point[index] = after[index];
             held = true;
         }
     }
-    double limit = static_cast<double>(kPartnerTolerance) * kPartnerTolerance * stepSquared;
+    // An object that moved in no value of its own draws the same with any
+    // candidate: the nearest in what it held is taken, however far.
+    double limit = moved ? static_cast<double>(kPartnerTolerance) * kPartnerTolerance * stepSquared
+                         : std::numeric_limits<double>::infinity();
     DrawTree::Nearest found = m_frames[0].nearest(key.shader, {m_point, limit, std::nullopt});
     m_partnerCandidates += found.compared;
     if (found.entry.has_value() || !held) {
@@ -280,7 +308,7 @@ std::optional<size_t> ObjectPlanner::derivedPartner(const AssemblyKey& key,
     }
     std::optional<size_t> entry = between.find(*derived);
     if (entry.has_value() && between.values(*entry).size() == after.size() &&
-        landsOn(measure(before, after, between.values(*entry)))) {
+        landsOn(measure(before, after, between.values(*entry), frameState(key.shader)))) {
         return entry;
     }
     return std::nullopt;
@@ -307,7 +335,8 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
             ++m_partnersSearched;
             std::span<const float> before = twoBack.values(*earlier);
             std::optional<size_t> found = searchPartner(key, before, after);
-            if (found.has_value() && landsOn(measure(before, after, between.values(*found)))) {
+            if (found.has_value() &&
+                landsOn(measure(before, after, between.values(*found), frameState(key.shader)))) {
                 m_searchAgainAt.erase(hash);
                 learn(key, between.key(*found));
                 return Found{*earlier, *found};
@@ -330,7 +359,8 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
             return Found{*nearest, std::nullopt};
         }
         std::optional<size_t> found = searchPartner(key, before, after);
-        if (found.has_value() && landsOn(measure(before, after, between.values(*found)))) {
+        if (found.has_value() &&
+            landsOn(measure(before, after, between.values(*found), frameState(key.shader)))) {
             ++m_partnersReidentified;
             return Found{*nearest, *found};
         }
