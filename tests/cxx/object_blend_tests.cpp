@@ -123,6 +123,7 @@ void aMovingObjectIsDrawnHalfWayBetweenItsFrames() {
     check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "one object blended");
     check::equal(blend.drawsWritten(), uint64_t{1}, "and its draw written");
     check::equal(blend.framesEnded(), uint64_t{3}, "each frame's end counted with its wait");
+    check::isTrue(blend.planningBusy().count() > 0, "and the planning thread's time counted");
 }
 
 void aStillObjectIsDrawnExactlyAsTheTitleDrewIt() {

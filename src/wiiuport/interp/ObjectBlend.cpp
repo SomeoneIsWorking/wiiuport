@@ -84,9 +84,13 @@ void ObjectBlend::planHandedOver(std::stop_token stop) {
         size_t count = std::exchange(m_pendingCount, 0);
         m_planningBatch = true;
         lock.unlock();
+        auto started = std::chrono::steady_clock::now();
         for (size_t index = 0; index < count; ++index) {
             m_planner.add(m_taken[index]);
         }
+        m_planningBusyNanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                         std::chrono::steady_clock::now() - started)
+                                         .count();
         lock.lock();
         m_planningBatch = false;
         m_caughtUp.notify_all();

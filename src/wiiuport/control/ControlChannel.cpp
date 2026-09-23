@@ -359,6 +359,7 @@ std::string ControlChannel::interpolationJson() const {
     body += ",\"objectDrawsWritten\":" + std::to_string(objects.drawsWritten());
     body += ",\"objectReplaysDiverged\":" + std::to_string(objects.replaysDiverged());
     body += ",\"objectFramesEnded\":" + std::to_string(objects.framesEnded());
+    body += ",\"objectPlanningBusyNanoseconds\":" + std::to_string(objects.planningBusy().count());
     body += ",\"objectFrameEndPlanningNanoseconds\":" +
             std::to_string(objects.frameEndPlanning().count());
     frame::PresentPacing::Summary pacing = m_pacing.summary();

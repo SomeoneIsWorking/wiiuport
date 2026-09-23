@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <span>
 
 namespace wiiuport::interp {
@@ -19,6 +20,15 @@ namespace wiiuport::interp {
 // thread, and times the whole of it.
 class PlanReplay {
   public:
+    // What one shader's objects came to over the planned frames, and what
+    // finding them cost: which shader to look at, when the totals say only
+    // that planning is slow or that objects go unverified.
+    struct ShaderReport {
+        ObjectPlanner::Outcomes outcomes{};
+        // Draws compared while planning this shader's objects, both searches.
+        uint64_t compared{0};
+    };
+
     struct Report {
         // Frames fed, and those planned against two whole frames before them.
         uint64_t frames{0};
@@ -31,6 +41,7 @@ class PlanReplay {
         uint64_t reidentifyAttempts{0};
         uint64_t partnerCandidates{0};
         uint64_t nearestCandidates{0};
+        std::map<ShaderKey, ShaderReport> shaders;
         // The fastest of the repeats: every draw added and every frame ended.
         std::chrono::nanoseconds planning{0};
     };
