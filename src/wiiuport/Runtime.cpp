@@ -37,7 +37,7 @@ Runtime::Runtime()
       m_capture(&requestFrameCapture),
       m_guard(&LatteFrameHooks::GuardGuestState, &LatteFrameHooks::RestoreGuestState),
       m_continuous(m_viewTracker, m_substitution, m_objectBlend, m_replayer, m_presenter, m_guard,
-                   m_scheduler, m_restoreCheck, &steadyNow) {
+                   m_scheduler, m_tickProbes, &steadyNow) {
     // Frame complete, before the guest's swap: everything that reads the
     // frame first, and the continuous interpolator last, because it needs the
     // view tracker and the object blend to have taken this frame in.

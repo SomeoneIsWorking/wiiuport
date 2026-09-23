@@ -49,7 +49,7 @@ class RestoreCheck final : public TickProbe {
         return m_refused.load();
     }
 
-    void beforeInBetween() override;
+    void beforeInBetween(uint64_t tick) override;
     void beforeInBetweenPresent() override;
     void beforeGuestFrameCopied() override;
     void afterTick() override;

@@ -20,7 +20,8 @@ lucent::http::Response notFound() {
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
         "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
         "GET /recordings, GET /objects, GET /draws, POST /replay, POST /capture, POST /present, "
-        "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, POST /pacing, "
+        "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, "
+        "POST /neighbourcheck, POST /blends, POST /pacing, "
         "POST /objects, POST /draws, POST /recordings and POST /input.\n");
 }
 
@@ -111,8 +112,9 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_scheduler(sources.scheduler), m_interpolator(sources.interpolator),
       m_shapeLog(sources.shapeLog), m_viewTracker(sources.viewTracker),
       m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
-      m_objects(sources.objects), m_vertices(sources.vertices), m_snapshot(sources.snapshot),
-      m_pacing(sources.pacing), m_vertexChanges(sources.vertexChanges) {
+      m_neighbourCheck(sources.neighbourCheck), m_objects(sources.objects),
+      m_vertices(sources.vertices), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
+      m_vertexChanges(sources.vertexChanges) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -360,7 +362,10 @@ std::string ControlChannel::drawsJson() const {
 }
 
 std::string ControlChannel::verticesJson() const {
-    std::string body = ",\"vertexDraws\":{";
+    std::string body = std::string(",\"objectsPlanning\":") +
+                       (m_objects.isPlanning() ? "true" : "false") +
+                       ",\"verticesBlending\":" + (m_vertices.isBlending() ? "true" : "false");
+    body += ",\"vertexDraws\":{";
     for (size_t index = 0; index < interp::kVertexOutcomeCount; ++index) {
         auto outcome = static_cast<interp::VertexOutcome>(index);
         body += index == 0 ? "\"" : ",\"";
@@ -400,6 +405,9 @@ std::string ControlChannel::interpolationJson() const {
     body += ",\"shadowsCreated\":" + std::to_string(m_continuous.shadowsCreated());
     body += ",\"restoreChecksCompleted\":" + std::to_string(m_restoreCheck.completed());
     body += ",\"restoreChecksRefused\":" + std::to_string(m_restoreCheck.refused());
+    body += ",\"neighbourChecksCompleted\":" + std::to_string(m_neighbourCheck.completed());
+    body += ",\"neighbourChecksRefused\":" + std::to_string(m_neighbourCheck.refused());
+    body += ",\"neighbourChecksRestarted\":" + std::to_string(m_neighbourCheck.restarted());
     const interp::ContinuousInterpolator::NotCopied& notCopied = m_continuous.notCopied();
     body += ",\"notCopied\":{\"subresources\":" + std::to_string(notCopied.subresources) +
             ",\"texturesCreated\":" + std::to_string(notCopied.texturesCreated) +
@@ -648,6 +656,17 @@ bool ControlChannel::start(uint16_t port) {
                 m_continuous.setEnabled(on);
                 return lucent::http::Response::json(200, "OK", interpolationJson());
             }
+            // Which of the per-object blends the in-between frame draws, the
+            // camera's always: objects=0 draws every object as the title did
+            // (and so every vertex), vertices=0 only the vertices. A
+            // maintainer's discriminator, not a setting.
+            if (request.method == "POST" && request.path() == "/blends") {
+                std::string query(request.query());
+                m_objects.setPlanning(m_continuous.enabled() &&
+                                      requestedFlag(query, "objects", true));
+                m_vertices.setBlending(requestedFlag(query, "vertices", true));
+                return lucent::http::Response::json(200, "OK", interpolationJson());
+            }
             // Frame pacing measured from here on, so a walk is not averaged
             // with the boot and menus before it.
             if (request.method == "POST" && request.path() == "/pacing") {
@@ -664,6 +683,16 @@ bool ControlChannel::start(uint16_t port) {
                                                   : interp::RestoreCheck::Against::Restored)) {
                     return lucent::http::Response::text(
                         409, "Conflict", "a restore check is already waiting for its tick.\n");
+                }
+                return lucent::http::Response::json(200, "OK", interpolationJson());
+            }
+            // The title's frame of one interpolated tick, and the next
+            // tick's in-between frame and title's frame, into capture slots
+            // 2, 3 and 4.
+            if (request.method == "POST" && request.path() == "/neighbourcheck") {
+                if (!m_neighbourCheck.arm()) {
+                    return lucent::http::Response::text(
+                        409, "Conflict", "a neighbour check is already waiting for its ticks.\n");
                 }
                 return lucent::http::Response::json(200, "OK", interpolationJson());
             }

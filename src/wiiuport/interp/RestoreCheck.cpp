@@ -18,7 +18,7 @@ void RestoreCheck::capture(size_t slot) {
     }
 }
 
-void RestoreCheck::beforeInBetween() {
+void RestoreCheck::beforeInBetween(uint64_t /*tick*/) {
     m_running = m_requested.load();
     if (m_running == State::Idle) {
         return;

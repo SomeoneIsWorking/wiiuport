@@ -20,23 +20,23 @@ from pathlib import Path
 
 from wiiuport.census import read_census, request_census
 from wiiuport.draws import read_draws, read_vertex_census, request_vertex_census
-from wiiuport.drive import left_stick, press, release
+from wiiuport.drive import left_stick, release
+from wiiuport.gameplay import INTERVAL_SECONDS, PRESSES, press_into_world
 from wiiuport.headless import HeadlessSession
 from wiiuport.image import arm_capture, read_capture
 from wiiuport.interpolation import (
     Interpolation,
-    arm_recordings,
-    fetch_recordings,
     parse_recordings,
     read_interpolation,
     restart_pacing,
     set_continuous,
+    take_recordings,
 )
 from wiiuport.paired import PairedRates
 from wiiuport.paths import find_layout
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
-from wiiuport import restore_check
+from wiiuport import neighbour_check, restore_check
 from wiiuport.control import (
     DEFAULT_PORT,
     ControlUnavailable,
@@ -96,8 +96,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--save", type=Path, help="save folder; defaults to $WIIUPORT_SAVE")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--boot", type=int, default=90)
-    parser.add_argument("--presses", type=int, default=12)
-    parser.add_argument("--interval", type=int, default=8)
+    parser.add_argument("--presses", type=int, default=PRESSES)
+    parser.add_argument("--interval", type=int, default=INTERVAL_SECONDS)
     parser.add_argument("--walk", type=int, default=24, help="seconds to walk while measuring")
     parser.add_argument(
         "--paired",
@@ -144,18 +144,13 @@ def main(argv: list[str] | None = None) -> int:
                 return seen
 
             try:
-                for index in range(args.presses):
-                    if running.poll() is not None:
-                        break
-                    press("a" if index % 2 == 0 else "plus", port=args.port)
-                    time.sleep(args.interval)
-                    sample(f"press {index}")
-                release(port=args.port)
-                # The alternating drive can end on the Plus that opens the
-                # pause screen, and a paused world holds a still camera: B
-                # backs out of it, and in the field only swings the sword.
-                press("b", port=args.port)
-                time.sleep(3)
+                press_into_world(
+                    args.port,
+                    presses=args.presses,
+                    interval=args.interval,
+                    still_running=lambda: running.poll() is None,
+                    after_press=lambda index: sample(f"press {index}"),
+                )
 
                 restart_pacing(args.port)
                 before = sample("walk start")
@@ -173,13 +168,13 @@ def main(argv: list[str] | None = None) -> int:
                 # And whether the draws that read uniforms rewrite their
                 # vertex bytes, over as many frames.
                 request_vertex_census(CENSUS_FRAMES, port=args.port)
-                arm_recordings(args.snapshot, port=args.port)
-                body = wait_for(lambda: fetch_recordings(args.port), seconds=60)
+                body = take_recordings(args.snapshot, port=args.port)
                 census = wait_for(lambda: read_census(port=args.port), seconds=60)
                 vertex_census = wait_for(lambda: read_vertex_census(port=args.port), seconds=60)
                 # Still walking: the control only differs on a moving scene.
                 restored = restore_check.take(args.port, in_between=False)
                 control = restore_check.take(args.port, in_between=True)
+                between = neighbour_check.take(args.port)
                 release(port=args.port)
                 after = sample("walk end")
                 drawn_after = read_draws(port=args.port)
@@ -191,7 +186,11 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(3)
                 screen = read_capture(args.port, slot=0)
                 paired = walk_paired(args.port, args.paired)
-            except (ControlUnavailable, restore_check.RestoreCheckRefused) as unavailable:
+            except (
+                ControlUnavailable,
+                restore_check.RestoreCheckRefused,
+                neighbour_check.NeighbourCheckRefused,
+            ) as unavailable:
                 print(render_trace(trace))
                 print(f"refused: {unavailable}", file=sys.stderr)
                 return 1
@@ -221,11 +220,15 @@ def main(argv: list[str] | None = None) -> int:
     print(census.render())
     print(restored.render())
     print(control.render())
+    print(between.render())
     # Each check's pair comes from one tick, and the two checks from two.
     restored.guest.write_png(out / "restore-title.png")
     restored.other.write_png(out / "restore-restored.png")
     control.guest.write_png(out / "control-title.png")
     control.other.write_png(out / "control-in-between.png")
+    between.before.write_png(out / "neighbour-before.png")
+    between.between.write_png(out / "neighbour-in-between.png")
+    between.after.write_png(out / "neighbour-after.png")
     print(paired.render())
     snapshot = out / "recordings.bin"
     snapshot.write_bytes(body)
@@ -238,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"wrote {snapshot} and {out / 'screen.png'}")
     print(f"process exit {exit_code}")
 
-    problems = restore_check.judge(restored, control)
+    problems = restore_check.judge(restored, control) + neighbour_check.judge(between)
     for problem in problems:
         print(f"refused: {problem}", file=sys.stderr)
     if problems:

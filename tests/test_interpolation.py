@@ -67,6 +67,9 @@ def report(ticks: int, interpolated: int, no_view: int) -> Interpolation:
         notCopied={"subresources": 0, "texturesCreated": 0, "streamoutWrites": 0},
         restoreChecksCompleted=0,
         restoreChecksRefused=0,
+        neighbourChecksCompleted=0,
+        neighbourChecksRefused=0,
+        neighbourChecksRestarted=0,
         phaseNanoseconds={"blendedReplay": interpolated * 1000},
         cutsByTurn=0,
         cutsByStep=0,
@@ -121,3 +124,28 @@ def test_a_window_counts_only_what_happened_inside_it():
 def test_one_shot_tools_switch_continuous_off_and_the_rest_leave_it_on():
     assert runtime_env(1234) == {ENV_CONTROL_PORT: "1234", ENV_INTERPOLATION: "1"}
     assert runtime_env(1234, continuous=False)[ENV_INTERPOLATION] == "0"
+
+
+def test_a_snapshot_is_the_one_armed_not_the_one_before(monkeypatch: pytest.MonkeyPatch):
+    import types
+
+    from wiiuport import control, interpolation
+
+    # The runtime's completed count at each read: the armed snapshot
+    # completes on the fourth.
+    completed = iter([3, 3, 3, 4])
+    latest = {"count": 3}
+
+    def read(port: int) -> types.SimpleNamespace:
+        latest["count"] = next(completed)
+        return types.SimpleNamespace(recordingSnapshots=latest["count"])
+
+    def request(method: str, path: str, port: int, timeout: float) -> bytes:
+        return f"snapshot {latest['count']}".encode()
+
+    monkeypatch.setattr(interpolation, "read_interpolation", read)
+    monkeypatch.setattr(interpolation, "request_bytes", request)
+    monkeypatch.setattr(control.time, "sleep", lambda _seconds: None)
+    assert interpolation.take_recordings(4, port=1) == b"snapshot 4", (
+        "the snapshot completed before arming is never read, however long the new one takes"
+    )

@@ -14,6 +14,7 @@
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/interp/ContinuousInterpolator.h"
 #include "wiiuport/interp/FrameInterpolator.h"
+#include "wiiuport/interp/NeighbourCheck.h"
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/RestoreCheck.h"
 #include "wiiuport/interp/TransformSearch.h"
@@ -64,8 +65,9 @@ class ControlChannel {
         const interp::ViewTracker& viewTracker;
         interp::ContinuousInterpolator& continuous;
         interp::RestoreCheck& restoreCheck;
+        interp::NeighbourCheck& neighbourCheck;
         interp::ObjectBlend& objects;
-        const interp::VertexBlend& vertices;
+        interp::VertexBlend& vertices;
         frame::RecordingSnapshot& snapshot;
         frame::PresentPacing& pacing;
         frame::VertexChanges& vertexChanges;
@@ -167,8 +169,9 @@ class ControlChannel {
     const interp::ViewTracker& m_viewTracker;
     interp::ContinuousInterpolator& m_continuous;
     interp::RestoreCheck& m_restoreCheck;
+    interp::NeighbourCheck& m_neighbourCheck;
     interp::ObjectBlend& m_objects;
-    const interp::VertexBlend& m_vertices;
+    interp::VertexBlend& m_vertices;
     frame::RecordingSnapshot& m_snapshot;
     frame::PresentPacing& m_pacing;
     frame::VertexChanges& m_vertexChanges;

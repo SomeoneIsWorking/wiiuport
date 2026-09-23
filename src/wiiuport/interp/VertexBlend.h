@@ -114,6 +114,17 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     VertexBlend(const VertexBlend&) = delete;
     VertexBlend& operator=(const VertexBlend&) = delete;
 
+    // Off, replays draw the vertices as the title drew them, while the
+    // vertices are still kept, so turning it back on blends at once. Safe
+    // from any thread.
+    void setBlending(bool blending) {
+        m_blendingEnabled.store(blending);
+    }
+
+    bool isBlending() const {
+        return m_blendingEnabled.load();
+    }
+
     void onAssemblyRecorded(const frame::RecordedUniformAssembly& assembly) override;
     void onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) override;
     void onFrameRecorded(const frame::FrameRecording& recording) override;
@@ -273,6 +284,7 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::chrono::nanoseconds m_copying{0};
     std::chrono::nanoseconds m_waiting{0};
     std::atomic<int64_t> m_blendingNanoseconds{0};
+    std::atomic<bool> m_blendingEnabled{true};
 
     std::mutex m_mutex;
     std::condition_variable_any m_handedOver;

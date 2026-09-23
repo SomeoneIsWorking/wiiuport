@@ -11,7 +11,13 @@ import json
 import struct
 from dataclasses import dataclass
 
-from wiiuport.control import DEFAULT_PORT, ControlUnavailable, request_bytes, require_fields
+from wiiuport.control import (
+    DEFAULT_PORT,
+    ControlUnavailable,
+    request_bytes,
+    require_fields,
+    wait_for,
+)
 
 RECORDINGS_MAGIC = b"WIIUREC1"
 
@@ -37,6 +43,12 @@ class Interpolation:
     # drawn over it; refused ones left a slot holding some other frame.
     restoreChecksCompleted: int
     restoreChecksRefused: int
+    # Captures of the title's frames either side of an in-between frame and
+    # of that frame; restarted ones found a tick between them not
+    # interpolated and began again from the later tick.
+    neighbourChecksCompleted: int
+    neighbourChecksRefused: int
+    neighbourChecksRestarted: int
     phaseNanoseconds: dict[str, int]
     cutsByTurn: int
     cutsByStep: int
@@ -290,10 +302,19 @@ def parse_recordings(body: bytes) -> tuple[RecordedFrame, ...]:
     return tuple(frames)
 
 
-def arm_recordings(frames: int, port: int = DEFAULT_PORT, timeout: float = 5.0) -> None:
-    request_bytes("POST", f"/recordings?frames={frames}", port, timeout)
+def take_recordings(frames: int, port: int = DEFAULT_PORT, seconds: int = 60) -> bytes:
+    """A snapshot of the next `frames` frames, as framed.
 
+    The channel serves the last snapshot completed, so reading straight after
+    arming returns the one before whenever there was one: this waits until
+    the runtime counts another completed."""
+    before = read_interpolation(port).recordingSnapshots
+    request_bytes("POST", f"/recordings?frames={frames}", port, 5.0)
 
-def fetch_recordings(port: int = DEFAULT_PORT, timeout: float = 20.0) -> bytes:
-    """The last completed snapshot as framed, for keeping and parsing both."""
-    return request_bytes("GET", "/recordings", port, timeout)
+    def completed() -> bytes:
+        done = read_interpolation(port).recordingSnapshots
+        if done <= before:
+            raise ControlUnavailable(f"the snapshot armed after {before} has not completed")
+        return request_bytes("GET", "/recordings", port, 20.0)
+
+    return wait_for(completed, seconds)

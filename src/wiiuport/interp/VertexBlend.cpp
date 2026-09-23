@@ -343,7 +343,7 @@ std::span<const std::byte> VertexBlend::bufferBytes(const Frame& frame, const Dr
 
 bool VertexBlend::onRuntimeDraw(const LatteFrameHooks::DrawPrepared& draw,
                                 LatteFrameHooks::VertexReplacements& replacements) {
-    if (!m_objects.isArmed()) {
+    if (!m_objects.isArmed() || !m_blendingEnabled.load()) {
         m_replayArmed = false;
         return false;
     }

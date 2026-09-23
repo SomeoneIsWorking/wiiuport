@@ -35,12 +35,13 @@ struct CapturedImage {
 // indistinguishable from the one after it.
 class FrameCapture {
   public:
-    // Two images can be in flight at once -- a frame as the title presented
-    // it and the same frame as a replay redrew it -- and the renderer
+    // Several images can be in flight at once -- a frame as the title
+    // presented it and the same frame as a replay redrew it, or the title's
+    // frames either side of an in-between frame and that frame -- and the renderer
     // delivers each from its own detached thread, so their arrival order is
     // not guaranteed. The destination is therefore chosen when the capture is
     // armed rather than when it lands.
-    static constexpr size_t kSlotCount = 2;
+    static constexpr size_t kSlotCount = 5;
     // How a capture is armed, injected so a test drives this without a
     // renderer. Returns false when no capture could be armed.
     using Request = bool (*)(LatteFrameHooks::CaptureCallback callback);
