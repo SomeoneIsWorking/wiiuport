@@ -268,6 +268,32 @@ void aPointFarOutsideTheGroupComparesFewDraws() {
                   "comparing few: " + std::to_string(nearest.compared));
 }
 
+void aViewEveryDrawSharesDoesNotHideTheNearest() {
+    std::mt19937 random(kSeed + 5);
+    Frame frame = spreadGroup(random, kMostDraws, 0);
+    // The latter half of each draw's values is the view the shader is handed,
+    // the same for every draw of the frame.
+    for (uint32_t draw = 0; draw < kMostDraws; ++draw) {
+        for (uint32_t at = kValues / 2; at < kValues; ++at) {
+            frame.floats[(draw * kValues) + at] = frame.floats[at];
+        }
+    }
+    DrawTree tree;
+    uint32_t handle = tree.build(frame.groups[0], frame.values());
+    // Draw 7 a frame later: the camera has moved, so every draw is as far off
+    // along the view, and draw 7 alone is near along the rest.
+    std::vector<double> point(frame.values().of(7).begin(), frame.values().of(7).end());
+    for (uint32_t at = kValues / 2; at < kValues; ++at) {
+        point[at] += kWorld;
+    }
+    DrawTree::Query asked{point};
+    DrawTree::Nearest nearest = tree.nearest(handle, frame.values(), asked);
+    check::isTrue(agrees(frame, frame.groups[0], asked, nearest), "the nearest draw is found");
+    check::isTrue(nearest.entry == std::optional<uint32_t>{7}, "draw 7 is the nearest");
+    check::isTrue(nearest.compared * 10 < kMostDraws,
+                  "comparing few: " + std::to_string(nearest.compared));
+}
+
 void aPointShorterThanEveryDrawFindsNone() {
     std::mt19937 random(kSeed + 4);
     Frame frame = spreadGroup(random, kLeafDraws * 4, 0);
@@ -303,6 +329,7 @@ void runDrawTreeTests() {
     theTreeFindsWhatComparingEveryDrawFinds();
     aHundredCopiesOfOneDrawAreComparedOnce();
     aPointFarOutsideTheGroupComparesFewDraws();
+    aViewEveryDrawSharesDoesNotHideTheNearest();
     aPointShorterThanEveryDrawFindsNone();
     aRebuiltTreeForgetsTheFrameBefore();
 }

@@ -95,6 +95,13 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
         return std::chrono::nanoseconds{m_frameEndPlanningNanoseconds.load()};
     }
 
+    // How long the planning thread spent planning, frame ends apart: against
+    // the frames' ends, whether a long wait is planning's own work or the
+    // thread waiting for a core.
+    std::chrono::nanoseconds planningBusy() const {
+        return std::chrono::nanoseconds{m_planningBusyNanoseconds.load()};
+    }
+
     // A minute of the title's frames: a census long enough to be steady.
     static constexpr size_t kMaxCensusFrames = 1800;
 
@@ -139,6 +146,7 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
     uint64_t m_replaysDiverged{0};
     std::atomic<uint64_t> m_framesEnded{0};
     std::atomic<int64_t> m_frameEndPlanningNanoseconds{0};
+    std::atomic<int64_t> m_planningBusyNanoseconds{0};
 
     // Frames asked for and not yet taken up, then the tally taking them.
     std::atomic<uint32_t> m_censusRequested{0};

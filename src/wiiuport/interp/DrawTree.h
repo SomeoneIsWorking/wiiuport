@@ -37,6 +37,12 @@ struct DrawValues {
 // one inside it, which a bound on the split value alone does not make it.
 // Draws with the same values are one draw to the tree: a shader drawing a
 // hundred copies of one thing would otherwise compare all hundred.
+//
+// The bound also holds the positions nodes do not split on, over the whole
+// group's box: values every draw shares -- the view each of a shader's draws
+// is handed -- are as far from a point taken a frame later for every draw, and
+// a bound without them is below every draw's distance once the camera moves,
+// so nothing is passed over.
 class DrawTree {
   public:
     // How many of a group's widest-spread positions its nodes may split on.
@@ -98,11 +104,16 @@ class DrawTree {
         uint32_t orderEnd;
         // The positions nodes may split on, in m_order.
         uint32_t splitCount;
+        // Where the whole group's box over its other positions starts in
+        // m_bounds, in m_order's order after the split positions.
+        uint32_t rest;
     };
 
     uint32_t buildNode(uint32_t begin, uint32_t end, const Group& group, const DrawValues& values);
-    // The box of m_entries[begin, end), appended to m_bounds.
-    uint32_t buildBox(uint32_t begin, uint32_t end, const Group& group, const DrawValues& values);
+    // The box of m_entries[begin, end) over m_order[first, last), appended
+    // to m_bounds.
+    uint32_t buildBox(uint32_t begin, uint32_t end, uint32_t first, uint32_t last,
+                      const DrawValues& values);
 
     // One query's state, walked down a group's tree.
     class Search {
@@ -124,6 +135,8 @@ class DrawTree {
         // Whether a draw this far away could still be the one found.
         bool couldBeFound(double squared) const;
         void consider(uint32_t entry);
+        // How far the point is from the group's box at one position.
+        double offBox(uint32_t position, const Bounds& bounds) const;
 
         const DrawTree& m_tree;
         const Group& m_group;
@@ -131,6 +144,9 @@ class DrawTree {
         const Query& m_query;
         double m_bestSquared;
         Nearest m_found;
+        // The point's squared distance to the group's box at each position
+        // after the split ones, summed after them as distance() sums them.
+        std::vector<double> m_restSquared;
     };
 
     std::vector<uint32_t> m_entries;

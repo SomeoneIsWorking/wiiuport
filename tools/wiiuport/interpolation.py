@@ -49,6 +49,7 @@ class Interpolation:
     objectPartnerCandidates: int
     objectFramesEnded: int
     objectFrameEndPlanningNanoseconds: int
+    objectPlanningBusyNanoseconds: int
     objectSearchesDeferred: int
     objectValuesNotBlended: int
     objectValuesAlternating: int
@@ -103,6 +104,10 @@ class Interpolation:
         """How long, on average, a frame's end spent on planning: the wait, then the index."""
         return self.objectFrameEndPlanningNanoseconds / max(1, self.objectFramesEnded) / 1e6
 
+    def planning_busy_ms(self) -> float:
+        """How long, on average, the planning thread planned a frame's draws."""
+        return self.objectPlanningBusyNanoseconds / max(1, self.objectFramesEnded) / 1e6
+
     def render(self) -> str:
         skipped = ", ".join(f"{name} {count}" for name, count in self.skipped.items() if count)
         withheld = ", ".join(f"{name} {count}" for name, count in self.withheld.items() if count)
@@ -142,8 +147,9 @@ class Interpolation:
                     f"{self.objectReplaysDiverged} replays out of step with the recording, "
                     f"{self.objectValuesNotBlended} values kept as not numbers, "
                     f"{self.objectValuesAlternating} as flipping between frames; "
-                    f"a frame's end spent {self.frame_end_planning_ms():.2f} ms on planning over "
-                    f"{self.objectFramesEnded} frames"
+                    f"a frame's end spent {self.frame_end_planning_ms():.2f} ms on planning, "
+                    f"and the planning thread {self.planning_busy_ms():.2f} ms a frame before it, "
+                    f"over {self.objectFramesEnded} frames"
                 ),
                 (
                     f"  view: {self.viewFramesTracked} frames tracked, "

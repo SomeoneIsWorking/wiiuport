@@ -73,7 +73,7 @@ uint32_t DrawTree::build(std::span<const uint32_t> group, const DrawValues& valu
     std::stable_sort(m_spreads.begin(), m_spreads.end(), [](const auto& l, const auto& r) {
         return l.first > r.first;
     });
-    Group built{0, static_cast<uint32_t>(m_order.size()), 0, 0};
+    Group built{0, static_cast<uint32_t>(m_order.size()), 0, 0, 0};
     for (const auto& [spread, position] : m_spreads) {
         m_order.push_back(position);
         if (spread > 0.0f && built.splitCount < kSplitPositions) {
@@ -81,6 +81,7 @@ uint32_t DrawTree::build(std::span<const uint32_t> group, const DrawValues& valu
         }
     }
     built.orderEnd = static_cast<uint32_t>(m_order.size());
+    built.rest = buildBox(begin, end, built.orderBegin + built.splitCount, built.orderEnd, values);
     built.root = buildNode(begin, end, built, values);
     m_groups.push_back(built);
     return static_cast<uint32_t>(m_groups.size() - 1);
@@ -89,7 +90,9 @@ uint32_t DrawTree::build(std::span<const uint32_t> group, const DrawValues& valu
 uint32_t DrawTree::buildNode(uint32_t begin, uint32_t end, const Group& group,
                              const DrawValues& values) {
     auto index = static_cast<uint32_t>(m_nodes.size());
-    m_nodes.push_back(Node{begin, end, end, 0, 0, 0, buildBox(begin, end, group, values)});
+    m_nodes.push_back(
+        Node{begin, end, end, 0, 0, 0,
+             buildBox(begin, end, group.orderBegin, group.orderBegin + group.splitCount, values)});
     if (end - begin <= kLeafDraws) {
         return index;
     }
@@ -131,15 +134,15 @@ uint32_t DrawTree::buildNode(uint32_t begin, uint32_t end, const Group& group,
     return index;
 }
 
-uint32_t DrawTree::buildBox(uint32_t begin, uint32_t end, const Group& group,
+uint32_t DrawTree::buildBox(uint32_t begin, uint32_t end, uint32_t first, uint32_t last,
                             const DrawValues& values) {
     auto box = static_cast<uint32_t>(m_bounds.size());
-    for (uint32_t split = 0; split < group.splitCount; ++split) {
-        uint32_t position = m_order[group.orderBegin + split];
+    for (uint32_t at = first; at < last; ++at) {
+        uint32_t position = m_order[at];
         Bounds bounds{std::numeric_limits<float>::infinity(),
                       -std::numeric_limits<float>::infinity()};
-        for (uint32_t at = begin; at < end; ++at) {
-            float value = values.of(m_entries[at])[position];
+        for (uint32_t entry = begin; entry < end; ++entry) {
+            float value = values.of(m_entries[entry])[position];
             // A draw with no number here is no distance away along it.
             if (!isNumber(value)) {
                 bounds = {-std::numeric_limits<float>::infinity(),
@@ -171,6 +174,11 @@ DrawTree::Search::Search(const DrawTree& tree, const Group& group, const DrawVal
                          const Query& query)
     : m_tree(tree), m_group(group), m_values(values), m_query(query),
       m_bestSquared(query.limitSquared) {
+    for (uint32_t at = group.orderBegin + group.splitCount; at < group.orderEnd; ++at) {
+        m_restSquared.push_back(
+            offBox(tree.m_order[at],
+                   tree.m_bounds[group.rest + (at - group.orderBegin - group.splitCount)]));
+    }
     if (query.start.has_value()) {
         ++m_found.compared;
         if (std::optional<double> squared = distance(*query.start)) {
@@ -209,20 +217,32 @@ std::optional<double> DrawTree::Search::distance(uint32_t entry) const {
     return squared;
 }
 
+double DrawTree::Search::offBox(uint32_t position, const Bounds& bounds) const {
+    // NaN compares false either way: a position the point has no value at is
+    // no distance off.
+    double value = m_query.point[position];
+    if (value < bounds.low) {
+        double off = value - bounds.low;
+        return off * off;
+    }
+    if (value > bounds.high) {
+        double off = value - bounds.high;
+        return off * off;
+    }
+    return 0.0;
+}
+
 double DrawTree::Search::boxDistance(const Node& node) const {
-    // The positions in the order distance() sums them, so a box's sum is never
-    // more than a draw's inside it, rounding included.
+    // The positions in the order distance() sums them, each no further than
+    // the draw's own, so a box's sum is never more than a draw's inside it,
+    // rounding included.
     double squared = 0.0;
     for (uint32_t split = 0; split < m_group.splitCount; ++split) {
-        double value = m_query.point[m_tree.m_order[m_group.orderBegin + split]];
-        const Bounds& bounds = m_tree.m_bounds[node.box + split];
-        if (value < bounds.low) {
-            double off = value - bounds.low;
-            squared += off * off;
-        } else if (value > bounds.high) {
-            double off = value - bounds.high;
-            squared += off * off;
-        }
+        squared +=
+            offBox(m_tree.m_order[m_group.orderBegin + split], m_tree.m_bounds[node.box + split]);
+    }
+    for (double rest : m_restSquared) {
+        squared += rest;
     }
     return squared;
 }

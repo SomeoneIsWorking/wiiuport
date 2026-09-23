@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,10 +17,35 @@ from .cxxtests import build_target
 from .paths import Layout
 
 TARGET = "wiiuport_plan_replay"
+# Shaders named per ranking: the few that decide what a total means.
+RANKED_SHADERS = 5
 
 
 class PlanReplayFailed(RuntimeError):
     """The snapshot was not planned, so nothing was measured."""
+
+
+@dataclass(frozen=True)
+class ShaderReport:
+    """One shader's objects over the planned frames, and what finding them cost."""
+
+    baseHash: str
+    auxHash: str
+    stageIndex: int
+    outcomes: dict[str, int]
+    compared: int
+
+    @property
+    def name(self) -> str:
+        # As the runtime's own reports name a shader.
+        return self.baseHash[:8]
+
+    def render(self) -> str:
+        objects = sum(self.outcomes.values())
+        return (
+            f"{self.name}: {objects} objects, {self.outcomes['unverified']} unverified, "
+            f"{self.outcomes['unmatched']} unmatched, {self.compared} draws compared"
+        )
 
 
 @dataclass(frozen=True)
@@ -33,11 +59,14 @@ class PlanReplayReport:
     reidentifyAttempts: int
     partnerCandidates: int
     nearestCandidates: int
+    shaders: tuple[ShaderReport, ...]
     planningNanoseconds: int
 
     @classmethod
     def parse(cls, line: str) -> PlanReplayReport:
-        report = cls(**json.loads(line))
+        fields = json.loads(line)
+        fields["shaders"] = tuple(ShaderReport(**shader) for shader in fields["shaders"])
+        report = cls(**fields)
         # Planning needs two whole frames before the one planned: a snapshot
         # too short for that measured nothing, however fast it was.
         if report.framesPlanned == 0:
@@ -67,8 +96,16 @@ class PlanReplayReport:
                 ),
                 searches,
                 f"planning took {per_frame_ms:.3f} ms a frame, the fastest of the repeats",
+                f"most compared of {len(self.shaders)} shaders:",
+                *self._ranked(lambda shader: shader.compared),
+                "most unverified:",
+                *self._ranked(lambda shader: shader.outcomes["unverified"]),
             ]
         )
+
+    def _ranked(self, by: Callable[[ShaderReport], int]) -> list[str]:
+        ranked = sorted(self.shaders, key=by, reverse=True)[:RANKED_SHADERS]
+        return [f"  {shader.render()}" for shader in ranked if by(shader) > 0] or ["  (none)"]
 
 
 def plan_again(layout: Layout, recordings: Path, repeats: int) -> PlanReplayReport:
