@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <span>
+#include <vector>
 
 namespace wiiuport::interp {
 
@@ -27,6 +28,9 @@ class PlanReplay {
         ObjectPlanner::Outcomes outcomes{};
         // Draws compared while planning this shader's objects, both searches.
         uint64_t compared{0};
+        // Objects drawn at N with nothing shared or carried
+        // (ObjectPlanner::leftAtN).
+        uint64_t leftAtN{0};
     };
 
     struct Report {
@@ -42,6 +46,9 @@ class PlanReplay {
         uint64_t partnerCandidates{0};
         uint64_t nearestCandidates{0};
         std::map<ShaderKey, ShaderReport> shaders;
+        // Each planned frame's objects left at N, in order: a camera that
+        // turns steadily leaves few, and a frame that leaves many is a jump.
+        std::vector<uint64_t> leftAtNByFrame;
         // The fastest of the repeats: every draw added and every frame ended.
         std::chrono::nanoseconds planning{0};
     };

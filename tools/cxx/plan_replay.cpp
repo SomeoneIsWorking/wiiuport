@@ -52,7 +52,8 @@ std::string shadersJson(const std::map<ShaderKey, PlanReplay::ShaderReport>& sha
         body += ",\"auxHash\":\"" + hex(key.auxHash) + "\"";
         body += ",\"stageIndex\":" + std::to_string(key.stageIndex);
         body += ",\"outcomes\":" + outcomesJson(shader.outcomes);
-        body += ",\"compared\":" + std::to_string(shader.compared) + "}";
+        body += ",\"compared\":" + std::to_string(shader.compared);
+        body += ",\"leftAtN\":" + std::to_string(shader.leftAtN) + "}";
     }
     return body + "]";
 }
@@ -68,6 +69,11 @@ std::string reportJson(const PlanReplay::Report& report) {
     body += ",\"partnerCandidates\":" + std::to_string(report.partnerCandidates);
     body += ",\"nearestCandidates\":" + std::to_string(report.nearestCandidates);
     body += ",\"shaders\":" + shadersJson(report.shaders);
+    body += ",\"leftAtNByFrame\":[";
+    for (size_t frame = 0; frame < report.leftAtNByFrame.size(); ++frame) {
+        body += (frame == 0 ? "" : ",") + std::to_string(report.leftAtNByFrame[frame]);
+    }
+    body += "]";
     body += ",\"planningNanoseconds\":" + std::to_string(report.planning.count()) + "}";
     return body;
 }

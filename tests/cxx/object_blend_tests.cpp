@@ -304,6 +304,8 @@ void aKeptSnapshotIsPlannedAgainAsTheProductPlansIt() {
     check::equal(report.outcomes[static_cast<size_t>(Outcome::Held)], uint64_t{1},
                  "and the stander held");
     check::equal(report.partnersSearched, uint64_t{1}, "counted once, not once a repeat");
+    check::isTrue(report.leftAtNByFrame == std::vector<uint64_t>{0},
+                  "and none left at N in the one frame planned");
 }
 
 void aFailedSearchWaitsBeforeItIsRunAgain() {
@@ -712,6 +714,41 @@ void anUnverifiedObjectsOwnViewIsTurnedWithTheCamera() {
                   "yet drawn as it would have been blended, turned with the camera");
     check::equal(blend.planner().unblendedCarried(), uint64_t{1}, "counted");
     check::equal(blend.planner().transformsCarried(), uint64_t{1}, "with its one matrix");
+    check::equal(blend.planner().leftAtN(), uint64_t{0}, "so none is left at N");
+}
+
+void anObjectNewAtNIsSeenThroughTheViewEveryDrawShares() {
+    // Two objects stand still in a turning view; a third is drawn for the
+    // first time at N, as a palm is when it comes into view or its near model
+    // takes over. With no N-2 it cannot be matched, and drawn at N it would
+    // stand where N's camera put it: it takes the view the others drew.
+    std::vector<Draw> twoBack{{kBlockA, {0.0f, 5.0f}}, {kOtherA, {0.0f, 6.0f}}};
+    std::vector<Draw> oneBack{{kBlockB, {1.0f, 5.0f}}, {kOtherB, {1.0f, 6.0f}}};
+    std::vector<Draw> latest{
+        {kBlockA, {2.0f, 5.0f}}, {kOtherA, {2.0f, 6.0f}}, {kTileA, {2.0f, 9.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, twoBack, oneBack, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Unmatched), uint64_t{1}, "the new object is unmatched");
+    check::equal(uploaded[2][0], 1.5f, "yet drawn with the view the others drew");
+    check::equal(uploaded[2][1], 9.0f, "and its own value as the title drew it");
+    check::equal(blend.planner().leftAtN(), uint64_t{0}, "so none is left at N");
+}
+
+void aValueADrawHoldsUnmovedIsNotTakenByANewObject() {
+    // One object moved to 7 at N; another held 7 all along. A new object's 7
+    // is either's, and the one held unmoved says it need not move.
+    std::vector<Draw> twoBack{{kBlockA, {5.0f, 1.0f}}, {kOtherA, {7.0f, 2.0f}}};
+    std::vector<Draw> oneBack{{kBlockB, {6.0f, 1.0f}}, {kOtherB, {7.0f, 2.0f}}};
+    std::vector<Draw> latest{
+        {kBlockA, {7.0f, 1.0f}}, {kOtherA, {7.0f, 2.0f}}, {kTileA, {7.0f, 9.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, twoBack, oneBack, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Unmatched), uint64_t{1}, "the new object is unmatched");
+    check::equal(uploaded[0][0], 6.5f, "the mover is drawn half way");
+    check::equal(uploaded[2][0], 7.0f, "the new object as the title drew it");
+    check::equal(blend.planner().leftAtN(), uint64_t{1}, "left at N");
 }
 
 void aValueBlendedDrawsDisagreeOnIsNotShared() {
@@ -731,6 +768,7 @@ void aValueBlendedDrawsDisagreeOnIsNotShared() {
     check::equal(blend.objects(Outcome::Unverified), uint64_t{1}, "the tile is unverified");
     check::isTrue(uploaded[2] == latest[2].values, "and drawn as the title drew it");
     check::equal(blend.planner().unverifiedSharingValues(), uint64_t{0}, "sharing nothing");
+    check::equal(blend.planner().leftAtN(), uint64_t{1}, "counted as left at N");
 }
 
 void theLightsMapAndItsLookUpAreDrawnAtN() {
@@ -751,6 +789,89 @@ void theLightsMapAndItsLookUpAreDrawnAtN() {
     check::equal(uploaded[0][0], 1.5f, "the walker is drawn half way");
     check::isTrue(uploaded[1] == latest[1].values, "the caster as the title drew it");
     check::isTrue(uploaded[2] == latest[2].values, "and the look-up as the title drew it");
+}
+
+void anObjectFarFromTheOriginIsKnownThroughItsRounding() {
+    // A boat rocking far from the origin: its turn passes half way, but its
+    // place moves one unit in the float's last place, which the title rounds
+    // at N-1 onto where it stood. Rounding is not a step off its path.
+    float far = 196608.0f;
+    float farther = std::nextafter(far, 1.0e6f);
+    std::vector<Draw> latest{{kBlockA, {0.698f, farther}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {0.692f, far}}}, {{kBlockB, {0.695f, far}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "the boat is blended");
+    check::equal(uploaded[0][0], 0.5f * (0.695f + 0.698f), "and turned half way");
+}
+
+void anObjectKnownByItsBlocksThatStoppedAtNMinusOneIsHeld() {
+    // Walked long enough for its blocks to be paired, then stopped a frame
+    // before N: its own draw at N-1 holds N, which is where it stands
+    // between.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kBlockA, {0.0f, 7.0f}}});
+    record(blend, {{kBlockB, {1.0f, 7.0f}}});
+    record(blend, {{kBlockA, {2.0f, 7.0f}}});
+    record(blend, {{kBlockB, {3.0f, 7.0f}}});
+    std::vector<Draw> stopped{{kBlockA, {3.0f, 7.0f}}};
+    record(blend, stopped);
+    blend.armOnce();
+    auto uploaded = replay(blend, stopped);
+    check::equal(blend.objects(Outcome::Held), uint64_t{1}, "it is known by its blocks");
+    check::equal(uploaded[0][0], 3.0f, "and drawn where it stopped");
+}
+
+void anObjectKnownByItsBlocksThatStartedAtNMinusOneIsBlended() {
+    // Walked, stood, and set off again after N-1 -- a camera starting to
+    // turn: half way from where it stood at N-1 to N.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kBlockA, {0.0f, 7.0f}}});
+    record(blend, {{kBlockB, {1.0f, 7.0f}}});
+    record(blend, {{kBlockA, {2.0f, 7.0f}}});
+    record(blend, {{kBlockB, {2.0f, 7.0f}}});
+    std::vector<Draw> started{{kBlockA, {3.0f, 7.0f}}};
+    record(blend, started);
+    blend.armOnce();
+    auto uploaded = replay(blend, started);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "it is known by its blocks");
+    check::equal(uploaded[0][0], 2.5f, "and drawn half way from where it stood");
+}
+
+void anObjectKnownByItsBlocksThatTurnedBackIsBlended() {
+    // Swaying in the wind: past its mark at N-1 and back by N. Its own draw
+    // is where it passed, however far from the midpoint.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kBlockA, {0.0f, 7.0f}}});
+    record(blend, {{kBlockB, {1.0f, 7.0f}}});
+    record(blend, {{kBlockA, {2.0f, 7.0f}}});
+    record(blend, {{kBlockB, {4.0f, 7.0f}}});
+    std::vector<Draw> back{{kBlockA, {3.0f, 7.0f}}};
+    record(blend, back);
+    blend.armOnce();
+    auto uploaded = replay(blend, back);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "it is known by its blocks");
+    check::equal(uploaded[0][0], 3.5f, "and drawn half way back");
+}
+
+void blocksReusedByAnotherObjectDoNotNameThePartner() {
+    // At N-1 the two walkers' blocks were handed over to each other: the
+    // draw each one's blocks name is the other walker's.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kBlockA, {0.0f, 7.0f}}, {kOtherA, {100.0f, 7.0f}}});
+    record(blend, {{kBlockB, {1.0f, 7.0f}}, {kOtherB, {101.0f, 7.0f}}});
+    record(blend, {{kBlockA, {2.0f, 7.0f}}, {kOtherA, {102.0f, 7.0f}}});
+    record(blend, {{kBlockB, {103.0f, 7.0f}}, {kOtherB, {3.0f, 7.0f}}});
+    std::vector<Draw> latest{{kBlockA, {4.0f, 7.0f}}, {kOtherA, {104.0f, 7.0f}}};
+    record(blend, latest);
+    blend.armOnce();
+    auto uploaded = replay(blend, latest);
+    check::equal(uploaded[0][0], 3.5f, "each is drawn half way from its own draw");
+    check::equal(uploaded[1][0], 103.5f, "not from the one its blocks named");
 }
 
 void aMoveTooSmallToHalveIsNotDrawnBetween() {
@@ -932,6 +1053,11 @@ void runObjectBlendTests() {
     aBlockAllocatedAfreshEveryFrameDoesNotHideItsObject();
     aValueFlippingEveryFrameIsNotAveraged();
     aMoveTooSmallToHalveIsNotDrawnBetween();
+    anObjectFarFromTheOriginIsKnownThroughItsRounding();
+    anObjectKnownByItsBlocksThatStoppedAtNMinusOneIsHeld();
+    anObjectKnownByItsBlocksThatStartedAtNMinusOneIsBlended();
+    anObjectKnownByItsBlocksThatTurnedBackIsBlended();
+    blocksReusedByAnotherObjectDoNotNameThePartner();
     aFlippingValueFarLargerThanTheMoveDoesNotHideThePartner();
     aValueEveryDrawHoldsDoesNotDecideThePartner();
     drawsTheFrameAloneMovesAreBlendedWithAnyCandidate();
@@ -944,6 +1070,8 @@ void runObjectBlendTests() {
     aMatrixTheBlendedDrawsChangedEachTheirOwnWayIsNoCamera();
     aWindowSharedValuesAlreadyDrewIsLeftToThem();
     anUnverifiedObjectsOwnViewIsTurnedWithTheCamera();
+    anObjectNewAtNIsSeenThroughTheViewEveryDrawShares();
+    aValueADrawHoldsUnmovedIsNotTakenByANewObject();
     aPartnerWhoseMovingValuesAreNotNumbersIsNoPartner();
     anObjectThatStoppedAtNMinusOneIsDrawnWhereItStopped();
     aHeldStillWorldReplaysByteIdenticalToTheTitlesFrame();

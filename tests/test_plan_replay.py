@@ -4,13 +4,14 @@ import pytest
 from wiiuport.planreplay import PlanReplayFailed, PlanReplayReport
 
 
-def _shader(base: str, unverified: int, compared: int) -> dict[str, object]:
+def _shader(base: str, unverified: int, compared: int, left: int = 0) -> dict[str, object]:
     return {
         "baseHash": base,
         "auxHash": "0000000000000000",
         "stageIndex": 0,
         "outcomes": {"blended": 1, "unmatched": 0, "unverified": unverified},
         "compared": compared,
+        "leftAtN": left,
     }
 
 
@@ -26,9 +27,10 @@ def _line(**overrides: object) -> str:
         "partnerCandidates": 250,
         "nearestCandidates": 40,
         "shaders": [
-            _shader("1557c18f92f3bcb9", unverified=9, compared=5),
+            _shader("1557c18f92f3bcb9", unverified=9, compared=5, left=4),
             _shader("b7252004aba21c10", unverified=0, compared=200),
         ],
+        "leftAtNByFrame": [0, 1, 37],
         "planningNanoseconds": 8_000_000,
     }
     fields.update(overrides)
@@ -60,9 +62,17 @@ def test_a_replay_names_the_shaders_that_cost_and_the_ones_unverified() -> None:
     assert rendered[costly + 1].startswith("  b7252004: 1 objects")
     assert rendered[costly + 2].startswith("  1557c18f: 10 objects, 9 unverified")
     # A shader with none unverified is not ranked among them.
-    assert rendered[unverified + 1 :] == [
-        "  1557c18f: 10 objects, 9 unverified, 0 unmatched, 5 draws compared"
-    ]
+    assert rendered[unverified + 1] == (
+        "  1557c18f: 10 objects, 9 unverified, 0 unmatched, 4 left at N, 5 draws compared"
+    )
+    assert rendered[unverified + 2] == "left at N by frame: 0 1 37"
+
+
+def test_a_replay_names_the_shaders_whose_objects_were_left_at_n() -> None:
+    rendered = PlanReplayReport.parse(_line()).render().splitlines()
+    left = rendered.index("most left at N:")
+    # Only the shader with objects left is ranked.
+    assert [line[:10] for line in rendered[left + 1 :]] == ["  1557c18f"]
 
 
 def test_a_ranking_nothing_reaches_says_so() -> None:
