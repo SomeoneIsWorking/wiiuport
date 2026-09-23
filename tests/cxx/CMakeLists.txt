@@ -14,6 +14,7 @@ add_executable(wiiuport_tests
   object_blend_tests.cpp
   draw_tree_tests.cpp
   vertex_blend_tests.cpp
+  slot_pool_tests.cpp
   # The shipping implementation, compiled into the tests rather than
   # reimplemented beside them. It is free of the emulated system on purpose,
   # so what the player's remembered title does can be checked without one.

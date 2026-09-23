@@ -84,6 +84,8 @@ add_library(wiiuport STATIC
   interp/SharedTransforms.cpp
   interp/SharedValues.cpp
   interp/SharedValues.h
+  interp/SlotPool.cpp
+  interp/SlotPool.h
   interp/RestoreCheck.h
   interp/Midpoint.h
   interp/ObjectPlanner.cpp

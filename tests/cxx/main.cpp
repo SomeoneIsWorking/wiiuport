@@ -17,6 +17,7 @@ int main() {
     wiiuport::tests::runContinuousTests();
     wiiuport::tests::runObjectBlendTests();
     wiiuport::tests::runVertexBlendTests();
+    wiiuport::tests::runSlotPoolTests();
     wiiuport::tests::runDrawTreeTests();
     std::printf("%d checks, %d failures\n", check::g_checks, check::g_failures);
     if (check::g_checks == 0) {
