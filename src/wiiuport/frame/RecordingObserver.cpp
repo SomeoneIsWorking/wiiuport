@@ -132,6 +132,12 @@ void RecordingObserver::OnDisplayed(bool fromRuntime) {
     }
 }
 
+void RecordingObserver::OnShown(const LatteFrameHooks::ShownFrame& shown) {
+    for (auto* listener : m_scanOutListeners) {
+        listener->onScannedOut(shown);
+    }
+}
+
 void RecordingObserver::OnFrameEnd() {
     for (auto* listener : m_shownListeners) {
         listener->onFrameShown(m_completed);

@@ -71,6 +71,8 @@ class ControlChannel {
         interp::VertexBlend& vertices;
         frame::RecordingSnapshot& snapshot;
         frame::PresentPacing& pacing;
+        // Frame times as the presentation engine reports them shown.
+        frame::PresentPacing& scanOut;
         frame::VertexChanges& vertexChanges;
     };
 
@@ -184,6 +186,7 @@ class ControlChannel {
     interp::VertexBlend& m_vertices;
     frame::RecordingSnapshot& m_snapshot;
     frame::PresentPacing& m_pacing;
+    frame::PresentPacing& m_scanOut;
     frame::VertexChanges& m_vertexChanges;
     std::unique_ptr<lucent::http::Server> m_server;
 };

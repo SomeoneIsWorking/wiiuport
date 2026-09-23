@@ -107,6 +107,37 @@ std::string transformJson(const interp::TransformCandidate& candidate) {
     return body;
 }
 
+std::string_view shownStageName(LatteFrameHooks::ShownStage stage) {
+    switch (stage) {
+    case LatteFrameHooks::ShownStage::QueueDone:
+        return "queueDone";
+    case LatteFrameHooks::ShownStage::Dequeued:
+        return "dequeued";
+    case LatteFrameHooks::ShownStage::FirstPixelOut:
+        return "firstPixelOut";
+    case LatteFrameHooks::ShownStage::FirstPixelVisible:
+        return "firstPixelVisible";
+    }
+    return "unknown";
+}
+
+std::string pacingJson(const frame::PresentPacing::Summary& pacing) {
+    std::string body = "{\"guestFrames\":" + std::to_string(pacing.guestFrames);
+    body += ",\"runtimeFrames\":" + std::to_string(pacing.runtimeFrames);
+    body += ",\"intervals\":" + std::to_string(pacing.intervals);
+    body += ",\"intervalsKept\":" + std::to_string(pacing.intervalsKept);
+    body += ",\"p50Us\":" + std::to_string(pacing.p50.count());
+    body += ",\"p95Us\":" + std::to_string(pacing.p95.count());
+    body += ",\"p99Us\":" + std::to_string(pacing.p99.count());
+    body += ",\"longestUs\":" + std::to_string(pacing.longest.count());
+    body += ",\"guestToRuntimeMedianUs\":" + std::to_string(pacing.guestToRuntimeMedian.count());
+    body += ",\"runtimeToGuestMedianUs\":" + std::to_string(pacing.runtimeToGuestMedian.count());
+    body += ",\"stage\":";
+    body += pacing.stage.has_value() ? "\"" + std::string(shownStageName(*pacing.stage)) + "\""
+                                     : std::string("null");
+    return body + "}";
+}
+
 } // namespace
 
 ControlChannel::ControlChannel(const Sources& sources)
@@ -117,7 +148,7 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
       m_neighbourCheck(sources.neighbourCheck), m_objects(sources.objects),
       m_vertices(sources.vertices), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
-      m_vertexChanges(sources.vertexChanges) {
+      m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -471,18 +502,8 @@ std::string ControlChannel::interpolationJson() const {
     body += ",\"objectFrameEndPlanningNanoseconds\":" +
             std::to_string(objects.frameEndPlanning().count());
     body += verticesJson();
-    frame::PresentPacing::Summary pacing = m_pacing.summary();
-    body += ",\"pacing\":{\"guestFrames\":" + std::to_string(pacing.guestFrames);
-    body += ",\"runtimeFrames\":" + std::to_string(pacing.runtimeFrames);
-    body += ",\"intervals\":" + std::to_string(pacing.intervals);
-    body += ",\"intervalsKept\":" + std::to_string(pacing.intervalsKept);
-    body += ",\"p50Us\":" + std::to_string(pacing.p50.count());
-    body += ",\"p95Us\":" + std::to_string(pacing.p95.count());
-    body += ",\"p99Us\":" + std::to_string(pacing.p99.count());
-    body += ",\"longestUs\":" + std::to_string(pacing.longest.count());
-    body += ",\"guestToRuntimeMedianUs\":" + std::to_string(pacing.guestToRuntimeMedian.count());
-    body += ",\"runtimeToGuestMedianUs\":" + std::to_string(pacing.runtimeToGuestMedian.count());
-    body += "}";
+    body += ",\"pacing\":" + pacingJson(m_pacing.summary());
+    body += ",\"scanOut\":" + pacingJson(m_scanOut.summary());
     body += ",\"viewFramesTracked\":" + std::to_string(m_viewTracker.framesTracked());
     body += ",\"viewFramesLost\":" + std::to_string(m_viewTracker.framesLost());
     body += ",\"viewReseedsRun\":" + std::to_string(m_viewTracker.reseedsRun());
@@ -749,6 +770,7 @@ bool ControlChannel::start(uint16_t port) {
             // with the boot and menus before it.
             if (request.method == "POST" && request.path() == "/pacing") {
                 m_pacing.restart();
+                m_scanOut.restart();
                 return lucent::http::Response::json(200, "OK", interpolationJson());
             }
             // The guest's frame captured before and after the next in-between

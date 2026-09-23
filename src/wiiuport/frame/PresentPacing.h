@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 namespace wiiuport::frame {
@@ -21,8 +22,13 @@ namespace wiiuport::frame {
 // halves here can still reach the screen evenly while the queue never runs
 // dry. The renderer has no view of scan-out times to measure that directly.
 //
+// The same measure is taken of scan-out where the surface reports it: an
+// instance fed onScannedOut, by the presentation engine's times of each frame
+// reaching the screen, which is what a player sees. One instance measures one
+// of the two.
+//
 // Fed on the rendering thread, read and restarted from the control channel.
-class PresentPacing final : public DisplayedListener {
+class PresentPacing final : public DisplayedListener, public ScanOutListener {
   public:
     using Clock = std::chrono::steady_clock;
     using Now = Clock::time_point (*)();
@@ -34,6 +40,8 @@ class PresentPacing final : public DisplayedListener {
     explicit PresentPacing(Now now);
 
     void onDisplayed(bool fromRuntime) override;
+    // Two frames' times are an interval only on the same clock.
+    void onScannedOut(const LatteFrameHooks::ShownFrame& shown) override;
 
     // Forgets every interval, so a measurement covers only what follows.
     void restart();
@@ -53,6 +61,9 @@ class PresentPacing final : public DisplayedListener {
         // pacing puts both at half a tick.
         std::chrono::microseconds guestToRuntimeMedian{0};
         std::chrono::microseconds runtimeToGuestMedian{0};
+        // For scan-out, how far along its way the time was taken; none
+        // before the first frame is reported.
+        std::optional<LatteFrameHooks::ShownStage> stage;
     };
 
     Summary summary() const;
@@ -64,10 +75,15 @@ class PresentPacing final : public DisplayedListener {
         bool toRuntime;
     };
 
+    // `at` since any epoch of `clock`'s, one clock per source.
+    void record(bool fromRuntime, std::chrono::nanoseconds at, uint64_t clock);
+
     Now m_now;
     mutable std::mutex m_mutex;
     bool m_seenOne{false};
-    Clock::time_point m_last;
+    std::chrono::nanoseconds m_last{0};
+    uint64_t m_lastClock{0};
+    std::optional<LatteFrameHooks::ShownStage> m_stage;
     bool m_lastFromRuntime{false};
     uint64_t m_guestFrames{0};
     uint64_t m_runtimeFrames{0};

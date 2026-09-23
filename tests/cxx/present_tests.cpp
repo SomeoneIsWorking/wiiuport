@@ -403,11 +403,46 @@ void nothingDisplayedReportsNoIntervals() {
     check::equal(seen.intervalsKept, uint64_t{0}, "and none is kept");
 }
 
+// A frame the presentation engine reports shown, `at` ms on `clock`.
+LatteFrameHooks::ShownFrame shownAt(bool fromRuntime, int64_t at, uint64_t clock) {
+    return {fromRuntime, LatteFrameHooks::ShownStage::FirstPixelOut,
+            static_cast<uint64_t>(std::chrono::nanoseconds(milliseconds(at)).count()), clock};
+}
+
+void scanOutTimesFramesByTheEnginesClock() {
+    PresentPacing pacing(&displayedAt);
+    check::isTrue(!pacing.summary().stage.has_value(), "no stage before a frame is shown");
+    pacing.onScannedOut(shownAt(false, 1000, 7));
+    pacing.onScannedOut(shownAt(true, 1017, 7));
+    pacing.onScannedOut(shownAt(false, 1050, 7));
+    PresentPacing::Summary seen = pacing.summary();
+    check::equal(seen.intervals, uint64_t{2}, "each shown frame after the first is an interval");
+    check::equal(seen.guestToRuntimeMedian.count(), microseconds(milliseconds(17)).count(),
+                 "timed by when the engine showed them, not when they were handed over");
+    check::equal(seen.runtimeToGuestMedian.count(), microseconds(milliseconds(33)).count(),
+                 "so a frame held for two refreshes shows as such");
+    check::isTrue(seen.stage == LatteFrameHooks::ShownStage::FirstPixelOut,
+                  "and the stage the times were taken at is reported");
+}
+
+void scanOutTimesOnAnotherClockAreNoInterval() {
+    PresentPacing pacing(&displayedAt);
+    pacing.onScannedOut(shownAt(false, 1000, 7));
+    pacing.onScannedOut(shownAt(true, 5, 8));
+    pacing.onScannedOut(shownAt(false, 22, 8));
+    PresentPacing::Summary seen = pacing.summary();
+    check::equal(seen.intervals, uint64_t{1}, "a change of clock starts the intervals afresh");
+    check::equal(seen.longest.count(), microseconds(milliseconds(17)).count(),
+                 "and times of two clocks are never subtracted");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
 
 void runPresentTests() {
+    scanOutTimesFramesByTheEnginesClock();
+    scanOutTimesOnAnotherClockAreNoInterval();
     presentingBeforeTheTitleHasIsRefusedNotInvented();
     theArgumentsPresentedAreTheOnesTheTitleLastUsed();
     theGamePadsCopyIsNotWhatTheMainWindowIsShowing();

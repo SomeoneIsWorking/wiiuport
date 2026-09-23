@@ -25,18 +25,30 @@ PresentPacing::PresentPacing(Now now) : m_now(now) {
 }
 
 void PresentPacing::onDisplayed(bool fromRuntime) {
-    Clock::time_point now = m_now();
+    record(fromRuntime, m_now().time_since_epoch(), 0);
+}
+
+void PresentPacing::onScannedOut(const LatteFrameHooks::ShownFrame& shown) {
+    {
+        std::lock_guard lock(m_mutex);
+        m_stage = shown.stage;
+    }
+    record(shown.fromRuntime, std::chrono::nanoseconds{shown.timeNanoseconds}, shown.timeDomainId);
+}
+
+void PresentPacing::record(bool fromRuntime, std::chrono::nanoseconds at, uint64_t clock) {
     std::lock_guard lock(m_mutex);
     ++(fromRuntime ? m_runtimeFrames : m_guestFrames);
-    if (m_seenOne) {
+    if (m_seenOne && clock == m_lastClock) {
         ++m_intervals;
         if (m_kept.size() < kMaxIntervals) {
-            m_kept.push_back({std::chrono::duration_cast<microseconds>(now - m_last),
+            m_kept.push_back({std::chrono::duration_cast<microseconds>(at - m_last),
                               m_lastFromRuntime, fromRuntime});
         }
     }
     m_seenOne = true;
-    m_last = now;
+    m_last = at;
+    m_lastClock = clock;
     m_lastFromRuntime = fromRuntime;
 }
 
@@ -58,6 +70,7 @@ PresentPacing::Summary PresentPacing::summary() const {
         summary.guestFrames = m_guestFrames;
         summary.runtimeFrames = m_runtimeFrames;
         summary.intervals = m_intervals;
+        summary.stage = m_stage;
     }
     summary.intervalsKept = kept.size();
     std::vector<microseconds> all;
