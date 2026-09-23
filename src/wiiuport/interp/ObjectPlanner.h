@@ -14,6 +14,20 @@
 
 namespace wiiuport::interp {
 
+// The positions at which the title handed one value to every draw of a
+// shader, in N-1 and in N-2 both: frame state, such as the view, not any
+// object's own. Every candidate holds the same there, so it tells none
+// from another, and it is blended from N-1 whichever is the partner.
+struct FrameState {
+    std::span<const uint8_t> oneBack;
+    std::span<const uint8_t> twoBack;
+
+    bool at(size_t index) const {
+        return index < oneBack.size() && index < twoBack.size() && oneBack[index] != 0 &&
+               twoBack[index] != 0;
+    }
+};
+
 // Moves every object in an in-between frame to where it stood between the
 // title's two frames, each by its own identity.
 //
@@ -38,6 +52,12 @@ namespace wiiuport::interp {
 // and later frames derive the partner rather than search for it. A derived partner is re-checked
 // every frame, so a wrong or stale pairing fails the check rather than passing silently. An object
 // that fails, or has no N-2, is drawn as the title drew it and counted.
+//
+// Frame state -- a value every draw of the shader held alike in N-1 and N-2,
+// such as the view -- is blended but is no evidence of identity: it sways as
+// the camera does, unevenly, and is the same in every candidate. An object
+// that moved in none of its own values takes any candidate, since each draws
+// the same.
 //
 // Only numbers are blended. A value that is not a finite normal float at both
 // ends -- an integer in a float's clothing, a NaN -- is the later frame's.
@@ -192,6 +212,8 @@ class ObjectPlanner {
 
     // Plans the building frame's entry against N-1 and N-2.
     Outcome plan(size_t entry);
+
+    FrameState frameState(const ShaderKey& shader) const;
 
     // An object's draws in N-2 and N-1: where it stood two frames back, and
     // its partner -- none when it stood exactly where it stands in N.
