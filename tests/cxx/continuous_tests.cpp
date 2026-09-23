@@ -138,7 +138,7 @@ void resetFakes() {
     g_sequence.clear();
     g_presentAccepted = true;
     g_captureAccepted = true;
-    g_restore = LatteFrameHooks::GuestStateRestore{.subresourcesRestored = 5};
+    g_restore = LatteFrameHooks::GuestStateRestore{.subresourcesRestored = 5, .shadowsCreated = 2};
 }
 
 // Everything the interpolator is wired to in the product, with the fakes in
@@ -354,6 +354,8 @@ void aTickIsSplitInTwoByAnInBetweenFrame() {
                                "guest's frame copied back and to the scan buffer");
     check::equal(rig.continuous.restoresByCopy(), uint64_t{3}, "every restore by copy");
     check::equal(rig.continuous.restoresByReplay(), uint64_t{0}, "and none drawn again");
+    check::equal(rig.continuous.shadowsCreated(), uint64_t{6},
+                 "the copies each allocated are summed");
     check::equal(rig.continuous.subresourcesRestored(), uint64_t{15},
                  "with the subresources each copied back summed");
     check::isTrue(!rig.guard.isOpen(), "and the guard closed after each");

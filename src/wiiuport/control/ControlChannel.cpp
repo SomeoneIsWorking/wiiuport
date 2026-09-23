@@ -326,6 +326,7 @@ std::string ControlChannel::interpolationJson() const {
     body += ",\"restoresByCopy\":" + std::to_string(m_continuous.restoresByCopy());
     body += ",\"restoresByReplay\":" + std::to_string(m_continuous.restoresByReplay());
     body += ",\"subresourcesRestored\":" + std::to_string(m_continuous.subresourcesRestored());
+    body += ",\"shadowsCreated\":" + std::to_string(m_continuous.shadowsCreated());
     body += ",\"restoreChecksCompleted\":" + std::to_string(m_restoreCheck.completed());
     body += ",\"restoreChecksRefused\":" + std::to_string(m_restoreCheck.refused());
     const interp::ContinuousInterpolator::NotCopied& notCopied = m_continuous.notCopied();
@@ -346,11 +347,20 @@ std::string ControlChannel::interpolationJson() const {
     body += ",\"objects\":" + outcomesJson(objects.outcomes());
     body += ",\"objectPartnersDerived\":" + std::to_string(objects.planner().partnersDerived());
     body += ",\"objectPartnersSearched\":" + std::to_string(objects.planner().partnersSearched());
+    body += ",\"objectPartnersReidentified\":" +
+            std::to_string(objects.planner().partnersReidentified());
     body += ",\"objectSearchesDeferred\":" + std::to_string(objects.planner().searchesDeferred());
+    body +=
+        ",\"objectReidentifyAttempts\":" + std::to_string(objects.planner().reidentifyAttempts());
+    body += ",\"objectNearestCandidates\":" + std::to_string(objects.planner().nearestCandidates());
+    body += ",\"objectPartnerCandidates\":" + std::to_string(objects.planner().partnerCandidates());
     body += ",\"objectValuesNotBlended\":" + std::to_string(objects.planner().valuesNotBlended());
     body += ",\"objectValuesAlternating\":" + std::to_string(objects.planner().valuesAlternating());
     body += ",\"objectDrawsWritten\":" + std::to_string(objects.drawsWritten());
     body += ",\"objectReplaysDiverged\":" + std::to_string(objects.replaysDiverged());
+    body += ",\"objectFramesEnded\":" + std::to_string(objects.framesEnded());
+    body += ",\"objectFrameEndPlanningNanoseconds\":" +
+            std::to_string(objects.frameEndPlanning().count());
     frame::PresentPacing::Summary pacing = m_pacing.summary();
     body += ",\"pacing\":{\"guestFrames\":" + std::to_string(pacing.guestFrames);
     body += ",\"runtimeFrames\":" + std::to_string(pacing.runtimeFrames);

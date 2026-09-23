@@ -121,6 +121,7 @@ void aMovingObjectIsDrawnHalfWayBetweenItsFrames() {
     check::equal(uploaded[0][1], 7.0f, "and what did not move stays put");
     check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "one object blended");
     check::equal(blend.drawsWritten(), uint64_t{1}, "and its draw written");
+    check::equal(blend.framesEnded(), uint64_t{3}, "each frame's end counted with its wait");
 }
 
 void aStillObjectIsDrawnExactlyAsTheTitleDrewIt() {
@@ -188,6 +189,88 @@ void aShapeThatMovesTheSameButStandsElsewhereIsNotAPartner() {
                  "a value the object held that its partner does not have fails the match");
 }
 
+void aTileWhoseBlocksPassedToAnotherIsFoundByItsValues() {
+    // Two sea tiles standing still under a value every tile moves in, as the
+    // camera does. The grid shifts between N-2 and N, and each tile's blocks
+    // pass to the other: by address, each is a tile a hundred units away.
+    ObjectBlend blend{kHalfway};
+    std::vector<Draw> latest{{kBlockA, {100.0f, 2.0f}}, {kOtherA, {0.0f, 2.0f}}};
+    armAfter(blend, {{kBlockA, {0.0f, 1.0f}}, {kOtherA, {100.0f, 1.0f}}},
+             {{kBlockB, {0.0f, 1.5f}}, {kOtherB, {100.0f, 1.5f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::isTrue(uploaded[0] == std::vector<float>{100.0f, 1.75f},
+                  "the tile found by its values is blended with its own partner");
+    check::isTrue(uploaded[1] == std::vector<float>{0.0f, 1.75f}, "and so is the other");
+    check::equal(blend.objects(Outcome::Blended), uint64_t{2}, "both are blended");
+    check::equal(blend.planner().partnersReidentified(), uint64_t{2},
+                 "each found in N-2 by its values, not its blocks");
+}
+
+void anObjectDrawnFromBlocksNewToItIsFoundByItsValues() {
+    // The actor walks on, but frame N draws it from a block no frame before
+    // sourced; and a second object, as new, stands where nothing stood.
+    ObjectBlend blend{kHalfway};
+    std::vector<Draw> latest{{0xf4005000, {2.0f, 7.0f}}, {0xf4006000, {50.0f, -9.0f}}};
+    armAfter(blend, {{kBlockA, {0.0f, 7.0f}}}, {{kBlockB, {1.0f, 7.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(uploaded[0][0], 1.5f, "the walker is blended from where its values put it");
+    check::equal(uploaded[1][0], 50.0f, "while the new object nearest nothing is drawn as is");
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "one blended");
+    check::equal(blend.objects(Outcome::Unmatched), uint64_t{1}, "and one unmatched");
+}
+
+void anObjectFoundStandingStillByItsValuesIsHeld() {
+    std::vector<Draw> latest{{0xf4005000, {5.0f, 5.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kOtherA, {5.0f, 5.0f}}}, {{kOtherB, {5.0f, 5.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::isTrue(uploaded[0] == std::vector<float>{5.0f, 5.0f}, "drawn bit for bit");
+    check::equal(blend.objects(Outcome::Held), uint64_t{1}, "and counted as held");
+}
+
+// Where an actor stands frame by frame: a jump no search can follow, then a
+// walk of one unit a frame.
+constexpr std::array<float, 5> kJumpThenWalk{100.0f, 90.0f, 0.0f, 1.0f, 2.0f};
+
+void aFailedSearchByValuesDoesNotDelayTheSearchByBlocks() {
+    // An actor with a block allocated afresh every frame jumps between the
+    // first two frames planned, so no search finds it; it walks after that.
+    // Its key is the same once it has a frame two back, and the search by
+    // blocks has not failed for it, only the search by values.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    std::vector<Draw> latest;
+    for (uint32_t frame = 0; frame < kJumpThenWalk.size(); ++frame) {
+        latest = {{frame % 2 == 0 ? kBlockA : kBlockB,
+                   {kJumpThenWalk[frame], 7.0f},
+                   kActorShader,
+                   0xf4900000 + (frame * 0x100)}};
+        record(blend, latest);
+    }
+    blend.armOnce();
+    auto uploaded = replay(blend, latest);
+    check::equal(uploaded[0][0], 1.5f, "it is blended once its blocks say who it is");
+}
+
+void aFrameWithNoDrawsStillLeavesTheOneBeforeSearchable() {
+    // Nothing draws in the frame after the actor's, so no draw of that frame
+    // indexes the actor's for searching; its end has to. The actor then comes
+    // back from a block the frame two back never sourced, and is looked for
+    // there by its values.
+    wiiuport::interp::ObjectPlanner planner{kHalfway};
+    auto feed = [&planner](const std::vector<Draw>& draws) {
+        for (const RecordedUniformAssembly& assembly : frameOf(draws).uniformAssemblies()) {
+            planner.add(assembly);
+        }
+        planner.endFrame();
+    };
+    feed({{kBlockA, {0.0f, 7.0f}}});
+    feed({});
+    feed({{kBlockB, {2.0f, 7.0f}}});
+    check::equal(planner.reidentifyAttempts(), uint64_t{1}, "the actor is looked for by values");
+    check::equal(planner.nearestCandidates(), uint64_t{1}, "among the one draw before the gap");
+}
+
 void aFailedSearchWaitsBeforeItIsRunAgain() {
     // A sprite that flips between two poses: frame N-1 is one of its ends,
     // never the middle, so no partner is ever found.
@@ -207,6 +290,8 @@ void aFailedSearchWaitsBeforeItIsRunAgain() {
     }
     check::isTrue(blend.planner().searchesDeferred() > 0, "later frames of the same object wait");
     check::isTrue(blend.planner().partnersSearched() < armed, "so it is not searched every frame");
+    check::isTrue(blend.planner().reidentifyAttempts() < armed,
+                  "neither by its blocks nor by its values");
     check::equal(blend.objects(Outcome::Blended), uint64_t{0}, "and it is never blended");
 }
 
@@ -517,7 +602,12 @@ void runObjectBlendTests() {
     aPartnerFoundOnceIsCarriedAndRechecked();
     oneObjectsBlocksPairEveryShaderDrawingIt();
     aShapeThatMovesTheSameButStandsElsewhereIsNotAPartner();
+    aTileWhoseBlocksPassedToAnotherIsFoundByItsValues();
+    anObjectDrawnFromBlocksNewToItIsFoundByItsValues();
+    anObjectFoundStandingStillByItsValuesIsHeld();
+    aFailedSearchByValuesDoesNotDelayTheSearchByBlocks();
     aFailedSearchWaitsBeforeItIsRunAgain();
+    aFrameWithNoDrawsStillLeavesTheOneBeforeSearchable();
     aValueThatIsNotANumberIsTakenFromTheLaterFrame();
     twoDrawsFromOneBlockAreTwoObjects();
     aReplayOutOfStepWithTheRecordingStopsWriting();

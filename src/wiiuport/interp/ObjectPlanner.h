@@ -27,7 +27,13 @@ namespace wiiuport::interp {
 //
 // An address can be reused by a different object between those two frames,
 // and blending two objects draws a third that never existed: such an object's
-// midpoint lands on nothing in N-1, and it is not blended. Partners are learned as block addresses
+// midpoint lands on nothing in N-1. It, and an object drawn from blocks N-2
+// never sourced, is then looked for in N-2 by its values -- the same shader's
+// draw nearest it -- and blended only if that draw's midpoint with N lands on
+// a draw in N-1 in turn. A pool that hands its blocks to different objects
+// as they come and go, as the sea's tiles are when the grid under the camera
+// shifts, is identified that way; a different object found nearest lands at
+// half its step, as it does by address. Partners are learned as block addresses
 // -- A on even frames goes with B on odd -- so one draw's search pairs every draw of that object,
 // and later frames derive the partner rather than search for it. A derived partner is re-checked
 // every frame, so a wrong or stale pairing fails the check rather than passing silently. An object
@@ -53,9 +59,10 @@ class ObjectPlanner {
     explicit ObjectPlanner(float t);
 
     // Keys a draw into the frame being built and, once two whole frames are
-    // held, plans it.
+    // held, plans it. The first of a frame first indexes N for searching.
     void add(const frame::RecordedUniformAssembly& assembly);
-    // The frame being built is whole: it becomes N.
+    // The frame being built is whole: it becomes N. Its values are indexed
+    // by the next add(), so the frame's end pays only for finding by key.
     void endFrame();
     // Drops every frame held: three more are needed before a plan is ready.
     void forget();
@@ -81,9 +88,11 @@ class ObjectPlanner {
         Blended,
         // Unchanged since N-2: drawn as it was, which is the blend.
         Held,
-        // No draw with its identity in N-2: new, or its blocks moved.
+        // No draw with its blocks in N-2, and none found there by its values
+        // whose midpoint lands in N-1: new, or moved beyond telling.
         Unmatched,
-        // Moved, but nothing in N-1 is where it passed through.
+        // Moved, but nothing in N-1 is where it passed through, from the draw
+        // its blocks name in N-2 or from the one nearest its values.
         Unverified,
         // Its partner was found, but its blend would not lie strictly between
         // N-1 and N: nearer each than they are to each other. An object that
@@ -116,6 +125,27 @@ class ObjectPlanner {
         return m_partnersSearched;
     }
 
+    // Partners found only once the object itself was found in N-2 by its
+    // values, because its blocks named something else there or nothing.
+    uint64_t partnersReidentified() const {
+        return m_partnersReidentified;
+    }
+
+    // What the searches cost: draws compared against an object, in N-2 to
+    // find it by its values and in N-1 to find its partner. A search is
+    // exact, so these, not the searches, are what a scene makes expensive.
+    uint64_t reidentifyAttempts() const {
+        return m_reidentifyAttempts;
+    }
+
+    uint64_t nearestCandidates() const {
+        return m_nearestCandidates;
+    }
+
+    uint64_t partnerCandidates() const {
+        return m_partnerCandidates;
+    }
+
     // An object whose search found nothing is not searched for again until
     // this many frames later. Most never will be found: a flipbook
     // sprite stepping sixty degrees a frame, or a draw with no uniform blocks
@@ -123,7 +153,8 @@ class ObjectPlanner {
     // frame was measured as seven tenths of the planning time.
     static constexpr uint64_t kSearchRetryInterval = 8;
 
-    // Searches not run because the same object's search failed recently.
+    // Searches not run because the same object's search of that kind failed
+    // recently.
     uint64_t searchesDeferred() const {
         return m_searchesDeferred;
     }
@@ -161,22 +192,40 @@ class ObjectPlanner {
 
     // Plans the building frame's entry against N-1 and N-2.
     Outcome plan(size_t entry);
-    // Whether the object at `before` in N-2 and `after` in N has a partner in
-    // N-1 its midpoint lands on. Derived from learned block pairs when they
-    // still pass, searched among the same shader's draws otherwise.
-    // Returns the partner's entry in N-1.
-    std::optional<size_t> findPartner(const AssemblyKey& key, std::span<const float> before,
-                                      std::span<const float> after);
+
+    // An object's draws in N-2 and N-1: where it stood two frames back, and
+    // its partner -- none when it stood exactly where it stands in N.
+    struct Found {
+        size_t earlier;
+        std::optional<size_t> partner;
+    };
+
+    // Finds the object whose draw in N is `after` in N-2 and N-1: by its
+    // blocks first, `earlier` being the draw they name in N-2 if any, then by
+    // its values. A failure waits kSearchRetryInterval frames before the
+    // searches run again.
+    std::optional<Found> findPartner(const AssemblyKey& key, std::optional<size_t> earlier,
+                                     std::span<const float> after);
+    // The partner of the object at `before` in N-2 derived from learned block
+    // pairs, if they still pass.
+    std::optional<size_t> derivedPartner(const AssemblyKey& key, std::span<const float> before,
+                                         std::span<const float> after) const;
     // The key of `key`'s draw in N-1 under the learned block pairs, if every
     // block it sourced is either paired or shared by both frames.
-    std::optional<AssemblyKey> derivedPartner(const AssemblyKey& key) const;
+    std::optional<AssemblyKey> derivedKey(const AssemblyKey& key) const;
+    // The same shader's draw in N-2 nearest `after` over the values that are
+    // numbers in both, starting from `start`, the draw the object's blocks
+    // name, which the search then only has to beat.
+    std::optional<size_t> nearestEarlier(const AssemblyKey& key, std::span<const float> after,
+                                         std::optional<size_t> start);
     // The same shader's draw in N-1 whose values the midpoint lands nearest,
-    // within the tolerance. Tries the values the object moved in first and
-    // abandons a candidate as soon as it is out of tolerance, so a shader
-    // drawn a thousand times costs a few values per candidate, not all.
+    // within the tolerance. Both searches are exact, over N-2's and N-1's
+    // trees of their draws (DrawTree).
     std::optional<size_t> searchPartner(const AssemblyKey& key, std::span<const float> before,
                                         std::span<const float> after);
     void learn(const AssemblyKey& key, const AssemblyKey& partner);
+    // Indexes N's values, once, before anything searches it.
+    void indexLatest();
 
     // Where the in-between frame sits on N-1..N.
     float m_t;
@@ -187,15 +236,22 @@ class ObjectPlanner {
     std::array<KeyedFrame, 3> m_frames;
     Plan m_plan;
     size_t m_framesHeld{0};
+    bool m_latestUnindexed{false};
     uint64_t m_framesPlanned{0};
     std::unordered_map<uint32_t, uint32_t> m_blockPartner;
     // Key hash of an object whose search failed, and the planned frame it may
     // be searched for again.
     std::unordered_map<uint64_t, uint64_t> m_searchAgainAt;
-    // Reused by every search: which values to compare first.
-    std::vector<uint32_t> m_searchOrder;
+    // The same for a search by values.
+    std::unordered_map<uint64_t, uint64_t> m_reidentifyAgainAt;
+    // Reused by every search: the point searched for.
+    std::vector<double> m_point;
     uint64_t m_partnersDerived{0};
     uint64_t m_partnersSearched{0};
+    uint64_t m_partnersReidentified{0};
+    uint64_t m_reidentifyAttempts{0};
+    uint64_t m_nearestCandidates{0};
+    uint64_t m_partnerCandidates{0};
     uint64_t m_searchesDeferred{0};
     uint64_t m_valuesNotBlended{0};
     uint64_t m_valuesAlternating{0};

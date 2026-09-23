@@ -63,6 +63,7 @@ ContinuousInterpolator::Clock::time_point ContinuousInterpolator::charge(Phase p
 void ContinuousInterpolator::restoreGuestFrame(const frame::FrameRecording& recording) {
     LatteFrameHooks::GuestStateRestore restored = m_guard.restore();
     m_subresourcesRestored += restored.subresourcesRestored;
+    m_shadowsCreated += restored.shadowsCreated;
     if (restored.Complete()) {
         ++m_restoresByCopy;
     } else {

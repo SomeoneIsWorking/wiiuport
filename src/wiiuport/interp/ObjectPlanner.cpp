@@ -70,6 +70,14 @@ bool liesBetween(std::span<const float> oneBack, std::span<const float> blended,
     return fromOneBack < apart && fromLatest < apart;
 }
 
+// Whether an object's last failed search of one kind was too recent to run
+// it again.
+bool waiting(const std::unordered_map<uint64_t, uint64_t>& againAt, uint64_t hash,
+             uint64_t framesPlanned) {
+    auto failed = againAt.find(hash);
+    return failed != againAt.end() && failed->second > framesPlanned;
+}
+
 bool equalValues(std::span<const float> l, std::span<const float> r) {
     return l.size() == r.size() && std::memcmp(l.data(), r.data(), l.size_bytes()) == 0;
 }
@@ -105,6 +113,7 @@ void ObjectPlanner::Plan::clear() {
 }
 
 void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
+    indexLatest();
     // Fresh blocks are told from an object's own only against a frame held
     // two back.
     size_t entry = m_building.add(assembly, m_framesHeld >= 2 ? &m_frames[1] : nullptr);
@@ -117,6 +126,9 @@ void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
 }
 
 void ObjectPlanner::endFrame() {
+    // A frame with no draws never indexed the one before it, which is about
+    // to become N-1 and be searched.
+    indexLatest();
     m_building.finish();
     ++m_framesPlanned;
     // Swapping keeps every frame's storage, so a steady scene allocates
@@ -127,23 +139,34 @@ void ObjectPlanner::endFrame() {
     std::swap(m_plan, m_buildingPlan);
     m_building.begin();
     m_buildingPlan.clear();
+    m_latestUnindexed = true;
     m_framesHeld = std::min(m_framesHeld + 1, m_frames.size());
     // Expired entries go once the table outgrows a frame's worth, so objects
     // that left the scene do not accumulate.
-    if (m_searchAgainAt.size() > m_frames[0].size()) {
-        std::erase_if(m_searchAgainAt, [this](const auto& failed) {
-            return failed.second <= m_framesPlanned;
-        });
+    for (auto* againAt : {&m_searchAgainAt, &m_reidentifyAgainAt}) {
+        if (againAt->size() > m_frames[0].size()) {
+            std::erase_if(*againAt, [this](const auto& failed) {
+                return failed.second <= m_framesPlanned;
+            });
+        }
+    }
+}
+
+void ObjectPlanner::indexLatest() {
+    if (m_latestUnindexed) {
+        m_frames[0].indexValues();
+        m_latestUnindexed = false;
     }
 }
 
 void ObjectPlanner::forget() {
     m_framesHeld = 0;
+    m_latestUnindexed = false;
     m_building.begin();
     m_buildingPlan.clear();
 }
 
-std::optional<AssemblyKey> ObjectPlanner::derivedPartner(const AssemblyKey& key) const {
+std::optional<AssemblyKey> ObjectPlanner::derivedKey(const AssemblyKey& key) const {
     AssemblyKey partner = key;
     for (size_t index = 1; index < partner.sourceCount; index += 2) {
         uint32_t address = partner.sources[index];
@@ -182,92 +205,109 @@ void ObjectPlanner::learn(const AssemblyKey& key, const AssemblyKey& partner) {
 std::optional<size_t> ObjectPlanner::searchPartner(const AssemblyKey& key,
                                                    std::span<const float> before,
                                                    std::span<const float> after) {
-    const KeyedFrame& between = m_frames[0];
-    // The values it moved in first, then the ones it held: a different object
-    // is usually told apart by the first few.
-    m_searchOrder.clear();
+    // The midpoint, where the object's values are numbers at both ends.
+    m_point.assign(after.size(), std::numeric_limits<double>::quiet_NaN());
     double stepSquared = 0.0;
-    for (uint32_t index = 0; index < after.size(); ++index) {
+    for (size_t index = 0; index < after.size(); ++index) {
         if (!isNumber(before[index]) || !isNumber(after[index])) {
             continue;
         }
         double moved = static_cast<double>(after[index]) - before[index];
         stepSquared += moved * moved;
-        m_searchOrder.push_back(index);
+        m_point[index] = (static_cast<double>(before[index]) + after[index]) / 2.0;
     }
-    std::stable_partition(m_searchOrder.begin(), m_searchOrder.end(), [&](uint32_t index) {
-        return before[index] != after[index];
-    });
-    std::optional<size_t> best;
-    double bestResidual = static_cast<double>(kPartnerTolerance) * kPartnerTolerance * stepSquared;
-    auto consider = [&](uint32_t entry) {
-        std::span<const float> candidate = between.values(entry);
-        if (candidate.size() != after.size()) {
-            return;
-        }
-        double residual = 0.0;
-        for (uint32_t index : m_searchOrder) {
-            if (!isNumber(candidate[index])) {
-                continue;
-            }
-            double off =
-                ((static_cast<double>(before[index]) + after[index]) / 2.0) - candidate[index];
-            residual += off * off;
-            if (residual > bestResidual) {
-                return;
-            }
-        }
-        bestResidual = residual;
-        best = entry;
-    };
-    KeyedFrame::ShaderDraws draws = between.drawnBy(key.shader);
-    // A partner lands within the tolerance on every value, so on the one its
-    // shader's draws are ordered by too: only those near the midpoint there
-    // can be it. Exact, not a guess -- the rest would fail the sum below.
-    std::span<const uint32_t> near = draws.ordered;
-    uint32_t at = draws.position;
-    if (at < after.size() && isNumber(before[at]) && isNumber(after[at])) {
-        double centre = (static_cast<double>(before[at]) + after[at]) / 2.0;
-        double radius =
-            std::nextafter(std::sqrt(bestResidual), std::numeric_limits<double>::infinity());
-        near = between.within(draws, centre - radius, centre + radius);
-    }
-    for (uint32_t entry : near) {
-        consider(entry);
-    }
-    for (uint32_t entry : draws.unordered) {
-        consider(entry);
-    }
-    return best;
+    double limit = static_cast<double>(kPartnerTolerance) * kPartnerTolerance * stepSquared;
+    DrawTree::Nearest found = m_frames[0].nearest(key.shader, {m_point, limit, std::nullopt});
+    m_partnerCandidates += found.compared;
+    return found.entry;
 }
 
-std::optional<size_t> ObjectPlanner::findPartner(const AssemblyKey& key,
-                                                 std::span<const float> before,
-                                                 std::span<const float> after) {
+std::optional<size_t> ObjectPlanner::nearestEarlier(const AssemblyKey& key,
+                                                    std::span<const float> after,
+                                                    std::optional<size_t> start) {
+    m_point.assign(after.size(), std::numeric_limits<double>::quiet_NaN());
+    for (size_t index = 0; index < after.size(); ++index) {
+        if (isNumber(after[index])) {
+            m_point[index] = after[index];
+        }
+    }
+    std::optional<uint32_t> started;
+    if (start.has_value()) {
+        started = static_cast<uint32_t>(*start);
+    }
+    DrawTree::Nearest found = m_frames[1].nearest(
+        key.shader, {m_point, std::numeric_limits<double>::infinity(), started});
+    m_nearestCandidates += found.compared;
+    return found.entry;
+}
+
+std::optional<size_t> ObjectPlanner::derivedPartner(const AssemblyKey& key,
+                                                    std::span<const float> before,
+                                                    std::span<const float> after) const {
     const KeyedFrame& between = m_frames[0];
-    if (std::optional<AssemblyKey> derived = derivedPartner(key)) {
-        std::optional<size_t> entry = between.find(*derived);
-        if (entry.has_value() && between.values(*entry).size() == after.size() &&
-            landsOn(measure(before, after, between.values(*entry)))) {
+    std::optional<AssemblyKey> derived = derivedKey(key);
+    if (!derived.has_value()) {
+        return std::nullopt;
+    }
+    std::optional<size_t> entry = between.find(*derived);
+    if (entry.has_value() && between.values(*entry).size() == after.size() &&
+        landsOn(measure(before, after, between.values(*entry)))) {
+        return entry;
+    }
+    return std::nullopt;
+}
+
+std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey& key,
+                                                               std::optional<size_t> earlier,
+                                                               std::span<const float> after) {
+    const KeyedFrame& between = m_frames[0];
+    const KeyedFrame& twoBack = m_frames[1];
+    if (earlier.has_value()) {
+        if (std::optional<size_t> derived = derivedPartner(key, twoBack.values(*earlier), after)) {
             ++m_partnersDerived;
-            return entry;
+            return Found{*earlier, *derived};
         }
     }
     uint64_t hash = key.hash();
-    if (auto failed = m_searchAgainAt.find(hash);
-        failed != m_searchAgainAt.end() && failed->second > m_framesPlanned) {
+    // By blocks and by values fail for different objects -- a new one has no
+    // blocks to search by -- so each waits on its own failures.
+    if (earlier.has_value()) {
+        if (waiting(m_searchAgainAt, hash, m_framesPlanned)) {
+            ++m_searchesDeferred;
+        } else {
+            ++m_partnersSearched;
+            std::span<const float> before = twoBack.values(*earlier);
+            std::optional<size_t> found = searchPartner(key, before, after);
+            if (found.has_value() && landsOn(measure(before, after, between.values(*found)))) {
+                m_searchAgainAt.erase(hash);
+                learn(key, between.key(*found));
+                return Found{*earlier, *found};
+            }
+            m_searchAgainAt.insert_or_assign(hash, m_framesPlanned + kSearchRetryInterval);
+        }
+    }
+    if (waiting(m_reidentifyAgainAt, hash, m_framesPlanned)) {
         ++m_searchesDeferred;
         return std::nullopt;
     }
-    ++m_partnersSearched;
-    std::optional<size_t> found = searchPartner(key, before, after);
-    if (!found.has_value() || !landsOn(measure(before, after, between.values(*found)))) {
-        m_searchAgainAt.insert_or_assign(hash, m_framesPlanned + kSearchRetryInterval);
-        return std::nullopt;
+    // Its blocks named another object in N-2, or none. Not learned: the
+    // blocks are what could not be trusted.
+    ++m_reidentifyAttempts;
+    std::optional<size_t> nearest = nearestEarlier(key, after, earlier);
+    if (nearest.has_value() && nearest != earlier) {
+        ++m_partnersSearched;
+        std::span<const float> before = twoBack.values(*nearest);
+        if (equalValues(before, after)) {
+            return Found{*nearest, std::nullopt};
+        }
+        std::optional<size_t> found = searchPartner(key, before, after);
+        if (found.has_value() && landsOn(measure(before, after, between.values(*found)))) {
+            ++m_partnersReidentified;
+            return Found{*nearest, *found};
+        }
     }
-    m_searchAgainAt.erase(hash);
-    learn(key, between.key(*found));
-    return found;
+    m_reidentifyAgainAt.insert_or_assign(hash, m_framesPlanned + kSearchRetryInterval);
+    return std::nullopt;
 }
 
 ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
@@ -276,18 +316,21 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     const AssemblyKey& key = latest.key(entry);
     std::span<const float> after = latest.values(entry);
     std::optional<size_t> earlier = twoBack.find(key);
-    if (!earlier.has_value() || twoBack.values(*earlier).size() != after.size()) {
-        return Outcome::Unmatched;
+    if (earlier.has_value() && twoBack.values(*earlier).size() != after.size()) {
+        earlier.reset();
     }
-    std::span<const float> before = twoBack.values(*earlier);
-    if (equalValues(before, after)) {
+    if (earlier.has_value() && equalValues(twoBack.values(*earlier), after)) {
         return Outcome::Held;
     }
-    std::optional<size_t> partner = findPartner(key, before, after);
-    if (!partner.has_value()) {
-        return Outcome::Unverified;
+    std::optional<Found> found = findPartner(key, earlier, after);
+    if (!found.has_value()) {
+        return earlier.has_value() ? Outcome::Unverified : Outcome::Unmatched;
     }
-    std::span<const float> oneBack = m_frames[0].values(*partner);
+    if (!found->partner.has_value()) {
+        return Outcome::Held;
+    }
+    std::span<const float> before = twoBack.values(found->earlier);
+    std::span<const float> oneBack = m_frames[0].values(*found->partner);
     std::vector<float>& floats = m_buildingPlan.floats;
     size_t start = floats.size();
     uint64_t notBlended = 0;
