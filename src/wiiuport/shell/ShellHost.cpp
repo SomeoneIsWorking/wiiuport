@@ -211,6 +211,9 @@ bool ShellHost::launchTitle(const std::filesystem::path& path) {
 }
 
 void ShellHost::shutdown() {
+    // A title a maintainer paused would hold the rendering thread through
+    // the shutdown that waits on it.
+    Runtime::instance().frameGate().release();
     if (m_titleRunning) {
         CafeSystem::ShutdownTitle();
         m_titleRunning = false;

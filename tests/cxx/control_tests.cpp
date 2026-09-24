@@ -68,6 +68,7 @@ struct Fixture {
     wiiuport::frame::RecordingSnapshot snapshot;
     wiiuport::frame::PresentPacing pacing{&neverNow};
     wiiuport::frame::PresentPacing scanOut{&neverNow};
+    wiiuport::frame::FrameGate gate;
     ControlChannel channel{ControlChannel::Sources{
         .recorder = recorder,
         .replayer = replayer,
@@ -88,6 +89,7 @@ struct Fixture {
         .pacing = pacing,
         .scanOut = scanOut,
         .vertexChanges = recorder.vertexChanges(),
+        .gate = gate,
     }};
 };
 

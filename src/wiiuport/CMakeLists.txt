@@ -38,6 +38,8 @@ add_library(wiiuport STATIC
   control/ControlChannel.h
   frame/FrameCapture.cpp
   frame/FrameCapture.h
+  frame/FrameGate.cpp
+  frame/FrameGate.h
   frame/FramePresenter.cpp
   frame/FramePresenter.h
   frame/GuestStateGuard.cpp

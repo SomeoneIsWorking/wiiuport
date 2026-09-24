@@ -121,6 +121,14 @@ std::string_view shownStageName(LatteFrameHooks::ShownStage stage) {
     return "unknown";
 }
 
+std::string gateJson(const frame::FrameGate::Status& gate) {
+    return std::string("{\"paused\":") + (gate.paused ? "true" : "false") +
+           ",\"holding\":" + (gate.holding ? "true" : "false") +
+           ",\"stepsLeft\":" + std::to_string(gate.stepsLeft) +
+           ",\"framesHeld\":" + std::to_string(gate.framesHeld) +
+           ",\"framesStepped\":" + std::to_string(gate.framesStepped) + "}\n";
+}
+
 std::string pacingJson(const frame::PresentPacing::Summary& pacing) {
     std::string body = "{\"guestFrames\":" + std::to_string(pacing.guestFrames);
     body += ",\"runtimeFrames\":" + std::to_string(pacing.runtimeFrames);
@@ -148,7 +156,7 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
       m_neighbourCheck(sources.neighbourCheck), m_objects(sources.objects),
       m_vertices(sources.vertices), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
-      m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges) {
+      m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -754,6 +762,31 @@ bool ControlChannel::start(uint16_t port) {
                 m_vertices.exclude(std::move(excluded));
                 return lucent::http::Response::json(200, "OK", interpolationJson());
             }
+            // Holds the title between frames: pause=1 holds at the next
+            // frame's end, step=N lets N more end and answers once it holds
+            // again, resume=1 lets it run.
+            if (request.method == "POST" && request.path() == "/gate") {
+                std::string query(request.query());
+                if (requestedFlag(query, "resume", false)) {
+                    m_gate.resume();
+                    return lucent::http::Response::json(200, "OK", gateJson(m_gate.status()));
+                }
+                size_t steps = requestedCount(query, "step", 0);
+                if (steps > 0) {
+                    m_gate.step(steps);
+                } else if (requestedFlag(query, "pause", false)) {
+                    m_gate.pause();
+                } else {
+                    return lucent::http::Response::text(
+                        400, "Bad Request",
+                        "name pause=1, step=N (a count above zero) or resume=1.\n");
+                }
+                if (!m_gate.awaitHeld(kGateHoldTimeout)) {
+                    return lucent::http::Response::json(504, "Gateway Timeout",
+                                                        gateJson(m_gate.status()));
+                }
+                return lucent::http::Response::json(200, "OK", gateJson(m_gate.status()));
+            }
             // Frame pacing measured from here on, so a walk is not averaged
             // with the boot and menus before it.
             if (request.method == "POST" && request.path() == "/pacing") {
@@ -937,6 +970,9 @@ bool ControlChannel::start(uint16_t port) {
             }
             if (request.path() == "/draws") {
                 return lucent::http::Response::json(200, "OK", drawsJson());
+            }
+            if (request.path() == "/gate") {
+                return lucent::http::Response::json(200, "OK", gateJson(m_gate.status()));
             }
             if (request.path() == "/frames") {
                 return lucent::http::Response::json(200, "OK", framesJson());

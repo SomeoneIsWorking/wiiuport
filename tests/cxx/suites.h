@@ -20,5 +20,6 @@ void runObjectBlendTests();
 void runDrawTreeTests();
 void runVertexBlendTests();
 void runSlotPoolTests();
+void runGateTests();
 
 } // namespace wiiuport::tests

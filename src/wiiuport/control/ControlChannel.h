@@ -3,6 +3,7 @@
 #include "wiiuport/control/ControllerStatus.h"
 #include "wiiuport/control/SetupStatus.h"
 #include "wiiuport/frame/FrameCapture.h"
+#include "wiiuport/frame/FrameGate.h"
 #include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameReplayer.h"
 #include "wiiuport/frame/FrameShapeLog.h"
@@ -21,6 +22,7 @@
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -45,6 +47,9 @@ class ControlChannel {
     // How many candidates GET /transforms lists. The totals beside them
     // are never capped, so a cut list still reports how many there were.
     static constexpr size_t kDefaultTransformLimit = 20;
+    // How long POST /gate waits for the title to hold: a frame, or a step's
+    // frames, end well inside it at any rate the title runs.
+    static constexpr std::chrono::milliseconds kGateHoldTimeout{10000};
 
     // How many gamepad reads a press is held for when the caller does not
     // say. Long enough that a title sampling once a frame cannot miss it.
@@ -74,6 +79,7 @@ class ControlChannel {
         // Frame times as the presentation engine reports them shown.
         frame::PresentPacing& scanOut;
         frame::VertexChanges& vertexChanges;
+        frame::FrameGate& gate;
     };
 
     explicit ControlChannel(const Sources& sources);
@@ -184,6 +190,7 @@ class ControlChannel {
     frame::PresentPacing& m_pacing;
     frame::PresentPacing& m_scanOut;
     frame::VertexChanges& m_vertexChanges;
+    frame::FrameGate& m_gate;
     std::unique_ptr<lucent::http::Server> m_server;
 };
 
