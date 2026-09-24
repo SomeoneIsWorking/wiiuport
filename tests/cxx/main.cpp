@@ -50,6 +50,7 @@ int main(int argc, char** argv) {
     wiiuport::tests::runObjectBlendTests();
     wiiuport::tests::runObjectBlendSharedValueTests();
     wiiuport::tests::runVertexBlendTests();
+    wiiuport::tests::runSharedVertexReadsTests();
     wiiuport::tests::runSlotPoolTests();
     wiiuport::tests::runDrawTreeTests(seed);
     wiiuport::tests::runGateTests();

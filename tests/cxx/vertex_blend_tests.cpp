@@ -294,6 +294,9 @@ struct ActorDraw {
     // Drawn with the uniforms the draw before it assembled, as a title draws
     // several meshes of one object: no assembly of its own.
     bool sharesUniforms{false};
+    // Where in the buffer it reads its vertices start, in values: a draw
+    // over part of another's mesh, as a toon outline reads the hair's.
+    uint32_t fromValue{0};
 };
 
 // Where a guest's draw keeps its mesh: each frame's vertices in their own
@@ -313,9 +316,10 @@ struct GuestFrame {
         }
     }
 
-    // The buffer the draw at `index` reads.
-    const std::vector<std::byte>& meshOf(size_t index) const {
-        return meshes[draws[index].passOver.value_or(index)];
+    // The bytes the draw at `index` reads.
+    std::span<const std::byte> meshOf(size_t index) const {
+        return std::span<const std::byte>(meshes[draws[index].passOver.value_or(index)])
+            .subspan(draws[index].fromValue * sizeof(float));
     }
 };
 
@@ -327,7 +331,7 @@ RecordedUniformAssembly assemblyOf(const ActorDraw& draw) {
     return assembly;
 }
 
-LatteFrameHooks::DrawPrepared preparedOf(const std::vector<std::byte>& mesh, bool fromRuntime,
+LatteFrameHooks::DrawPrepared preparedOf(std::span<const std::byte> mesh, bool fromRuntime,
                                          const ActorDraw& draw) {
     LatteFrameHooks::DrawPrepared prepared{};
     prepared.vertexShaderBaseHash = kActorShader;
@@ -514,6 +518,49 @@ void aMeshTwoShadersFetchOtherwiseIsDrawnAlikeByBoth() {
     std::vector<std::vector<float>> drawn = blends.replay(latest);
     check::equal(drawn[0][0], 13.0f, "the walker's shader draws its value half way");
     check::equal(drawn[1][1], 103.0f, "and the shadow's draws the value it fetches half way");
+    check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{2}, "both blended");
+}
+
+void aMeshWhoseBytesAnotherMeshDrawsAtNIsDrawnAtNToo() {
+    // The hair's mesh is blended; its outline reads part of the same buffer
+    // under uniforms no frame before drew, so it has no partner and draws at
+    // N. Half way beside it, the hair showed the black outline through it.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    blends.record(GuestFrame({{kBlockA, {0.0f, 7.0f}, {10.0f, 100.0f}}}));
+    blends.record(GuestFrame({{kBlockB, {1.0f, 7.0f}, {12.0f, 102.0f}}}));
+    ActorDraw outline{kOtherA, {9.0f}, {104.0f}, 0};
+    outline.fromValue = 1;
+    GuestFrame latest({{kBlockA, {2.0f, 7.0f}, {14.0f, 104.0f}}, outline});
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 14.0f, "the hair is drawn at N");
+    check::equal(drawn[1][0], 104.0f, "as its outline is");
+    check::equal(blends.vertices.draws(VertexOutcome::SharesBytes), uint64_t{1},
+                 "counted as sharing its bytes");
+}
+
+void aMeshWhoseBytesAnotherMeshBlendsIsBlendedWithIt() {
+    // The outline has uniforms of its own a frame before, and moves with the
+    // hair: both are blended, and draw their shared bytes alike.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    // The title's blocks alternate: the A pair at N and N-2, the B pair at N-1.
+    auto frame = [](float at, bool pairA) {
+        uint32_t block = pairA ? kBlockA : kBlockB;
+        uint32_t other = pairA ? kOtherA : kOtherB;
+        ActorDraw outline{other, {at + 50.0f}, {100.0f + (2.0f * at)}, 0};
+        outline.fromValue = 1;
+        return GuestFrame(
+            {{block, {at, 7.0f}, {10.0f + (2.0f * at), 100.0f + (2.0f * at)}}, outline});
+    };
+    blends.record(frame(0.0f, true));
+    blends.record(frame(1.0f, false));
+    GuestFrame latest = frame(2.0f, true);
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][1], 103.0f, "the hair's shared value is drawn half way");
+    check::equal(drawn[1][0], 103.0f, "and the outline's, the same bytes, alike");
     check::equal(blends.vertices.draws(VertexOutcome::Blended), uint64_t{2}, "both blended");
 }
 
@@ -766,6 +813,8 @@ void runVertexBlendTests() {
     everyPassOverAMeshDrawsItAlike();
     eachMeshOfOneObjectIsBlendedFromItsOwnDrawAFrameBefore();
     aMeshTwoShadersFetchOtherwiseIsDrawnAlikeByBoth();
+    aMeshWhoseBytesAnotherMeshDrawsAtNIsDrawnAtNToo();
+    aMeshWhoseBytesAnotherMeshBlendsIsBlendedWithIt();
     aMeshAnExcludedShaderReadsIsDrawnAsTheTitleDrewIt();
     cloudsTheTitleReordersAreBlendedFromTheCloudTheyPassed();
     cloudsReorderedSinceTwoFramesBackAreBlendedFromTheirOwn();

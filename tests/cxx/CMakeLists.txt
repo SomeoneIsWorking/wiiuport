@@ -17,6 +17,7 @@ add_executable(wiiuport_tests
   object_blend_tests.cpp
   draw_tree_tests.cpp
   vertex_blend_tests.cpp
+  shared_vertex_reads_tests.cpp
   slot_pool_tests.cpp
   gate_tests.cpp
   map_pass_tests.cpp

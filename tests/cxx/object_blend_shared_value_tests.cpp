@@ -325,6 +325,27 @@ void aPixelStageShadingAMovingObjectMovesWithIt() {
     check::equal(blend.objects(Outcome::Shading), uint64_t{1}, "which alone shades");
 }
 
+void theLightsLookUpEveryObjectsPixelStageHoldsIsDrawnAtN() {
+    // Two walkers, each shaded by its own fading colour and by the look-up of
+    // the light's map, which is the same in both: the map is drawn with the
+    // light at N, so its look-up is too, or each walker is in its own shadow.
+    auto frame = [](float walker, float colour, float lookUp) {
+        return std::vector<Draw>{
+            {kBlockA, {walker, 7.0f}},
+            {kOtherA, {colour, lookUp}, kActorShader, 0, ObjectPlanner::kPixelStage},
+            {kTileA, {walker + 50.0f, 6.0f}},
+            {kTileB, {colour + 1.0f, lookUp}, kActorShader, 0, ObjectPlanner::kPixelStage}};
+    };
+    std::vector<Draw> latest = frame(2.0f, 0.4f, 12.0f);
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, frame(0.0f, 0.2f, 10.0f), frame(1.0f, 0.3f, 11.0f), latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(uploaded[1][0], std::lerp(0.3f, 0.4f, 0.5f), "a walker fades with it");
+    check::equal(uploaded[3][0], std::lerp(1.3f, 1.4f, 0.5f), "and so does the other");
+    check::equal(uploaded[1][1], 12.0f, "the light's look-up is drawn at N in one");
+    check::equal(uploaded[3][1], 12.0f, "and in the other");
+}
+
 void withMapBlendingOffADrawIntoTheMapIsDrawnAsTheTitleDrewIt() {
     constexpr uint32_t kCascade = 0xf4003000;
     auto frame = [](float walker, float light) {
@@ -352,6 +373,7 @@ void runObjectBlendSharedValueTests() {
     aValueBlendedDrawsDisagreeOnIsNotShared();
     aPassValueIsOneValueInEveryShaderThatReadsIt();
     aDrawIntoTheMapMovesWithItsObjectAndHoldsTheLight();
+    theLightsLookUpEveryObjectsPixelStageHoldsIsDrawnAtN();
     withMapBlendingOffADrawIntoTheMapIsDrawnAsTheTitleDrewIt();
     aPixelStageShadingAMovingObjectMovesWithIt();
     aMatrixEveryBlendedDrawChangedAlikeCarriesAnObjectDrawnAtN();

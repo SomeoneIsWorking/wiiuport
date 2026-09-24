@@ -771,6 +771,24 @@ void anObjectKnownByItsBlocksThatTurnedBackIsBlended() {
     check::equal(uploaded[0][0], 3.5f, "and drawn half way back");
 }
 
+void aSlotSetBackToTheStartOfAnotherRunIsDrawnAtN() {
+    // A ripple ring growing in its blocks until the title respawns it small
+    // at the swimmer: its blocks name the old ring at N-1, the draw nearest
+    // it, which it leapt back from further than it grew there.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kBlockA, {0.0f, 7.0f}}});
+    record(blend, {{kBlockB, {1.0f, 7.0f}}});
+    record(blend, {{kBlockA, {2.0f, 7.0f}}});
+    record(blend, {{kBlockB, {3.0f, 7.0f}}});
+    std::vector<Draw> respawned{{kBlockA, {0.5f, 7.0f}}};
+    record(blend, respawned);
+    blend.armOnce();
+    auto uploaded = replay(blend, respawned);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{0}, "the old ring is not its partner");
+    check::equal(uploaded[0][0], 0.5f, "and the new ring is drawn as the title drew it");
+}
+
 void blocksReusedByAnotherObjectDoNotNameThePartner() {
     // At N-1 the two walkers' blocks were handed over to each other: the
     // draw each one's blocks name is the other walker's.
@@ -1000,6 +1018,7 @@ void runObjectBlendTests() {
     aStillSpriteWhoseBlocksPassToAnotherIsNotBlendedToIt();
     anObjectTheTitleMovesEveryOtherFrameIsBlended();
     anObjectKnownByItsBlocksThatTurnedBackIsBlended();
+    aSlotSetBackToTheStartOfAnotherRunIsDrawnAtN();
     blocksReusedByAnotherObjectDoNotNameThePartner();
     aFlippingValueFarLargerThanTheMoveDoesNotHideThePartner();
     aValueEveryDrawHoldsDoesNotDecideThePartner();

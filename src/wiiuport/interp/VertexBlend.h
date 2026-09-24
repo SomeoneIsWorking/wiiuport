@@ -1,5 +1,7 @@
 #pragma once
 
+#include "wiiuport/interp/SharedVertexReads.h"
+
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/frame/RecordingObserver.h"
@@ -98,6 +100,11 @@ enum class VertexOutcome : uint8_t {
     // to tell which draws a defect in the in-between frame is. Drawn as the
     // title drew it.
     Excluded,
+    // Some of its bytes are read by a draw the replay cannot redirect, or by
+    // another mesh whose vertices moved and are drawn as the title drew them:
+    // blended, it would be drawn half a frame from them -- a toon outline
+    // showing black through the hair it wraps. Drawn as the title drew it.
+    SharesBytes,
     Count
 };
 
@@ -341,6 +348,9 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         std::unordered_map<std::pair<uint64_t, uint64_t>, std::vector<size_t>, PairHash> byShader;
         // Each mesh's id, by the copies it reads.
         std::map<std::vector<size_t>, uint32_t> meshes;
+        // What every draw of the frame reads vertices from, a kept mesh's
+        // once: the meshes whose bytes another reader draws are not blended.
+        std::vector<VertexRead> reads;
         // ObjectBlend's frames ended when this one ended.
         uint64_t frameIndex{0};
         // Assemblies recorded so far, and the last vertex-stage one.
@@ -351,6 +361,10 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
 
         void clear();
     };
+
+    // Notes what the draw being recorded reads vertices from, as `mesh`'s or,
+    // with none, a draw the replay draws from the title's bytes.
+    void recordReads(const LatteFrameHooks::DrawPrepared& draw, std::optional<uint32_t> mesh);
 
     // A draw's bytes, one buffer after another, from a frame's copies.
     std::span<const std::byte> bufferBytes(const Frame& frame, const Draw& draw,
@@ -419,6 +433,12 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // What the latest frame's draw at `index` came to, waiting for its mesh
     // if a worker is still blending it; none for a draw not kept.
     std::optional<PairBlend> blendOf(size_t index);
+    // Groups the latest frame's meshes by the bytes they share, and notes
+    // which groups a mesh drawn at N although it may have moved belongs to.
+    void groupMeshes(const VertexReadGroups& groups);
+    // Whether the group of meshes sharing bytes has a blended mesh and one
+    // drawn at N although it moved, waiting for every mesh of it.
+    bool groupTorn(uint32_t group);
     // Blends one pair into m_blended at `start`, its bytes laid out there,
     // checked against the object's draw two frames back.
     VertexOutcome blendPair(const Draw& earlier, const Draw& partner, const Draw& drawn,
@@ -472,6 +492,15 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::vector<uint8_t> m_meshExcluded;
     std::vector<std::optional<Job>> m_meshJobs;
     std::vector<std::optional<size_t>> m_meshSlots;
+    // The latest frame's meshes by the bytes they share (groupVertexReads):
+    // each mesh's group, how many meshes each group has, the slots of its
+    // blended ones, whether one of its meshes was planned drawn at N although
+    // it may have moved, and, once the replay asks, whether it is torn.
+    std::vector<uint32_t> m_meshGroup;
+    std::vector<uint32_t> m_groupMeshes;
+    std::vector<std::vector<size_t>> m_groupSlots;
+    std::vector<uint8_t> m_groupStepped;
+    std::vector<std::optional<bool>> m_groupTorn;
     std::vector<PairSlot> m_pairSlots;
     std::vector<Scratch> m_scratch{kBlendWorkers};
     std::array<uint64_t, kVertexOutcomeCount> m_outcomes{};

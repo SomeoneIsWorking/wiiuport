@@ -154,6 +154,8 @@ std::string_view vertexOutcomeName(VertexOutcome outcome) {
         return "started";
     case VertexOutcome::Excluded:
         return "excluded";
+    case VertexOutcome::SharesBytes:
+        return "sharesBytes";
     case VertexOutcome::Count:
         break;
     }
@@ -351,6 +353,7 @@ void VertexBlend::Frame::clear() {
     entryDraws.clear();
     byShader.clear();
     meshes.clear();
+    reads.clear();
     frameIndex = 0;
     assemblies = 0;
     lastVertexEntry.reset();
@@ -407,11 +410,25 @@ void VertexBlend::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) {
         }
         drawsOfEntry.last = static_cast<uint32_t>(index);
         m_building.byShader[{draw.vertexShaderBaseHash, draw.vertexShaderAuxHash}].push_back(index);
-        recorded.mesh =
-            m_building.meshes
-                .try_emplace(recorded.bufferStarts, static_cast<uint32_t>(m_building.meshes.size()))
-                .first->second;
+        auto [mesh, fresh] = m_building.meshes.try_emplace(
+            recorded.bufferStarts, static_cast<uint32_t>(m_building.meshes.size()));
+        recorded.mesh = mesh->second;
+        if (fresh) {
+            recordReads(draw, recorded.mesh);
+        }
         m_copying += std::chrono::steady_clock::now() - started;
+    } else if (m_objects.isPlanning()) {
+        recordReads(draw, std::nullopt);
+    }
+}
+
+void VertexBlend::recordReads(const LatteFrameHooks::DrawPrepared& draw,
+                              std::optional<uint32_t> mesh) {
+    for (uint32_t index = 0; index < draw.vertexBufferCount; ++index) {
+        const LatteFrameHooks::DrawPrepared::VertexBuffer& buffer = draw.vertexBuffers[index];
+        m_building.reads.push_back(VertexRead{.begin = reinterpret_cast<uintptr_t>(buffer.data),
+                                              .size = buffer.sizeInBytes,
+                                              .mesh = mesh});
     }
 }
 
@@ -469,6 +486,7 @@ void VertexBlend::startBlending() {
             m_meshExcluded[drawn.mesh] = 1;
         }
     }
+    VertexReadGroups groups = groupVertexReads(m_latest.reads, meshCount);
     for (size_t index = 0; index < m_latest.draws().size(); ++index) {
         const Draw& drawn = m_latest.draws()[index];
         if (!drawn.vertexEntry.has_value()) {
@@ -476,6 +494,10 @@ void VertexBlend::startBlending() {
         }
         if (m_meshExcluded[drawn.mesh] != 0) {
             m_drawBlends[index] = PairBlend{VertexOutcome::Excluded, 0};
+            continue;
+        }
+        if (groups.readUnredirected[drawn.mesh] != 0) {
+            m_drawBlends[index] = PairBlend{VertexOutcome::SharesBytes, 0};
             continue;
         }
         if (m_meshJobs[drawn.mesh].has_value()) {
@@ -516,7 +538,70 @@ void VertexBlend::startBlending() {
     if (m_blended.size() < bytes) {
         m_blended.resize(bytes);
     }
+    groupMeshes(groups);
     m_pool.start(m_pairSlots.size());
+}
+
+namespace {
+
+// Whether a mesh drawn with this outcome is drawn at N although its vertices
+// may have moved: a mesh sharing its bytes cannot then be blended.
+bool drawnAtNWhereItMoved(VertexOutcome outcome) {
+    switch (outcome) {
+    case VertexOutcome::Blended:
+    case VertexOutcome::Unchanged:
+    case VertexOutcome::Held:
+    case VertexOutcome::NotFloats:
+        return false;
+    default:
+        return true;
+    }
+}
+
+} // namespace
+
+void VertexBlend::groupMeshes(const VertexReadGroups& groups) {
+    size_t meshCount = groups.groupOf.size();
+    m_meshGroup = groups.groupOf;
+    m_groupMeshes.assign(meshCount, 0);
+    m_groupSlots.resize(meshCount);
+    for (std::vector<size_t>& slots : m_groupSlots) {
+        slots.clear();
+    }
+    m_groupStepped.assign(meshCount, 0);
+    m_groupTorn.assign(meshCount, std::nullopt);
+    for (uint32_t mesh = 0; mesh < meshCount; ++mesh) {
+        uint32_t group = m_meshGroup[mesh];
+        ++m_groupMeshes[group];
+        if (const std::optional<size_t>& slot = m_meshSlots[mesh]; slot.has_value()) {
+            m_groupSlots[group].push_back(*slot);
+        }
+    }
+    for (size_t index = 0; index < m_latest.draws().size(); ++index) {
+        const Draw& drawn = m_latest.draws()[index];
+        const std::optional<PairBlend>& planned = m_drawBlends[index];
+        if (drawn.vertexEntry.has_value() && !m_meshJobs[drawn.mesh].has_value() &&
+            planned.has_value() && drawnAtNWhereItMoved(planned->outcome)) {
+            m_groupStepped[m_meshGroup[drawn.mesh]] = 1;
+        }
+    }
+}
+
+bool VertexBlend::groupTorn(uint32_t group) {
+    std::optional<bool>& torn = m_groupTorn[group];
+    if (torn.has_value()) {
+        return *torn;
+    }
+    torn = m_groupStepped[group] != 0;
+    for (size_t slot : m_groupSlots[group]) {
+        if (!m_pool.done(slot)) {
+            auto started = std::chrono::steady_clock::now();
+            m_pool.waitFor(slot);
+            m_waiting += std::chrono::steady_clock::now() - started;
+        }
+        torn = *torn || drawnAtNWhereItMoved(m_pairSlots[slot].outcome);
+    }
+    return *torn;
 }
 
 std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index) const {
@@ -585,6 +670,10 @@ std::optional<VertexBlend::PairBlend> VertexBlend::blendOf(size_t index) {
         m_waiting += std::chrono::steady_clock::now() - started;
     }
     const PairSlot& pair = m_pairSlots[*slot];
+    uint32_t group = m_meshGroup[m_latest.draws()[index].mesh];
+    if (pair.outcome == VertexOutcome::Blended && m_groupMeshes[group] > 1 && groupTorn(group)) {
+        return PairBlend{VertexOutcome::SharesBytes, 0};
+    }
     return PairBlend{pair.outcome, pair.start};
 }
 
