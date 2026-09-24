@@ -24,7 +24,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Report host requirements and exit without building.",
     )
+    parser.add_argument(
+        "--apt-packages",
+        action="store_true",
+        help="Print the Debian packages the requirements name, for CI and containers.",
+    )
     args = parser.parse_args(argv)
+    if args.apt_packages:
+        print(" ".join(hostdeps.apt_packages()))
+        return 0
 
     try:
         layout = find_layout()
