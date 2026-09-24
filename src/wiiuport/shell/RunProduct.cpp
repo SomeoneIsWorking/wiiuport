@@ -3,6 +3,8 @@
 #include "wiiuport/Runtime.h"
 #include "wiiuport/shell/ShellHost.h"
 
+#include "Boot/SystemBringup.h"
+
 #include <lucent/log.h>
 
 #include <string_view>
@@ -33,8 +35,14 @@ int runProduct(const Product& product, int argc, char** argv) {
     // Installed before the system exists, so the first frame the guest
     // submits is already observed.
     Runtime::instance().installHooks();
-    ShellHost host;
-    return host.run(options);
+    int code = 0;
+    {
+        ShellHost host;
+        code = host.run(options);
+    }
+    // The emulated system cannot be taken down by static destructors; its
+    // owner ends the process instead, as every front end on it must.
+    SystemBringup::Exit(code);
 }
 
 } // namespace wiiuport::shell

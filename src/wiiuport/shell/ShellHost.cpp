@@ -35,6 +35,7 @@ int ShellHost::run(const Options& options) {
     m_expectedTitle = options.expectedTitle;
     if (!bringUpSystem()) {
         lucent::error("shell", "{}", m_failure);
+        shutdown();
         return 1;
     }
     std::filesystem::path title = resolveTitle(options);
@@ -67,6 +68,7 @@ int ShellHost::run(const Options& options) {
     // while nothing is.
     Runtime::instance().control().setControllerStatus(&m_controllers);
     m_controllers.start();
+    Runtime::instance().control().setHostStop(this);
     lucent::info("shell", "running {}", title.string());
     while (m_window.pumpEvents(*this)) {
         std::this_thread::sleep_for(kEventPollInterval);
@@ -74,6 +76,10 @@ int ShellHost::run(const Options& options) {
     lucent::info("shell", "host asked to stop");
     shutdown();
     return 0;
+}
+
+void ShellHost::requestStop() {
+    ShellWindow::requestClose();
 }
 
 void ShellHost::onHostEvent(SDL_Event& event) {
@@ -212,6 +218,7 @@ bool ShellHost::launchTitle(const std::filesystem::path& path) {
 }
 
 void ShellHost::shutdown() {
+    Runtime::instance().control().setHostStop(nullptr);
     // A title a maintainer paused would hold the rendering thread through
     // the shutdown that waits on it.
     Runtime::instance().frameGate().release();

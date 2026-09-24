@@ -47,6 +47,10 @@ class ShellWindow {
     bool open(const Options& options);
     void close();
 
+    // Asks the event loop to stop as closing the window does. Safe from any
+    // thread: it only queues the quit event pumpEvents acts on.
+    static void requestClose();
+
     bool isOpen() const {
         return m_window != nullptr;
     }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "wiiuport/control/HostStop.h"
 #include "wiiuport/shell/ControllerAutoMap.h"
 #include "wiiuport/shell/HostPaths.h"
 #include "wiiuport/shell/ShellWindow.h"
@@ -18,7 +19,7 @@ namespace wiiuport::shell {
 // It composes; it does not implement. Window handling belongs to ShellWindow,
 // guest execution to Cemu's core, and everything first-party answers for
 // itself over the control channel.
-class ShellHost final : public HostEventObserver {
+class ShellHost final : public HostEventObserver, public control::HostStopTarget {
   public:
     struct Options {
         // The running executable, as the host invoked it: the data shipped
@@ -39,6 +40,9 @@ class ShellHost final : public HostEventObserver {
     // Forwards controller arrivals, departures and input to the emulated
     // controllers, which have no event loop of their own.
     void onHostEvent(SDL_Event& event) override;
+
+    // POST /quit: leaves the event loop as closing the window does.
+    void requestStop() override;
 
   private:
     bool bringUpSystem();

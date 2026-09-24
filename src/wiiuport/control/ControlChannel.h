@@ -1,6 +1,7 @@
 #pragma once
 
 #include "wiiuport/control/ControllerStatus.h"
+#include "wiiuport/control/HostStop.h"
 #include "wiiuport/control/SetupStatus.h"
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FrameGate.h"
@@ -23,6 +24,7 @@
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -106,6 +108,14 @@ class ControlChannel {
     // What the setup screen is waiting for, or that no host reported one.
     std::string setupJson() const;
 
+    // The host registers itself while a title runs, so POST /quit can ask it
+    // to stop the way a player closing its window does; nullptr unregisters.
+    void setHostStop(HostStopTarget* target);
+
+    // The body of POST /quit, and whether a host took the request: none is
+    // registered while nothing runs, which is refused rather than ignored.
+    std::string requestHostStop(bool& accepted);
+
     // False when the listener could not bind, which is reported and not fatal:
     // a busy port must not stop the product running.
     bool start(uint16_t port);
@@ -179,6 +189,7 @@ class ControlChannel {
     frame::FramePresenter& m_presenter;
     const ControllerStatusSource* m_controllerStatus{nullptr};
     const SetupStatusSource* m_setupStatus{nullptr};
+    std::atomic<HostStopTarget*> m_hostStop{nullptr};
     frame::ReplayScheduler& m_scheduler;
     interp::FrameInterpolator& m_interpolator;
     const frame::FrameShapeLog& m_shapeLog;
