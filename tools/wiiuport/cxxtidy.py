@@ -13,20 +13,14 @@ import json
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .hostdeps import MissingHostPackages, Requirement, check
+from .lockedtools import LOCKED_BIN, LockedToolMissing, locked_tool
 from .paths import Layout
 from .structure import FIRST_PARTY_CXX_ROOTS
-
-TIDY_REQUIREMENT = Requirement(
-    "clang-tidy",
-    ("clang-tools-extra",),
-    ("clang-tidy",),
-    executables=("clang-tidy", "run-clang-tidy"),
-)
 
 REQUIRED_CHECK_GROUPS: tuple[str, ...] = (
     "clang-analyzer-",
@@ -113,8 +107,15 @@ def missing_check_groups(listed: str) -> list[str]:
     ]
 
 
-def run_tidy(root: Path, units: Sequence[Unit], runner: Runner = _run) -> TidyReport:
-    listed = runner(["clang-tidy", "--list-checks"], root)
+def run_tidy(
+    root: Path, units: Sequence[Unit], runner: Runner = _run, bin_dir: Path = LOCKED_BIN
+) -> TidyReport:
+    try:
+        tidy = str(locked_tool("clang-tidy", bin_dir))
+        parallel = str(locked_tool("run-clang-tidy.py", bin_dir))
+    except LockedToolMissing as missing:
+        raise TidyUnavailable(f"clang-tidy was never run.\n{missing}") from missing
+    listed = runner([tidy, "--list-checks"], root)
     missing = missing_check_groups(listed.stdout)
     if listed.returncode != 0 or missing:
         raise TidyUnavailable(
@@ -128,7 +129,10 @@ def run_tidy(root: Path, units: Sequence[Unit], runner: Runner = _run) -> TidyRe
         pattern = "^(" + "|".join(re.escape(str(source)) for source in sources) + ")$"
         result = runner(
             [
-                "run-clang-tidy",
+                sys.executable,
+                parallel,
+                "-clang-tidy-binary",
+                tidy,
                 "-p",
                 str(database),
                 "-j",
@@ -151,10 +155,6 @@ def run_tidy(root: Path, units: Sequence[Unit], runner: Runner = _run) -> TidyRe
 
 
 def check_tidy(layout: Layout) -> TidyReport:
-    try:
-        check((TIDY_REQUIREMENT,))
-    except MissingHostPackages as missing:
-        raise TidyUnavailable(f"clang-tidy was never run.\n{missing}") from missing
     units = tidy_units(layout.root, (layout.wiiuport_build, layout.cemu_build))
     if not units:
         raise TidyUnavailable("no database compiles a first-party unit, so nothing was analysed")

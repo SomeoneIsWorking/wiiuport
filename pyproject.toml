@@ -9,6 +9,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "clang-format==22.1.8",
+    "clang-tidy==22.1.8",
     "libclang",
     "pytest>=8",
     "ruff>=0.6",

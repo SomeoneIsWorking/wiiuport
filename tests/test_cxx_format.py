@@ -7,18 +7,11 @@ looked exactly like a pass.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
-import pytest
 from wiiuport.verify import check_formatting
 
 FIXTURES = Path(__file__).parent / "fixtures" / "format"
-
-pytestmark = pytest.mark.skipif(
-    shutil.which("clang-format") is None,
-    reason="clang-format is absent; its own refusal is covered separately",
-)
 
 
 def test_a_conforming_source_passes() -> None:
@@ -41,10 +34,7 @@ def test_the_configured_brace_rule_is_enforced() -> None:
     assert "unbraced.cpp" in detail
 
 
-def test_a_missing_formatter_refuses_instead_of_crashing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(shutil, "which", lambda _name: None)
-    passed, detail = check_formatting([FIXTURES / "formatted.cpp"], FIXTURES)
+def test_a_missing_formatter_refuses_instead_of_crashing(tmp_path: Path) -> None:
+    passed, detail = check_formatting([FIXTURES / "formatted.cpp"], FIXTURES, bin_dir=tmp_path)
     assert not passed
-    assert "clang-format" in detail and "sudo dnf install clang-tools-extra" in detail
+    assert "clang-format" in detail and "uv run --frozen" in detail
