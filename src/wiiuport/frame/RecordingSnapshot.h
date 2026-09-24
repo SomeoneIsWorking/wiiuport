@@ -26,7 +26,10 @@ namespace wiiuport::frame {
 class RecordingSnapshot final : public FrameEndListener {
   public:
     static constexpr size_t kMaxFrames = 16;
-    static constexpr const char* kMagic = "WIIUREC2";
+    static constexpr const char* kMagic = "WIIUREC3";
+    // Bits of an assembly's flags word.
+    static constexpr uint32_t kWritesColour = 1;
+    static constexpr uint32_t kLooksUpDepthMap = 2;
 
     // One frame of a snapshot, as the recorder published it.
     struct Frame {
@@ -42,7 +45,8 @@ class RecordingSnapshot final : public FrameEndListener {
 
     // The last completed snapshot, framed for the wire:
     //   magic, u32 frames; per frame u32 complete, u32 assemblies; per
-    //   assembly u64 baseHash, u64 auxHash, u32 stage, u32 writesColour, u32 sources,
+    //   assembly u64 baseHash, u64 auxHash, u32 stage, u32 flags (1 writesColour,
+    //   2 looksUpDepthMap), u32 sources,
     //   u32[sources], u32 floats, f32[floats]. Host byte order.
     // Empty when no snapshot has completed.
     std::string framed() const;

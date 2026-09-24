@@ -346,6 +346,24 @@ void theLightsLookUpEveryObjectsPixelStageHoldsIsDrawnAtN() {
     check::equal(uploaded[3][1], 12.0f, "and in the other");
 }
 
+void aPixelStageThatLooksUpTheLightsMapItselfIsDrawnAtN() {
+    // The pier: moving with the camera, its pixel stage compares against the
+    // light's map, drawn at N. Where it looks is the light's, and so at N.
+    auto frame = [](float pier, float lookUp) {
+        return std::vector<Draw>{{kBlockA, {pier, 7.0f}},
+                                 {.block = kOtherA,
+                                  .values = {lookUp, 0.5f},
+                                  .stage = ObjectPlanner::kPixelStage,
+                                  .looksUpDepthMap = true}};
+    };
+    std::vector<Draw> latest = frame(2.0f, 12.0f);
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, frame(0.0f, 10.0f), frame(1.0f, 11.0f), latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(uploaded[0][0], 1.5f, "the pier is drawn half way");
+    check::isTrue(uploaded[1] == latest[1].values, "its look-up of the map as the title drew it");
+}
+
 void withMapBlendingOffADrawIntoTheMapIsDrawnAsTheTitleDrewIt() {
     constexpr uint32_t kCascade = 0xf4003000;
     auto frame = [](float walker, float light) {
@@ -362,6 +380,21 @@ void withMapBlendingOffADrawIntoTheMapIsDrawnAsTheTitleDrewIt() {
     check::equal(blend.objects(Outcome::Shading), uint64_t{1}, "as a pixel stage is");
 }
 
+void withPixelBlendingOffAPixelStageIsDrawnAsTheTitleDrewIt() {
+    auto frame = [](float walker, float colour) {
+        return std::vector<Draw>{
+            {kBlockA, {walker, 7.0f}},
+            {kOtherA, {colour, 0.5f}, kActorShader, 0, ObjectPlanner::kPixelStage}};
+    };
+    std::vector<Draw> latest = frame(2.0f, 0.4f);
+    ObjectBlend blend{kHalfway};
+    blend.setPixelBlending(false);
+    armAfter(blend, frame(0.0f, 0.2f), frame(1.0f, 0.3f), latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(uploaded[0][0], 1.5f, "the walker is still drawn half way");
+    check::isTrue(uploaded[1] == latest[1].values, "its pixel stage as the title drew it");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -374,7 +407,9 @@ void runObjectBlendSharedValueTests() {
     aPassValueIsOneValueInEveryShaderThatReadsIt();
     aDrawIntoTheMapMovesWithItsObjectAndHoldsTheLight();
     theLightsLookUpEveryObjectsPixelStageHoldsIsDrawnAtN();
+    aPixelStageThatLooksUpTheLightsMapItselfIsDrawnAtN();
     withMapBlendingOffADrawIntoTheMapIsDrawnAsTheTitleDrewIt();
+    withPixelBlendingOffAPixelStageIsDrawnAsTheTitleDrewIt();
     aPixelStageShadingAMovingObjectMovesWithIt();
     aMatrixEveryBlendedDrawChangedAlikeCarriesAnObjectDrawnAtN();
     aMatrixTheBlendedDrawsChangedEachTheirOwnWayIsNoCamera();

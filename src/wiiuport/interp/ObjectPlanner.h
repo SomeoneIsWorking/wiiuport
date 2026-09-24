@@ -99,6 +99,12 @@ class ObjectPlanner {
         m_mapBlending = blending;
     }
 
+    // Off, every pixel stage is drawn at N, shading its object as the title
+    // did, from its next add(). A maintainer's discriminator, not a setting.
+    void setPixelBlending(bool blending) {
+        m_pixelBlending = blending;
+    }
+
     // Whether N was planned against two whole frames before it.
     bool ready() const {
         return m_framesHeld >= kFramesToPlan;
@@ -338,7 +344,7 @@ class ObjectPlanner {
     Outcome plan(size_t entry);
     // A pixel stage's outcome: planned behind a blended vertex stage,
     // Shading otherwise.
-    Outcome planPixelStage(size_t entry);
+    Outcome planPixelStage(size_t entry, bool looksUpDepthMap);
     // Whether an object found by its values at `candidate` in N-1 passed
     // through it on the curve over its draws at N-3, N-2 and N.
     bool turnedThrough(std::span<const float> before, std::span<const float> after,
@@ -460,6 +466,7 @@ class ObjectPlanner {
     Plan m_plan;
     size_t m_framesHeld{0};
     bool m_mapBlending{true};
+    bool m_pixelBlending{true};
     bool m_latestUnindexed{false};
     uint64_t m_framesPlanned{0};
     uint64_t m_heldPartnersDerived{0};

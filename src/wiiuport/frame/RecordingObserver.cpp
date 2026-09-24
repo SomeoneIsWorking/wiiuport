@@ -49,6 +49,7 @@ void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly
     recorded.shaderAuxHash = assembly.shaderAuxHash;
     recorded.stageIndex = assembly.stageIndex;
     recorded.writesColour = assembly.writesColour;
+    recorded.looksUpDepthMap = assembly.looksUpDepthMap;
     std::span<const uint32_t> sources = sourceWordsOf(assembly);
     recorded.blockSources.assign(sources.begin(), sources.end());
     std::span<const float> values(assembly.data, assembly.sizeInBytes / sizeof(float));

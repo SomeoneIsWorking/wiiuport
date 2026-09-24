@@ -21,6 +21,7 @@ ReplayedDraw::ReplayedDraw(const Draw& draw) : sources(draw.sources()), values(d
     assembly.shaderBaseHash = draw.shader;
     assembly.stageIndex = draw.stage;
     assembly.writesColour = draw.writesColour;
+    assembly.looksUpDepthMap = draw.looksUpDepthMap;
     assembly.data = values.data();
     assembly.sizeInBytes = static_cast<uint32_t>(values.size() * sizeof(float));
     assembly.blockAddresses = sources.data();
@@ -35,6 +36,7 @@ FrameRecording frameOf(const std::vector<Draw>& draws) {
         assembly.shaderBaseHash = draw.shader;
         assembly.stageIndex = draw.stage;
         assembly.writesColour = draw.writesColour;
+        assembly.looksUpDepthMap = draw.looksUpDepthMap;
         assembly.blockSources = draw.sources();
         assembly.data = draw.values;
         frame.addUniformAssembly(assembly);
