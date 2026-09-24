@@ -159,6 +159,40 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement(
         "ALSA", ("alsa-lib-devel",), ("libasound2-dev",), files=("/usr/include/alsa/asoundlib.h",)
     ),
+    # SDL's X11 backend refuses to configure without each X extension it
+    # enables by default; GTK 3 used to bring these in unasked.
+    Requirement(
+        "X11 and the extensions SDL's X11 backend uses",
+        (
+            "libX11-devel",
+            "libXext-devel",
+            "libXcursor-devel",
+            "libXi-devel",
+            "libXfixes-devel",
+            "libXrandr-devel",
+            "libXtst-devel",
+        ),
+        (
+            "libx11-dev",
+            "libxext-dev",
+            "libxcursor-dev",
+            "libxi-dev",
+            "libxfixes-dev",
+            "libxrandr-dev",
+            "libxtst-dev",
+        ),
+        files=(
+            "/usr/include/X11/Xlib.h",
+            "/usr/include/X11/extensions/Xdbe.h",
+            "/usr/include/X11/extensions/shape.h",
+            "/usr/include/X11/extensions/sync.h",
+            "/usr/include/X11/Xcursor/Xcursor.h",
+            "/usr/include/X11/extensions/XInput2.h",
+            "/usr/include/X11/extensions/Xfixes.h",
+            "/usr/include/X11/extensions/Xrandr.h",
+            "/usr/include/X11/extensions/XTest.h",
+        ),
+    ),
     # SDL's Wayland backend and Cemu's own viewporter protocol. GTK 3 used to
     # bring these in unasked; the runtime no longer builds the wx front end
     # that needed GTK, so they are named for what uses them.
