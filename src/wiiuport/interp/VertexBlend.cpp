@@ -220,6 +220,31 @@ bool VertexLayout::absorb(const VertexLayout& other) {
     return true;
 }
 
+namespace {
+
+// Whether the mesh stepped from N-1 to N no further than from N-2 to N-1,
+// over the floats it moved in from N-2 to N.
+bool steppedNoFurther(const VertexLayout& layout, std::span<const std::byte> twoBack,
+                      std::span<const std::byte> before, std::span<const std::byte> after) {
+    double toBefore = 0.0;
+    double toAfter = 0.0;
+    forEachFloat(layout, [&](size_t word, Endian endian) {
+        float first = readFloat(twoBack, word, endian);
+        float between = readFloat(before, word, endian);
+        float last = readFloat(after, word, endian);
+        if (!Midpoint::movedIn(first, last) || !isNumber(between)) {
+            return;
+        }
+        double stepped = static_cast<double>(between) - first;
+        double leapt = static_cast<double>(last) - between;
+        toBefore += stepped * stepped;
+        toAfter += leapt * leapt;
+    });
+    return toAfter <= toBefore;
+}
+
+} // namespace
+
 VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::byte> twoBack,
                                std::span<const std::byte> before, std::span<const std::byte> after,
                                float t, PartnerIdentity identity, std::span<std::byte> out) {
@@ -242,8 +267,15 @@ VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::
     if (midpoint.stoodAtStart()) {
         return VertexOutcome::Started;
     }
-    if (identity == PartnerIdentity::ByPlace && !midpoint.landsOn()) {
-        return VertexOutcome::Unverified;
+    if (!midpoint.landsOn()) {
+        // Known by its blocks, its own animation may have turned back at
+        // N-1, stepping to N no further than it stepped there; one that
+        // leaps further was set back to the start of its run -- a band of
+        // surf -- and half way is where it never was.
+        if (identity != PartnerIdentity::ByBlocks ||
+            !steppedNoFurther(layout, twoBack, before, after)) {
+            return VertexOutcome::Unverified;
+        }
     }
     uint64_t blended = 0;
     bool outside = false;
@@ -495,9 +527,12 @@ std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index
     if (!partner.has_value() || !earlier.has_value()) {
         return VertexOutcome::ShapeDiffers;
     }
-    PartnerIdentity identity = planner.latest().sharesKey(*drawn.vertexEntry)
-                                   ? PartnerIdentity::ByPlace
-                                   : PartnerIdentity::ByBlocks;
+    PartnerIdentity identity = PartnerIdentity::ByBlocks;
+    if (planner.latest().sharesKey(*drawn.vertexEntry)) {
+        identity = PartnerIdentity::ByPlace;
+    } else if (planner.partnerFoundByValues(*drawn.vertexEntry)) {
+        identity = PartnerIdentity::ByValues;
+    }
     return Job{index, *partner, *earlier, identity, index, &drawn.layout};
 }
 

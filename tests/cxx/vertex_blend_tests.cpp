@@ -189,6 +189,32 @@ void anotherMeshAFrameBeforeIsNotBlendedTowards() {
     check::isTrue(out == after, "is not blended towards: N is drawn");
 }
 
+void anotherObjectsMeshFoundByUniformsIsNotBlendedTowards() {
+    // The uniforms of another object stood where the object's passed; its
+    // mesh, at 501, is not the one that moved from 100 to 102.
+    std::vector<std::byte> twoBack = bytesOf({{{100.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> before = bytesOf({{{501.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> after = bytesOf({{{102.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> out(after.size());
+    VertexOutcome outcome = blendVertexBytes(layoutOf(1, kBigEndian), twoBack, before, after,
+                                             kHalfway, PartnerIdentity::ByValues, out);
+    check::isTrue(outcome == VertexOutcome::Unverified, "a mesh it did not pass through");
+    check::isTrue(out == after, "is not blended towards: N is drawn");
+}
+
+void aMeshItsBlocksNameSetBackToTheStartOfItsRunIsDrawnAtN() {
+    // A band of surf runs up the beach and is set back to where it starts:
+    // half way is where it never was.
+    std::vector<std::byte> twoBack = bytesOf({{{100.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> before = bytesOf({{{104.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> after = bytesOf({{{0.0f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> out(after.size());
+    VertexOutcome outcome =
+        blendVertexBytes(layoutOf(1, kBigEndian), twoBack, before, after, kHalfway, kByBlocks, out);
+    check::isTrue(outcome == VertexOutcome::Unverified, "it is not blended");
+    check::isTrue(out == after, "N is drawn");
+}
+
 void aMeshItsBlocksNameIsBlendedThoughItTurnedBack() {
     // Its own animation turned back: N-1 is not near the middle of N-2..N,
     // but its blocks say whose mesh it is.
@@ -708,6 +734,8 @@ void runVertexBlendTests() {
     aMoveTooSmallToHalveIsOutside();
     aValueThatIsNotANumberIsTakenFromN();
     anotherMeshAFrameBeforeIsNotBlendedTowards();
+    anotherObjectsMeshFoundByUniformsIsNotBlendedTowards();
+    aMeshItsBlocksNameSetBackToTheStartOfItsRunIsDrawnAtN();
     aMeshItsBlocksNameIsBlendedThoughItTurnedBack();
     aMeshBackWhereItStoodTwoFramesAgoIsHeld();
     aMeshThatStoodStillUntilNIsDrawnAsTheTitleDrewIt();

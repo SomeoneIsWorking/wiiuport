@@ -7,6 +7,7 @@
 #include "wiiuport/interp/SharedTransforms.h"
 #include "wiiuport/interp/SharedValues.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -28,6 +29,12 @@ struct FrameState {
     bool at(size_t index) const {
         return index < oneBack.size() && index < twoBack.size() && oneBack[index] != 0 &&
                twoBack[index] != 0;
+    }
+
+    // The state of the values from `offset` on, for a slice of them.
+    FrameState from(size_t offset) const {
+        return {oneBack.subspan(std::min(offset, oneBack.size())),
+                twoBack.subspan(std::min(offset, twoBack.size()))};
     }
 };
 
@@ -101,6 +108,10 @@ class ObjectPlanner {
     // blended entry was blended from, or the one a held entry's learned
     // blocks name there. None where it is not known.
     std::optional<size_t> partnerOf(size_t entry) const;
+    // Whether partnerOf(entry) was found by the values its object drew
+    // with rather than named by its blocks: those vouch for the values, not
+    // for anything else the draw holds.
+    bool partnerFoundByValues(size_t entry) const;
     // The entry of N-2 that is the same object as an entry of N -- blended,
     // held or unverified -- which is what checks the partner. None where the
     // object has no draw there.
@@ -139,6 +150,8 @@ class ObjectPlanner {
     };
     static constexpr uint32_t kPixelStage = LatteFrameHooks::kPixelStageIndex;
     static constexpr size_t kOutcomeCount = static_cast<size_t>(Outcome::Count);
+    // Latte's uniforms are registers of four floats, each one quantity.
+    static constexpr size_t kRegisterFloats = 4;
     static std::string_view outcomeName(Outcome outcome);
 
     using Outcomes = std::array<uint64_t, kOutcomeCount>;
@@ -274,6 +287,8 @@ class ObjectPlanner {
         // blended, else carried from its draw in N-1 named by its blocks;
         // NaN where none was seen.
         std::vector<double> stepAt;
+        // Whether the partner was found by values, by entry (Found).
+        std::vector<uint8_t> foundByValues;
         std::vector<float> floats;
         // What each entry came to, by entry.
         std::vector<Outcome> outcomeOf;
@@ -321,6 +336,8 @@ class ObjectPlanner {
     struct Found {
         size_t earlier;
         std::optional<size_t> partner;
+        // Found by the values it drew with, not named by its blocks.
+        bool byValues{false};
     };
 
     // Finds the object whose draw in N is `after` in N-2 and N-1: by its
