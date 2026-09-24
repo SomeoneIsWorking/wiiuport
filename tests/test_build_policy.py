@@ -156,3 +156,10 @@ def test_every_project_in_the_build_records_paths_relative_to_the_checkout() -> 
     included = config.reproducible_paths.read_text()
     assert "-ffile-prefix-map=${WIIUPORT_CHECKOUT}/=wiiuport/" in included
     assert "include_guard(GLOBAL)" in included
+
+
+def test_the_runtime_is_built_without_the_wx_front_end() -> None:
+    """The product is the SDL shell. With wx in the build, SDL cannot take its
+    Wayland backend: both embed the same generated protocol stubs."""
+    config = BuildConfig(layout=Layout(root=Path(__file__).resolve().parent.parent))
+    assert "-DENABLE_WXWIDGETS=OFF" in build.configure_command(config, config.layout.cemu_source)

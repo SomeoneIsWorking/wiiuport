@@ -113,9 +113,6 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
         files=("/usr/include/png.h",),
         libraries=("libpng16.a",),
     ),
-    Requirement(
-        "GTK 3", ("gtk3-devel",), ("libgtk-3-dev",), files=("/usr/include/gtk-3.0/gtk/gtk.h",)
-    ),
     Requirement("glm", ("glm-devel",), ("libglm-dev",), files=("/usr/include/glm/glm.hpp",)),
     # The setup screen's font engine. setup-ui refuses without it rather than
     # drawing a screen with no text, and the refusal is easier to act on here,
@@ -125,13 +122,6 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
         ("freetype-devel",),
         ("libfreetype-dev",),
         files=("/usr/include/freetype2/ft2build.h",),
-    ),
-    # cairo is the fourth of Cemu's empty Linux overlay ports (with gtk3, glm and
-    # libpng), so vcpkg deliberately takes it from the distribution. It arrives as a
-    # GTK 3 dependency on both Fedora and Debian, which is exactly why an undeclared
-    # requirement like this stays invisible until something stops pulling it in.
-    Requirement(
-        "cairo", ("cairo-devel",), ("libcairo2-dev",), files=("/usr/include/cairo/cairo.h",)
     ),
     Requirement(
         "libsecret",
@@ -168,6 +158,22 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
     # cubeb's audio backend on Linux; the runtime plays through ALSA.
     Requirement(
         "ALSA", ("alsa-lib-devel",), ("libasound2-dev",), files=("/usr/include/alsa/asoundlib.h",)
+    ),
+    # SDL's Wayland backend and Cemu's own viewporter protocol. GTK 3 used to
+    # bring these in unasked; the runtime no longer builds the wx front end
+    # that needed GTK, so they are named for what uses them.
+    Requirement(
+        "Wayland client and scanner",
+        ("wayland-devel",),
+        ("libwayland-dev",),
+        files=("/usr/include/wayland-client.h", "/usr/include/wayland-egl.h"),
+        executables=("wayland-scanner",),
+    ),
+    Requirement(
+        "xkbcommon",
+        ("libxkbcommon-devel",),
+        ("libxkbcommon-dev",),
+        files=("/usr/include/xkbcommon/xkbcommon.h",),
     ),
     Requirement(
         "wayland-protocols",

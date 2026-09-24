@@ -49,8 +49,9 @@ bool ShellWindow::open(const Options& options) {
         return false;
     }
     WindowSystem::GetWindowInfo().app_active = true;
-    lucent::info("shell", "window open: {}x{} {}", options.width, options.height,
-                 options.hidden ? "hidden" : "shown");
+    const char* driver = SDL_GetCurrentVideoDriver();
+    lucent::info("shell", "window open: {}x{} {} on {}", options.width, options.height,
+                 options.hidden ? "hidden" : "shown", driver != nullptr ? driver : "no driver");
     return true;
 }
 
