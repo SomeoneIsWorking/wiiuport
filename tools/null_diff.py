@@ -236,11 +236,19 @@ def main(argv: list[str] | None = None) -> int:
     if differing == 0:
         print("identical: the replay reproduced the frame it recorded, byte for byte")
         return 0
+    # The renderer does not draw the same commands the same way twice, so
+    # the replay is judged against itself: faithful when it lands no further
+    # from the title's frame than a second replay lands from the first.
+    if largest <= again_largest:
+        print(
+            f"faithful: no byte is further from the title's frame ({largest}) than two replays "
+            f"of the recording are from each other ({again_largest})"
+        )
+        return 0
     print(
-        "not identical. Both images are one frame -- the title's present and the replay's "
-        "present of the same recording -- so this difference is the replay, not the scene "
-        "advancing. The two PNGs show where. Where two replays of the recording differ as "
-        "much, the renderer does not draw the same commands the same way twice."
+        "not faithful. Both images are one frame -- the title's present and the replay's "
+        "present of the same recording -- and the replay lands further from it than from "
+        "itself replayed again, so this difference is the replay's. The two PNGs show where."
     )
     return 1
 
