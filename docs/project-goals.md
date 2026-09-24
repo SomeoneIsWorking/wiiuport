@@ -39,8 +39,10 @@ interpolating the transforms the game already submits preserves simulation seman
 unlike patching the game's tick rate.
 
 **Success conditions.**
-- A frame's draw stream can be replayed with byte-identical output when the blend is the
-  identity at t=1 (the null-interpolation discriminator).
+- A frame's draw stream can be replayed, with the blend the identity at t=1, to output no
+  further from the title's frame than the renderer's own replay of that stream is from
+  itself (the null-interpolation discriminator; the renderer does not draw the same
+  commands identically twice, so byte-identical is not a bar any replay can meet).
 - Substituted transform storage never writes back into guest memory.
 - The runtime reports, with denominators: frames recorded, frames replayed, replay
   bailouts by reason, and substituted transform slots per frame.
