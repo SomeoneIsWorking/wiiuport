@@ -67,8 +67,6 @@ HOST_PROVIDED: frozenset[str] = frozenset(
         "libbz2.so.1",
         "libbz2.so.1.0",
         "libz.so.1",
-        "libglib-2.0.so.0",
-        "libpcre2-8.so.0",
         "libbsd.so.0",
         "libmd.so.0",
     }
@@ -76,6 +74,17 @@ HOST_PROVIDED: frozenset[str] = frozenset(
 """Libraries left to the host. Everything else the executable links is bundled,
 so a new dependency is carried by default rather than missing on a player's
 machine."""
+
+LIBRARY_FAMILIES: tuple[frozenset[str], ...] = (
+    # One release of glib; gio and gobject call into libglib's private symbols.
+    frozenset(
+        {"libglib-2.0.so.0", "libgio-2.0.so.0", "libgobject-2.0.so.0", "libgmodule-2.0.so.0"}
+    ),
+    frozenset({"libGL.so.1", "libEGL.so.1", "libGLX.so.0", "libOpenGL.so.0", "libGLdispatch.so.0"}),
+)
+"""Libraries built together, which a package takes all from the host or all from
+the bundle: split, one half calls into a release of the other it was not built
+against."""
 
 _LDD_LINE = re.compile(r"^\s*(?P<name>\S+)(?: => (?P<path>\S+|not found))?(?: \(0x[0-9a-f]+\))?$")
 

@@ -115,3 +115,9 @@ def test_a_bundle_is_not_staged_over_another_or_with_a_private_path(tmp_path: Pa
         )
     with pytest.raises(BundleRefused, match="not a staged runtime bundle"):
         runtime_bundle.read_manifest(existing)
+
+
+def test_no_library_family_is_split_between_the_host_and_the_bundle() -> None:
+    for family in runtime_bundle.LIBRARY_FAMILIES:
+        from_host = family & runtime_bundle.HOST_PROVIDED
+        assert from_host in (frozenset(), family), sorted(family)
