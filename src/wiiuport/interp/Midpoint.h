@@ -56,27 +56,23 @@ class Midpoint {
 
     // One value at N-2, its candidate's at N-1, and N.
     void add(float before, float between, float after) {
-        if (!movedIn(before, after)) {
+        addExpected(before, between, after, (static_cast<double>(before) + after) / 2.0);
+    }
+
+    // The same, where the candidate's own value at N-3 is known too: a path
+    // that turns passes at N-1 through the curve over N-3, N-2 and N, not
+    // through the midpoint of N-2 and N. A different object's N-3 bends that
+    // curve away from its N-1 as surely as its N-1 is off the midpoint. A
+    // value with no number at N-3 has no curve, and is judged by its
+    // midpoint.
+    void addCurved(float threeBack, float before, float between, float after) {
+        if (!isNumber(threeBack)) {
+            add(before, between, after);
             return;
         }
-        ++m_moved;
-        if (!isNumber(between)) {
-            return;
-        }
-        if (sameBits(between, before)) {
-            ++m_stood;
-        }
-        double moved = static_cast<double>(after) - before;
-        // The title rounds what it computes to a float: within its rounding
-        // of the candidate, the object is on it. Far from the origin a move
-        // is a few units in the last place, and rounding alone would
-        // otherwise set the object off its own path.
-        double off =
-            std::max(0.0, std::abs(((static_cast<double>(before) + after) / 2.0) - between) -
-                              rounding(between));
-        m_stepSquared += moved * moved;
-        m_residualSquared += off * off;
-        ++m_compared;
+        addExpected(before, between, after,
+                    (-static_cast<double>(threeBack) / 3.0) + before +
+                        (static_cast<double>(after) / 3.0));
     }
 
     // Values it moved in, and of those the candidate had a number at.
@@ -108,6 +104,29 @@ class Midpoint {
     }
 
   private:
+    // `expected` is where the object would stand at N-1 on its path.
+    void addExpected(float before, float between, float after, double expected) {
+        if (!movedIn(before, after)) {
+            return;
+        }
+        ++m_moved;
+        if (!isNumber(between)) {
+            return;
+        }
+        if (sameBits(between, before)) {
+            ++m_stood;
+        }
+        double moved = static_cast<double>(after) - before;
+        // The title rounds what it computes to a float: within its rounding
+        // of the candidate, the object is on it. Far from the origin a move
+        // is a few units in the last place, and rounding alone would
+        // otherwise set the object off its own path.
+        double off = std::max(0.0, std::abs(expected - between) - rounding(between));
+        m_stepSquared += moved * moved;
+        m_residualSquared += off * off;
+        ++m_compared;
+    }
+
     double m_stepSquared{0.0};
     double m_residualSquared{0.0};
     size_t m_compared{0};

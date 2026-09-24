@@ -32,6 +32,7 @@ using wiiuport::tests::object_blend::kHalfway;
 using wiiuport::tests::object_blend::kOtherA;
 using wiiuport::tests::object_blend::kOtherB;
 using wiiuport::tests::object_blend::kOutline;
+using wiiuport::tests::object_blend::kPierShader;
 using wiiuport::tests::object_blend::record;
 using wiiuport::tests::object_blend::replay;
 using wiiuport::tests::object_blend::ReplayedDraw;
@@ -525,6 +526,46 @@ void aPlaceTheTitleComputedIsKnownThroughItsArithmeticsRounding() {
     check::equal(uploaded[0][0], 0.5f * (0.695f + 0.698f), "and turned half way");
 }
 
+void anObjectFoundByValuesThatTurnedAtNMinusOneIsBlended() {
+    // A buoy drifting and bobbing: it drifts on, and bobs up, up, turning,
+    // down. Its blocks pass to other objects, so it is found by its values;
+    // its midpoint over N-2 and N is off its own draw at N-1 in the register
+    // that turned, and the curve through its draw at N-3 is not.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    // Its block at N-2 was another object's at N-4, so nothing is learned.
+    record(blend, {{kOtherA, {9.0f, 9.0f}, kPierShader}});
+    record(blend, {{kBlockB, {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f}}});
+    record(blend, {{kOtherA, {10.0f, 0.0f, 0.0f, 0.0f, 2.0f, 0.0f, 0.0f, 0.0f}}});
+    record(blend, {{kBlockB, {20.0f, 0.0f, 0.0f, 0.0f, 2.0f, 0.0f, 0.0f, 0.0f}}});
+    std::vector<Draw> latest{{kOtherA, {30.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f}}};
+    record(blend, latest);
+    blend.armOnce();
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.planner().partnersTurned(), uint64_t{1}, "its turn is on its path");
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "so it is blended");
+    check::equal(uploaded[0][0], 25.0f, "drifted half way on");
+    check::equal(uploaded[0][4], 1.5f, "and half way back down");
+}
+
+void anotherObjectTurnedOtherwiseIsNotTakenForATurn() {
+    // The surf's other piece, turned otherwise, standing where the object's
+    // midpoint lands: its own draw at N-3 bends the curve away from it.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kOtherA, {9.0f, 9.0f}, kPierShader}});
+    record(blend, {{kBlockB, {-10.0f, 0.0f, 0.0f, 0.0f, 0.9f, 0.0f, 0.0f, 0.0f}}});
+    record(blend, {{kOtherA, {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}}});
+    record(blend, {{kBlockB, {10.0f, 0.0f, 0.0f, 0.0f, 0.3f, 0.0f, 0.0f, 0.0f}}});
+    std::vector<Draw> latest{{kOtherA, {20.0f, 0.0f, 0.0f, 0.0f, 0.02f, 0.0f, 0.0f, 0.0f}}};
+    record(blend, latest);
+    blend.armOnce();
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.planner().partnersTurned(), uint64_t{0}, "no turn is taken");
+    check::equal(blend.objects(Outcome::Blended), uint64_t{0}, "it is not blended");
+    check::equal(uploaded[0][0], 20.0f, "and is drawn at N");
+}
+
 void anObjectKnownByItsBlocksThatStoppedAtNMinusOneIsHeld() {
     // Walked long enough for its blocks to be paired, then stopped a frame
     // before N: its own draw at N-1 holds N, which is where it stands
@@ -946,6 +987,8 @@ void runObjectBlendTests() {
     aMoveTooSmallToHalveIsNotDrawnBetween();
     anObjectFarFromTheOriginIsKnownThroughItsRounding();
     aPlaceTheTitleComputedIsKnownThroughItsArithmeticsRounding();
+    anObjectFoundByValuesThatTurnedAtNMinusOneIsBlended();
+    anotherObjectTurnedOtherwiseIsNotTakenForATurn();
     anObjectKnownByItsBlocksThatStoppedAtNMinusOneIsHeld();
     anObjectKnownByItsBlocksThatStoodUntilNMinusOneIsBlended();
     anObjectFoundByItsValuesThatStoodUntilNMinusOneIsBlended();

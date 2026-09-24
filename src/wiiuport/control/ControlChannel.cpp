@@ -509,6 +509,7 @@ std::string ControlChannel::interpolationJson() const {
     body += ",\"objectPartnersSearched\":" + std::to_string(objects.planner().partnersSearched());
     body += ",\"objectPartnersReidentified\":" +
             std::to_string(objects.planner().partnersReidentified());
+    body += ",\"objectPartnersTurned\":" + std::to_string(objects.planner().partnersTurned());
     body +=
         ",\"objectHeldPartnersDerived\":" + std::to_string(objects.planner().heldPartnersDerived());
     body += ",\"objectSearchesDeferred\":" + std::to_string(objects.planner().searchesDeferred());
