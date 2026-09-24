@@ -18,6 +18,7 @@ add_executable(wiiuport_tests
   # The shipping implementation, compiled into the tests rather than
   # reimplemented beside them. It is free of the emulated system on purpose,
   # so what the player's remembered title does can be checked without one.
+  ../../src/wiiuport/shell/TitleIdentity.cpp
   ../../src/wiiuport/shell/TitleSelection.cpp
 )
 target_link_libraries(wiiuport_tests PRIVATE wiiuport::wiiuport)

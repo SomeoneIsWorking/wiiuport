@@ -3,7 +3,8 @@
 // A player runs this; Cemu's own front end is not built. The disc image is an
 // optional argument: given one, that is what runs, and given none the product
 // runs what the player chose last time, or asks them on its setup screen. It
-// never guesses which game to run.
+// never guesses which game to run. A product made for one title names it
+// with --title-id, and a disc holding another is refused.
 
 #include "wiiuport/Runtime.h"
 #include "wiiuport/shell/ShellHost.h"
@@ -17,7 +18,9 @@
 namespace {
 
 void printUsage(const char* program) {
-    lucent::error("shell", "usage: {} [disc image] [--hidden] [--width N] [--height N]", program);
+    lucent::error("shell",
+                  "usage: {} [disc image] [--title-id ID] [--hidden] [--width N] [--height N]",
+                  program);
 }
 
 } // namespace
@@ -30,6 +33,14 @@ int main(int argc, char* argv[]) {
         const std::string& argument = arguments[i];
         if (argument == "--hidden") {
             options.window.hidden = true;
+            continue;
+        }
+        if (argument == "--title-id" && i + 1 < arguments.size()) {
+            options.expectedTitle = wiiuport::shell::TitleIdentity::parse(arguments[++i]);
+            if (!options.expectedTitle.has_value()) {
+                lucent::error("shell", "--title-id takes sixteen hex digits, not {}", arguments[i]);
+                return 2;
+            }
             continue;
         }
         if ((argument == "--width" || argument == "--height") && i + 1 < arguments.size()) {

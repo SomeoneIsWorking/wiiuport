@@ -1,11 +1,15 @@
 #include "check.h"
 #include "suites.h"
+#include "wiiuport/shell/TitleIdentity.h"
 #include "wiiuport/shell/TitleSelection.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 
+using wiiuport::shell::TitleIdentity;
 using wiiuport::shell::TitleSelection;
 
 namespace {
@@ -102,6 +106,32 @@ void anEmptyRecordIsAFailureAndNotAnAnswer() {
                   "and is reported as a record that could not be read");
 }
 
+void aTitleIdIsSixteenHexDigits() {
+    std::optional<TitleIdentity> lower = TitleIdentity::parse("0005000010143500");
+    check::isTrue(lower.has_value(), "an ID as it is written is read");
+    check::equal(lower->id(), uint64_t{0x0005000010143500}, "as the number it names");
+    check::equal(TitleIdentity::parse("0005000010143AbC")->id(), uint64_t{0x0005000010143abc},
+                 "in either case");
+    check::isTrue(!TitleIdentity::parse("000500001014350").has_value(), "fifteen digits are not");
+    check::isTrue(!TitleIdentity::parse("0x05000010143500").has_value(), "nor a prefixed one");
+    check::isTrue(!TitleIdentity::parse("000500001014350g").has_value(), "nor one not in hex");
+    check::isTrue(!TitleIdentity::parse("").has_value(), "nor nothing");
+}
+
+void onlyTheProductsOwnTitleIsAccepted() {
+    TitleIdentity windWaker(0x0005000010143500);
+    check::isTrue(windWaker.refusal(0x0005000010143500, "Wind Waker HD").empty(),
+                  "its own title is accepted");
+    std::string refused = windWaker.refusal(0x000500001010ec00, "Mario Kart 8");
+    check::isTrue(refused.find("Mario Kart 8") != std::string::npos,
+                  "another is refused by what it holds");
+    check::isTrue(refused.find("000500001010ec00") != std::string::npos &&
+                      refused.find("0005000010143500") != std::string::npos,
+                  "naming both IDs");
+    check::isTrue(windWaker.refusal(0x000500001010ec00, "").find("a title") != std::string::npos,
+                  "and one without a name is still refused");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -112,6 +142,8 @@ void runSelectionTests() {
     aRefusedTitleIsNotKept();
     aTitleThatStoppedWorkingIsForgottenOutLoud();
     anEmptyRecordIsAFailureAndNotAnAnswer();
+    aTitleIdIsSixteenHexDigits();
+    onlyTheProductsOwnTitleIsAccepted();
     std::filesystem::remove_all(std::filesystem::temp_directory_path() /
                                 "wiiuport-title-selection-tests");
 }

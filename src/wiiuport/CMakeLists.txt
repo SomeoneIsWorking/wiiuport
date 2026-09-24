@@ -158,6 +158,8 @@ if(TARGET CemuCafe)
     shell/ShellHost.h
     shell/ShellWindow.cpp
     shell/ShellWindow.h
+    shell/TitleIdentity.cpp
+    shell/TitleIdentity.h
     shell/TitleSelection.cpp
     shell/TitleSelection.h
     shell/WindowSystemBridge.cpp
