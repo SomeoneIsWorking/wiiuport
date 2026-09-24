@@ -11,6 +11,11 @@ screen on the display and say, over the control channel, what it is waiting
 for. Negative: the same installation with a remembered title must never show
 the screen and must reach the title instead. Each branch refuses by name when
 it is not observed.
+
+With ``--title-id``, the product is launched as a consuming product launches
+it, and ``--refuse-as`` adds a third branch: the remembered disc, launched by a
+product made for another title, must be refused by name and the player asked
+again.
 """
 
 from __future__ import annotations
@@ -77,13 +82,15 @@ def photograph(session: HeadlessSession) -> int:
     return 0
 
 
-def show_the_screen(session: HeadlessSession, layout: Layout, port: int, seconds: int) -> int:
+def show_the_screen(
+    session: HeadlessSession, layout: Layout, port: int, seconds: int, title_id: str | None
+) -> int:
     """With nothing remembered, the player must be asked."""
     record = session.config_home / "Cemu" / RECORD_NAME
     if record.exists():
         record.unlink()
-    # No argument at all: the packaged product's own path.
-    with session.launch(layout.shell_command()) as running:
+    # No disc named: the packaged product's own path.
+    with session.launch(layout.shell_command(title_id=title_id)) as running:
 
         def asked():
             status = read_setup(port)
@@ -111,13 +118,18 @@ def show_the_screen(session: HeadlessSession, layout: Layout, port: int, seconds
 
 
 def start_from_the_record(
-    session: HeadlessSession, layout: Layout, game: Path, port: int, seconds: int
+    session: HeadlessSession,
+    layout: Layout,
+    game: Path,
+    port: int,
+    seconds: int,
+    title_id: str | None,
 ) -> int:
     """With a title remembered, the player must not be asked again."""
     record = session.config_home / "Cemu" / RECORD_NAME
     record.parent.mkdir(parents=True, exist_ok=True)
     record.write_text(f"{game}\n")
-    with session.launch(layout.shell_command()) as running:
+    with session.launch(layout.shell_command(title_id=title_id)) as running:
 
         def started():
             if read_counters(port).framesObserved > 0:
@@ -144,6 +156,45 @@ def start_from_the_record(
     return 0
 
 
+def refuse_another_title(
+    session: HeadlessSession, layout: Layout, game: Path, port: int, seconds: int, other: str
+) -> int:
+    """A remembered disc of another title than the product runs must be
+    refused by name, and the player asked again."""
+    record = session.config_home / "Cemu" / RECORD_NAME
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(f"{game}\n")
+    with session.launch(layout.shell_command(title_id=other)) as running:
+
+        def asked():
+            status = read_setup(port)
+            return status if status.hostReports and status.shown else None
+
+        status = poll(port, seconds, asked)
+        if status is None:
+            exited = running.poll()
+            print(
+                f"refused: a product made for {other} was not asked again for its game "
+                f"within {seconds}s"
+                + (f"; the product exited with {exited}" if exited is not None else ""),
+                file=sys.stderr,
+            )
+            return 1
+    log = (session.session_dir / "run.log").read_text(errors="replace")
+    reason = next(
+        (line for line in log.splitlines() if "not the game this product runs" in line), None
+    )
+    if reason is None:
+        print(
+            "refused: the screen was shown again but the log never names why the "
+            "remembered disc was refused",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"with another title remembered: asked again; {reason.strip()}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--game", type=Path, help="disc image; defaults to $WIIUPORT_GAME")
@@ -151,6 +202,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--ask", type=int, default=60, help="seconds to wait for the screen")
     parser.add_argument("--boot", type=int, default=180, help="seconds to let the title boot")
+    parser.add_argument("--title-id", help="the title the product runs, as a consumer names it")
+    parser.add_argument(
+        "--refuse-as",
+        help="a title ID the disc is not: its record must then be refused and setup shown",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -176,10 +232,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with session:
             session.prepare(keys_source=keys)
-            failed = show_the_screen(session, layout, args.port, args.ask)
+            failed = show_the_screen(session, layout, args.port, args.ask, args.title_id)
             if failed:
                 return failed
-            return start_from_the_record(session, layout, game, args.port, args.boot)
+            failed = start_from_the_record(
+                session, layout, game, args.port, args.boot, args.title_id
+            )
+            if failed or args.refuse_as is None:
+                return failed
+            return refuse_another_title(session, layout, game, args.port, args.ask, args.refuse_as)
     except HeadlessError as unavailable:
         print(f"refused: {unavailable}", file=sys.stderr)
         return 2

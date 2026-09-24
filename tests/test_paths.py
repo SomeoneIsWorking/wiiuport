@@ -65,6 +65,17 @@ def test_the_product_launches_with_no_arguments_at_all(tmp_path: Path) -> None:
     assert layout.shell_command() == [str(layout.shell_binary)]
 
 
+def test_a_consumers_title_is_named_as_the_product_takes_it(tmp_path: Path) -> None:
+    layout = Layout(root=tmp_path)
+    command = layout.shell_command(Path("/games/title.wux"), title_id="0005000010143500")
+    assert command == [
+        str(layout.shell_binary),
+        "--title-id",
+        "0005000010143500",
+        "/games/title.wux",
+    ]
+
+
 def test_no_save_named_is_a_legitimate_answer_and_a_wrong_one_is_not(tmp_path) -> None:
     """Absent means "start a new game"; a typo must not read as absent."""
     import pytest
