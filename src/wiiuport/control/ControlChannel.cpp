@@ -521,6 +521,8 @@ std::string ControlChannel::interpolationJson() const {
     body += ",\"objectUnverifiedSharingValues\":" +
             std::to_string(objects.planner().unverifiedSharingValues());
     body += ",\"objectValuesShared\":" + std::to_string(objects.planner().valuesShared());
+    body += ",\"objectMapValuesHeld\":" + std::to_string(objects.planner().mapValuesHeld());
+    body += ",\"objectMapValuesMoved\":" + std::to_string(objects.planner().mapValuesMoved());
     body += ",\"objectUnblendedCarried\":" + std::to_string(objects.planner().unblendedCarried());
     body += ",\"objectsLeftAtN\":" + std::to_string(objects.planner().leftAtN());
     body += ",\"objectTransformsCarried\":" + std::to_string(objects.planner().transformsCarried());
@@ -747,7 +749,8 @@ bool ControlChannel::start(uint16_t port) {
             }
             // Which of the per-object blends the in-between frame draws, the
             // camera's always: objects=0 draws every object as the title did
-            // (and so every vertex), vertices=0 only the vertices. A
+            // (and so every vertex), vertices=0 only the vertices, maps=0 only
+            // the draws into the light's map. A
             // maintainer's discriminator, not a setting.
             // vertexShaderOff=<16 hex digits>, repeated for several, draws
             // the meshes those vertex shaders read as the title did, to name
@@ -770,6 +773,7 @@ bool ControlChannel::start(uint16_t port) {
                 m_objects.exclude(std::move(objectExcluded));
                 m_objects.setPlanning(m_continuous.enabled() &&
                                       requestedFlag(query, "objects", true));
+                m_objects.setMapBlending(requestedFlag(query, "maps", true));
                 m_vertices.setBlending(requestedFlag(query, "vertices", true));
                 m_vertices.exclude(std::move(excluded));
                 return lucent::http::Response::json(200, "OK", interpolationJson());

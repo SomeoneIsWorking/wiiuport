@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 
 namespace wiiuport::interp {
 
@@ -144,6 +145,7 @@ void ObjectPlanner::Plan::clear() {
     earlierAt.clear();
     stepAt.clear();
     foundByValues.clear();
+    drawsMap.clear();
     floats.clear();
     outcomeOf.clear();
     leftAtN.clear();
@@ -160,11 +162,17 @@ void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
     m_buildingPlan.earlierAt.push_back(kNotBlended);
     m_buildingPlan.stepAt.push_back(std::numeric_limits<double>::quiet_NaN());
     m_buildingPlan.foundByValues.push_back(0);
+    m_buildingPlan.drawsMap.push_back(assembly.writesColour ? 0 : 1);
     // Planned only against two whole frames; before that the frame is kept
     // as history, and its entries read as unmatched in a plan never ready.
     Outcome outcome = Outcome::Unmatched;
-    if (!assembly.writesColour || assembly.stageIndex == kPixelStage) {
+    if (assembly.stageIndex == kPixelStage || (!assembly.writesColour && !m_mapBlending)) {
         outcome = Outcome::Shading;
+    } else if (m_framesHeld >= 2 && !assembly.writesColour) {
+        // Planned once the whole frame is in (planMaps): which of its values
+        // are the pass's is told by every draw into the map.
+        m_buildingPlan.outcomeOf.push_back(outcome);
+        return;
     } else if (m_framesHeld >= 2) {
         outcome = plan(entry);
     }
@@ -180,6 +188,7 @@ void ObjectPlanner::endFrame() {
     // A frame planned against no two whole frames blended nothing to see
     // its objects through.
     if (m_framesHeld >= 2) {
+        planMaps();
         seeUnblendedThroughTheCamera();
     }
     ++m_framesPlanned;
@@ -537,6 +546,19 @@ bool ObjectPlanner::waiting(const std::unordered_map<uint64_t, uint64_t>& againA
     return failed != againAt.end() && failed->second > m_framesPlanned;
 }
 
+ObjectPlanner::Outcome ObjectPlanner::held(size_t entry, size_t earlier) {
+    const AssemblyKey& key = m_building.key(entry);
+    m_buildingPlan.earlierAt[entry] = static_cast<uint32_t>(earlier);
+    // Standing still in its uniforms, it may yet move in the vertices the
+    // title poses for it: its draw a frame before is named for that.
+    if (std::optional<size_t> partner =
+            derivedPartner(key, m_frames[1].values(earlier), m_building.values(entry))) {
+        m_buildingPlan.partnerAt[entry] = static_cast<uint32_t>(*partner);
+        ++m_heldPartnersDerived;
+    }
+    return Outcome::Held;
+}
+
 ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     const KeyedFrame& latest = m_building;
     const KeyedFrame& twoBack = m_frames[1];
@@ -548,14 +570,7 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
         earlier.reset();
     }
     if (earlier.has_value() && sameBits(twoBack.values(*earlier), after)) {
-        m_buildingPlan.earlierAt[entry] = static_cast<uint32_t>(*earlier);
-        // Standing still in its uniforms, it may yet move in the vertices the
-        // title poses for it: its draw a frame before is named for that.
-        if (std::optional<size_t> partner = derivedPartner(key, twoBack.values(*earlier), after)) {
-            m_buildingPlan.partnerAt[entry] = static_cast<uint32_t>(*partner);
-            ++m_heldPartnersDerived;
-        }
-        return Outcome::Held;
+        return held(entry, *earlier);
     }
     std::optional<Found> found = findPartner(key, earlier, after);
     if (!found.has_value()) {
@@ -611,6 +626,87 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     m_buildingPlan.foundByValues[entry] = found->byValues ? 1 : 0;
     m_buildingPlan.stepAt[entry] = squaredStep(oneBack, after, frameState(key.shader));
     return Outcome::Blended;
+}
+
+uint64_t ObjectPlanner::mapObjectOf(size_t entry) const {
+    const AssemblyKey& key = m_building.key(entry);
+    std::optional<uint32_t> own;
+    uint32_t fewest = std::numeric_limits<uint32_t>::max();
+    for (size_t index = 1; index < key.sourceCount; index += 2) {
+        uint32_t address = key.sources[index];
+        if (address == AssemblyKey::kFreshBlock) {
+            continue;
+        }
+        uint32_t uses = m_mapBlockUses.at(address);
+        if (uses < fewest) {
+            fewest = uses;
+            own = address;
+        }
+    }
+    // Above every address, so an entry never names a block's object.
+    return own.has_value() ? uint64_t{*own} : (uint64_t{1} << 32) | entry;
+}
+
+std::optional<size_t> ObjectPlanner::earlierMapDraw(size_t entry) const {
+    const KeyedFrame& twoBack = m_frames[1];
+    std::optional<size_t> earlier = twoBack.find(m_building.key(entry));
+    if (earlier.has_value() && twoBack.values(*earlier).size() != m_building.values(entry).size()) {
+        return std::nullopt;
+    }
+    return earlier;
+}
+
+void ObjectPlanner::planMaps() {
+    Plan& plan = m_buildingPlan;
+    const KeyedFrame& twoBack = m_frames[1];
+    m_mapPass.clear();
+    m_mapBlockUses.clear();
+    m_mapEarlier.clear();
+    for (size_t entry = 0; entry < m_building.size(); ++entry) {
+        if (plan.drawsMap[entry] == 0 || plan.outcomeOf[entry] == Outcome::Shading) {
+            continue;
+        }
+        const AssemblyKey& key = m_building.key(entry);
+        for (size_t index = 1; index < key.sourceCount; index += 2) {
+            if (key.sources[index] != AssemblyKey::kFreshBlock) {
+                ++m_mapBlockUses[key.sources[index]];
+            }
+        }
+    }
+    for (size_t entry = 0; entry < m_building.size(); ++entry) {
+        if (plan.drawsMap[entry] == 0 || plan.outcomeOf[entry] == Outcome::Shading) {
+            continue;
+        }
+        std::optional<size_t> earlier = earlierMapDraw(entry);
+        m_mapEarlier.emplace_back(entry, earlier);
+        if (earlier.has_value()) {
+            m_mapPass.add(mapObjectOf(entry), twoBack.values(*earlier), m_building.values(entry));
+        }
+    }
+    for (const auto& [entry, earlier] : m_mapEarlier) {
+        std::span<const float> after = m_building.values(entry);
+        Outcome outcome = Outcome::Unmatched;
+        // What moved only as the pass moved it -- the light, over a still
+        // object -- is drawn at N whole, which is what holding the pass in
+        // its blend would come to, without searching for its partner.
+        if (earlier.has_value() && m_mapPass.movesOnlyThePass(twoBack.values(*earlier), after)) {
+            outcome = held(entry, *earlier);
+        } else {
+            outcome = this->plan(entry);
+        }
+        plan.outcomeOf[entry] = outcome;
+        ++plan.outcomes[static_cast<size_t>(outcome)];
+        if (outcome != Outcome::Blended) {
+            continue;
+        }
+        std::span<const float> before = twoBack.values(plan.earlierAt[entry]);
+        for (size_t index = 0; index < after.size(); ++index) {
+            m_mapValuesMoved += sameBits(before[index], after[index]) ? 0 : 1;
+        }
+        m_mapValuesHeld += m_mapPass.holdThePass(
+            before, after,
+            std::span<float>(plan.floats.data() + plan.blendedAt[entry], after.size()));
+    }
 }
 
 void ObjectPlanner::seeUnblendedThroughTheCamera() {

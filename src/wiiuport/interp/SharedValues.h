@@ -75,7 +75,6 @@ class SharedValues {
         bool agreed;
     };
 
-    static uint64_t endsOf(float twoBack, float latest);
     // Counts what a draw drew for each value at N a draw new at N wants.
     void addDrawnAtLatest(std::span<const float> latest, std::span<const float> drawn);
 

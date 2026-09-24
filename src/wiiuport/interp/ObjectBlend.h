@@ -41,6 +41,12 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
         m_planning.store(planning);
     }
 
+    // Off, draws into the light's map are drawn as the title drew them. A
+    // maintainer's discriminator, not a setting. Safe from any thread.
+    void setMapBlending(bool blending) {
+        m_mapBlending.store(blending);
+    }
+
     void onAssemblyRecorded(const frame::RecordedUniformAssembly& assembly) override;
     void onFrameRecorded(const frame::FrameRecording& recording) override;
 
@@ -153,6 +159,7 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
 
     ObjectPlanner m_planner;
     std::atomic<bool> m_planning{false};
+    std::atomic<bool> m_mapBlending{true};
 
     // Handed over and not yet taken, and the batch the planning thread is
     // working through. They swap, so both keep their capacity.

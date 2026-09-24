@@ -88,6 +88,8 @@ add_library(wiiuport STATIC
   interp/NeighbourCheck.cpp
   interp/RestoreCheck.cpp
   interp/SharedTransforms.cpp
+  interp/MapPassValues.cpp
+  interp/MapPassValues.h
   interp/SharedValues.cpp
   interp/SharedValues.h
   interp/SlotPool.cpp
