@@ -14,7 +14,9 @@ from wiiuport.cxxtidy import (
     missing_check_groups,
     parse_diagnostics,
     run_tidy,
+    tidy_database,
     tidy_units,
+    without_precompiled_header,
 )
 
 FINDING = (
@@ -110,3 +112,28 @@ def test_a_failed_run_without_a_diagnostic_is_not_clean() -> None:
 def test_a_missing_locked_clang_tidy_refuses(tmp_path: Path) -> None:
     with pytest.raises(TidyUnavailable, match="uv run --frozen"):
         run_tidy(Path("/r"), UNITS, _runner(subprocess.CompletedProcess([], 0, "", "")), tmp_path)
+
+
+def test_a_precompiled_header_is_included_as_text_not_loaded() -> None:
+    pch = ["-Xclang", "-include-pch", "-Xclang", "/b/cmake_pch.hxx.pch"]
+    header = ["-Xclang", "-include", "-Xclang", "/b/cmake_pch.hxx"]
+    command = ["clang++", "-Winvalid-pch", *pch, *header, "-c", "a.cpp"]
+    assert without_precompiled_header(command) == [
+        "clang++",
+        "-Winvalid-pch",
+        *header,
+        "-c",
+        "a.cpp",
+    ]
+
+
+def test_a_database_given_as_command_strings_is_rewritten_to_arguments(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    command = "clang++ -Xclang -include-pch -Xclang '/b/p p.pch' -c a.cpp"
+    (source / "compile_commands.json").write_text(
+        json.dumps([{"directory": "/d", "file": "a.cpp", "command": command}])
+    )
+    written = tidy_database(source, tmp_path / "tidy")
+    entry = json.loads((written / "compile_commands.json").read_text())[0]
+    assert entry == {"directory": "/d", "file": "a.cpp", "arguments": ["clang++", "-c", "a.cpp"]}
