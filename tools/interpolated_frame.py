@@ -23,7 +23,7 @@ import sys
 import time
 from pathlib import Path
 
-from wiiuport.drive import press, release
+from wiiuport.gameplay import INTERVAL_SECONDS, PRESSES, press_into_world
 from wiiuport.headless import HeadlessSession
 from wiiuport.image import (
     arm_capture,
@@ -74,9 +74,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--boot", type=int, default=90)
-    parser.add_argument("--presses", type=int, default=12)
-    parser.add_argument("--interval", type=int, default=8)
-    parser.add_argument("--t", type=float, default=0.5, help="where between the two frames")
+    parser.add_argument("--presses", type=int, default=PRESSES)
+    parser.add_argument("--interval", type=float, default=INTERVAL_SECONDS)
+    parser.add_argument(
+        "--t",
+        type=float,
+        default=0.5,
+        help="where between the two frames; at 1 the image must be identical to the title's",
+    )
     parser.add_argument("--settle", type=int, default=5)
     parser.add_argument(
         "--reach",
@@ -136,13 +141,14 @@ def main(argv: list[str] | None = None) -> int:
                 return seen
 
             report = sample()
-            for index in range(args.presses):
-                if running.poll() is not None:
-                    break
-                press("a" if index % 2 == 0 else "plus", port=args.port)
-                time.sleep(args.interval)
-                report = sample()
-            release(port=args.port)
+            press_into_world(
+                args.port,
+                presses=args.presses,
+                interval=args.interval,
+                still_running=lambda: running.poll() is None,
+                after_press=lambda _index: sample(),
+            )
+            report = sample()
 
             # Keep trying while sampling: the view can only be offered while
             # the shaders that carry it are drawing, so one attempt at a fixed
@@ -259,6 +265,25 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    if args.t == 1.0:
+        # The null: blended all the way to the title's own frame, the replay
+        # must reproduce it exactly. Reached through the same substitution as
+        # t=0.5 -- which differs -- so identical here is not a replay that drew
+        # nothing.
+        if differing != 0:
+            print(
+                f"refused: at t=1 the view written into {substituted} draws is the title's "
+                f"own, and the image still differs in {differing} bytes at "
+                f"{bounding_box(title_frame, blended_frame)}. The replay does not reproduce "
+                "the frame it replays.",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"null: at t=1, {substituted} draws substituted and the replay is byte-identical "
+            "to the title's frame"
+        )
+        return 0
     if differing == 0:
         print(
             "refused: the view was substituted into "
