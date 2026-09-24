@@ -46,6 +46,7 @@ BUILD_TOOLS: tuple[str, ...] = (
     "libltdl-dev",
     "libtool",
     "python3",
+    "python3-dev",
     "python3-pip",
     "tar",
     "unzip",
