@@ -83,14 +83,19 @@ def photograph(session: HeadlessSession) -> int:
 
 
 def show_the_screen(
-    session: HeadlessSession, layout: Layout, port: int, seconds: int, title_id: str | None
+    session: HeadlessSession,
+    layout: Layout,
+    port: int,
+    seconds: int,
+    title_id: str | None,
+    product: Path | None,
 ) -> int:
     """With nothing remembered, the player must be asked."""
     record = session.config_home / "Cemu" / RECORD_NAME
     if record.exists():
         record.unlink()
     # No disc named: the packaged product's own path.
-    with session.launch(layout.shell_command(title_id=title_id)) as running:
+    with session.launch(layout.shell_command(title_id=title_id, product=product)) as running:
 
         def asked():
             status = read_setup(port)
@@ -124,12 +129,13 @@ def start_from_the_record(
     port: int,
     seconds: int,
     title_id: str | None,
+    product: Path | None,
 ) -> int:
     """With a title remembered, the player must not be asked again."""
     record = session.config_home / "Cemu" / RECORD_NAME
     record.parent.mkdir(parents=True, exist_ok=True)
     record.write_text(f"{game}\n")
-    with session.launch(layout.shell_command(title_id=title_id)) as running:
+    with session.launch(layout.shell_command(title_id=title_id, product=product)) as running:
 
         def started():
             if read_counters(port).framesObserved > 0:
@@ -207,7 +213,17 @@ def main(argv: list[str] | None = None) -> int:
         "--refuse-as",
         help="a title ID the disc is not: its record must then be refused and setup shown",
     )
+    parser.add_argument(
+        "--product",
+        type=Path,
+        help="a packaged product (an AppImage) to launch in place of this checkout's binary",
+    )
     args = parser.parse_args(argv)
+    if args.product is not None and args.refuse_as is not None:
+        parser.error(
+            "--refuse-as names another title on the command line, which a packaged product "
+            "that fixes its own refuses before any record is read"
+        )
 
     try:
         game = resolve_game(args.game)
@@ -217,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     layout = find_layout()
-    binary = layout.shell_binary
+    binary = layout.shell_binary if args.product is None else args.product
     if not binary.is_file():
         print(f"refused: no product binary at {binary}; build it first", file=sys.stderr)
         return 2
@@ -232,11 +248,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with session:
             session.prepare(keys_source=keys)
-            failed = show_the_screen(session, layout, args.port, args.ask, args.title_id)
+            failed = show_the_screen(
+                session, layout, args.port, args.ask, args.title_id, args.product
+            )
             if failed:
                 return failed
             failed = start_from_the_record(
-                session, layout, game, args.port, args.boot, args.title_id
+                session, layout, game, args.port, args.boot, args.title_id, args.product
             )
             if failed or args.refuse_as is None:
                 return failed

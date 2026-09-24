@@ -1,72 +1,12 @@
-// The product's entry point.
+// The maintainer's runtime: a product that fixes no title.
 //
-// A player runs this; Cemu's own front end is not built. The disc image is an
-// optional argument: given one, that is what runs, and given none the product
-// runs what the player chose last time, or asks them on its setup screen. It
-// never guesses which game to run. A product made for one title names it
-// with --title-id, and a disc holding another is refused.
+// The disc image is an optional argument: given one, that is what runs, and
+// given none the runtime runs what the player chose last time, or asks on its
+// setup screen. It never guesses which game to run. A title project builds its
+// own product through runProduct instead of copying this entry point.
 
-#include "wiiuport/Runtime.h"
-#include "wiiuport/shell/ShellHost.h"
-
-#include <lucent/log.h>
-
-#include <filesystem>
-#include <string>
-#include <vector>
-
-namespace {
-
-void printUsage(const char* program) {
-    lucent::error("shell",
-                  "usage: {} [disc image] [--title-id ID] [--hidden] [--width N] [--height N]",
-                  program);
-}
-
-} // namespace
+#include "wiiuport/shell/RunProduct.h"
 
 int main(int argc, char* argv[]) {
-    wiiuport::shell::ShellHost::Options options;
-    options.executable = argv[0];
-    std::vector<std::string> arguments(argv + 1, argv + argc);
-    for (size_t i = 0; i < arguments.size(); ++i) {
-        const std::string& argument = arguments[i];
-        if (argument == "--hidden") {
-            options.window.hidden = true;
-            continue;
-        }
-        if (argument == "--title-id" && i + 1 < arguments.size()) {
-            options.expectedTitle = wiiuport::shell::TitleIdentity::parse(arguments[++i]);
-            if (!options.expectedTitle.has_value()) {
-                lucent::error("shell", "--title-id takes sixteen hex digits, not {}", arguments[i]);
-                return 2;
-            }
-            continue;
-        }
-        if ((argument == "--width" || argument == "--height") && i + 1 < arguments.size()) {
-            int value = std::stoi(arguments[++i]);
-            if (argument == "--width") {
-                options.window.width = value;
-            } else {
-                options.window.height = value;
-            }
-            continue;
-        }
-        if (!argument.empty() && argument.front() == '-') {
-            lucent::error("shell", "unknown option {}", argument);
-            printUsage(argv[0]);
-            return 2;
-        }
-        if (!options.title.empty()) {
-            lucent::error("shell", "more than one disc image given; this shell runs one title");
-            return 2;
-        }
-        options.title = argument;
-    }
-
-    // Installed before the system exists, so the first frame the guest
-    // submits is already observed.
-    wiiuport::Runtime::instance().installHooks();
-    wiiuport::shell::ShellHost host;
-    return host.run(options);
+    return wiiuport::shell::runProduct({}, argc, argv);
 }

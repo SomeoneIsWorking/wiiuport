@@ -148,12 +148,18 @@ if(TARGET CemuCafe)
     add_subdirectory("${WIIUPORT_SETUP_UI_DIR}" setup_ui EXCLUDE_FROM_ALL)
   endif()
 
-  add_executable(wiiuport_shell
-    shell/Main.cpp
+  # The host a product is built on: everything but an entry point. A title
+  # project's main is one call to shell::runProduct with what it fixes (its
+  # name and title), and it links this; it never copies the entry point.
+  add_library(wiiuport_host STATIC
     shell/ControllerAutoMap.cpp
     shell/ControllerAutoMap.h
     shell/HostPaths.cpp
     shell/HostPaths.h
+    shell/ProductCommandLine.cpp
+    shell/ProductCommandLine.h
+    shell/RunProduct.cpp
+    shell/RunProduct.h
     shell/SetupScreen.cpp
     shell/SetupScreen.h
     shell/ShellHost.cpp
@@ -166,29 +172,42 @@ if(TARGET CemuCafe)
     shell/TitleSelection.h
     shell/WindowSystemBridge.cpp
   )
-  target_link_libraries(wiiuport_shell PRIVATE
-    wiiuport::wiiuport
-    CemuAudio
-    CemuBoot
-    CemuCafe
-    CemuCommon
-    CemuComponents
-    CemuConfig
-    CemuGui
-    CemuInput
-    CemuUtil
-    SDL3::SDL3
-    setup_ui::setup_ui
+  target_link_libraries(wiiuport_host
+    PUBLIC
+      wiiuport::wiiuport
+    PRIVATE
+      CemuAudio
+      CemuBoot
+      CemuCafe
+      CemuCommon
+      CemuComponents
+      CemuConfig
+      CemuGui
+      CemuInput
+      CemuUtil
+      SDL3::SDL3
+      setup_ui::setup_ui
   )
-  target_include_directories(wiiuport_shell PRIVATE "${WIIUPORT_FORK_INCLUDE_DIR}")
+  target_include_directories(wiiuport_host PRIVATE "${WIIUPORT_FORK_INCLUDE_DIR}")
   # Cemu's headers are written against its precompiled header, which is where
   # its integer aliases and the standard library it assumes come from. A
   # target that includes them uses the same one its own targets do.
-  cemu_use_precompiled_header(wiiuport_shell)
+  cemu_use_precompiled_header(wiiuport_host)
+  add_library(wiiuport::host ALIAS wiiuport_host)
+
+  # The maintainer's runtime: the product that fixes no title.
+  add_executable(wiiuport_shell shell/Main.cpp)
+  target_link_libraries(wiiuport_shell PRIVATE wiiuport::host)
   set_target_properties(wiiuport_shell PROPERTIES
     # Beside the fork's data directories (resources/, gameProfiles/), because
     # the core resolves those relative to the running executable.
     RUNTIME_OUTPUT_DIRECTORY "${WIIUPORT_FORK_INCLUDE_DIR}/../bin/$<1:>"
     OUTPUT_NAME "wiiuport"
   )
+
+  # A product built the way a title project builds one, through the host's
+  # interface alone. It is compiled and linked with every runtime build so a
+  # change that narrows or breaks that interface fails here, not in a title.
+  add_executable(wiiuport_fixed_title_product ../../tests/consumer/FixedTitleProduct.cpp)
+  target_link_libraries(wiiuport_fixed_title_product PRIVATE wiiuport::host)
 endif()
