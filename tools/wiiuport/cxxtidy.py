@@ -22,7 +22,10 @@ from .paths import Layout
 from .structure import FIRST_PARTY_CXX_ROOTS
 
 TIDY_REQUIREMENT = Requirement(
-    "clang-tidy", ("clang-tools-extra",), executables=("clang-tidy", "run-clang-tidy")
+    "clang-tidy",
+    ("clang-tools-extra",),
+    ("clang-tidy",),
+    executables=("clang-tidy", "run-clang-tidy"),
 )
 
 REQUIRED_CHECK_GROUPS: tuple[str, ...] = (

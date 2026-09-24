@@ -31,7 +31,9 @@ class Requirement:
 
     Probing for real files and executables rather than package names keeps the
     check honest across distributions that split or rename packages.
-    ``dnf_packages`` is only used to build the refusal message.
+    ``dnf_packages`` and ``apt_packages`` name what provides it on Fedora and on
+    Debian-derived hosts: the refusal message on each, and the release build's
+    Ubuntu container, install from them.
 
     ``libraries`` names library files to find in any standard library
     directory, rather than at one absolute path, so the same requirement holds
@@ -40,6 +42,7 @@ class Requirement:
 
     name: str
     dnf_packages: tuple[str, ...]
+    apt_packages: tuple[str, ...]
     files: tuple[str, ...] = ()
     executables: tuple[str, ...] = ()
     libraries: tuple[str, ...] = ()
@@ -69,22 +72,26 @@ def find_library(name: str) -> Path | None:
 # through the base perl split packages, so a package-name check would refuse a
 # host that is in fact ready.
 GATE_REQUIREMENTS: tuple[Requirement, ...] = (
-    Requirement("C++ compiler (clang)", ("clang",), executables=("clang", "clang++")),
-    Requirement("clang-format", ("clang-tools-extra",), executables=("clang-format",)),
-    Requirement("CMake", ("cmake",), executables=("cmake",)),
-    Requirement("Ninja", ("ninja-build",), executables=("ninja",)),
+    Requirement("C++ compiler (clang)", ("clang",), ("clang",), executables=("clang", "clang++")),
+    Requirement(
+        "clang-format", ("clang-tools-extra",), ("clang-format",), executables=("clang-format",)
+    ),
+    Requirement("CMake", ("cmake",), ("cmake",), executables=("cmake",)),
+    Requirement("Ninja", ("ninja-build",), ("ninja-build",), executables=("ninja",)),
 )
 """What the C++ gates need. Smaller than the runtime's list: a gate compiles
 first-party code and parses it, and needs none of Cemu's dependencies."""
 
 CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
-    Requirement("C++ compiler (clang)", ("clang",), executables=("clang", "clang++")),
-    Requirement("CMake", ("cmake",), executables=("cmake",)),
-    Requirement("Ninja", ("ninja-build",), executables=("ninja",)),
-    Requirement("nasm", ("nasm",), executables=("nasm",)),
-    Requirement("perl", ("perl-core",), executables=("perl",)),
-    Requirement("pkg-config", ("pkgconf-pkg-config",), executables=("pkg-config",)),
-    Requirement("zlib headers", ("zlib-devel",), files=("/usr/include/zlib.h",)),
+    Requirement("C++ compiler (clang)", ("clang",), ("clang",), executables=("clang", "clang++")),
+    Requirement("CMake", ("cmake",), ("cmake",), executables=("cmake",)),
+    Requirement("Ninja", ("ninja-build",), ("ninja-build",), executables=("ninja",)),
+    Requirement("nasm", ("nasm",), ("nasm",), executables=("nasm",)),
+    Requirement("perl", ("perl-core",), ("perl",), executables=("perl",)),
+    Requirement(
+        "pkg-config", ("pkgconf-pkg-config",), ("pkg-config",), executables=("pkg-config",)
+    ),
+    Requirement("zlib headers", ("zlib-devel",), ("zlib1g-dev",), files=("/usr/include/zlib.h",)),
     # Cemu makes libpng an empty vcpkg package on Linux
     # (dependencies/vcpkg_overlay_ports_linux/libpng) so the distro's libpng is
     # used. Fedora's libpng-devel then ships a CMake config declaring
@@ -95,36 +102,70 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement(
         "libpng, including the static archive its CMake config declares",
         ("libpng-devel", "libpng-static"),
+        ("libpng-dev",),
         files=("/usr/include/png.h",),
         libraries=("libpng16.a",),
     ),
-    Requirement("GTK 3", ("gtk3-devel",), files=("/usr/include/gtk-3.0/gtk/gtk.h",)),
-    Requirement("glm", ("glm-devel",), files=("/usr/include/glm/glm.hpp",)),
+    Requirement(
+        "GTK 3", ("gtk3-devel",), ("libgtk-3-dev",), files=("/usr/include/gtk-3.0/gtk/gtk.h",)
+    ),
+    Requirement("glm", ("glm-devel",), ("libglm-dev",), files=("/usr/include/glm/glm.hpp",)),
     # The setup screen's font engine. setup-ui refuses without it rather than
     # drawing a screen with no text, and the refusal is easier to act on here,
     # before a build that takes hours.
-    Requirement("freetype", ("freetype-devel",), files=("/usr/include/freetype2/ft2build.h",)),
+    Requirement(
+        "freetype",
+        ("freetype-devel",),
+        ("libfreetype-dev",),
+        files=("/usr/include/freetype2/ft2build.h",),
+    ),
     # cairo is the fourth of Cemu's empty Linux overlay ports (with gtk3, glm and
     # libpng), so vcpkg deliberately takes it from the distribution. It arrives as a
     # GTK 3 dependency on both Fedora and Debian, which is exactly why an undeclared
     # requirement like this stays invisible until something stops pulling it in.
-    Requirement("cairo", ("cairo-devel",), files=("/usr/include/cairo/cairo.h",)),
     Requirement(
-        "libsecret", ("libsecret-devel",), files=("/usr/include/libsecret-1/libsecret/secret.h",)
+        "cairo", ("cairo-devel",), ("libcairo2-dev",), files=("/usr/include/cairo/cairo.h",)
     ),
-    Requirement("libgcrypt", ("libgcrypt-devel",), executables=("libgcrypt-config",)),
-    Requirement("libusb", ("libusb1-devel",), files=("/usr/include/libusb-1.0/libusb.h",)),
-    Requirement("bluez", ("bluez-libs-devel",), files=("/usr/include/bluetooth/bluetooth.h",)),
-    Requirement("systemd", ("systemd-devel",), files=("/usr/include/systemd/sd-bus.h",)),
+    Requirement(
+        "libsecret",
+        ("libsecret-devel",),
+        ("libsecret-1-dev",),
+        files=("/usr/include/libsecret-1/libsecret/secret.h",),
+    ),
+    Requirement(
+        "libgcrypt", ("libgcrypt-devel",), ("libgcrypt20-dev",), executables=("libgcrypt-config",)
+    ),
+    Requirement(
+        "libusb",
+        ("libusb1-devel",),
+        ("libusb-1.0-0-dev",),
+        files=("/usr/include/libusb-1.0/libusb.h",),
+    ),
+    Requirement(
+        "bluez",
+        ("bluez-libs-devel",),
+        ("libbluetooth-dev",),
+        files=("/usr/include/bluetooth/bluetooth.h",),
+    ),
+    Requirement(
+        "systemd", ("systemd-devel",), ("libsystemd-dev",), files=("/usr/include/systemd/sd-bus.h",)
+    ),
     # udev is probed separately from systemd although Fedora ships both in
     # systemd-devel, because a vcpkg port configures with udev support and fails on
     # "checking for libudev.h... no". Probing sd-bus.h passed here while the header
     # the build actually consumes went unchecked -- the same shape of gap as libpng.
-    Requirement("udev", ("systemd-devel",), files=("/usr/include/libudev.h",)),
-    Requirement("freeglut", ("freeglut-devel",), files=("/usr/include/GL/freeglut.h",)),
+    Requirement("udev", ("systemd-devel",), ("libudev-dev",), files=("/usr/include/libudev.h",)),
+    Requirement(
+        "freeglut", ("freeglut-devel",), ("freeglut3-dev",), files=("/usr/include/GL/freeglut.h",)
+    ),
+    # cubeb's audio backend on Linux; the runtime plays through ALSA.
+    Requirement(
+        "ALSA", ("alsa-lib-devel",), ("libasound2-dev",), files=("/usr/include/alsa/asoundlib.h",)
+    ),
     Requirement(
         "wayland-protocols",
         ("wayland-protocols-devel",),
+        ("wayland-protocols",),
         files=("/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml",),
     ),
 )
@@ -144,15 +185,23 @@ def check(requirements: tuple[Requirement, ...] = CEMU_REQUIREMENTS) -> None:
     missing = [r for r in requirements if not r.satisfied()]
     if not missing:
         return
-    packages = sorted({p for r in missing for p in r.dnf_packages})
+    dnf = sorted({p for r in missing for p in r.dnf_packages})
+    apt = sorted({p for r in missing for p in r.apt_packages})
     lines = [
         f"{len(missing)} of {len(requirements)} host requirements are not satisfied:",
         *(f"  - {r.name}\n      absent: {', '.join(r.missing_parts())}" for r in missing),
         "",
         "Install them and re-run. On Fedora:",
-        "  sudo dnf install " + " ".join(packages),
+        "  sudo dnf install " + " ".join(dnf),
+        "On Debian or Ubuntu:",
+        "  sudo apt install " + " ".join(apt),
     ]
     raise MissingHostPackages("\n".join(lines))
+
+
+def apt_packages(requirements: tuple[Requirement, ...] = CEMU_REQUIREMENTS) -> list[str]:
+    """Every Debian package the requirements name, for a host built from scratch."""
+    return sorted({package for r in requirements for package in r.apt_packages})
 
 
 def report(requirements: tuple[Requirement, ...] = CEMU_REQUIREMENTS) -> str:
