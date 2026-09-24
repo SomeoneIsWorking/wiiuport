@@ -341,6 +341,7 @@ VertexBlend::Draw& VertexBlend::Frame::appendDraw() {
     draw.layout.buffers.clear();
     draw.layout.attributes.clear();
     draw.bufferStarts.clear();
+    draw.bufferSources.clear();
     draw.mesh = 0;
     draw.nextOfEntry = 0;
     return draw;
@@ -353,6 +354,7 @@ void VertexBlend::Frame::clear() {
     entryDraws.clear();
     byShader.clear();
     meshes.clear();
+    bySource.clear();
     reads.clear();
     frameIndex = 0;
     assemblies = 0;
@@ -395,6 +397,12 @@ void VertexBlend::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) {
                 m_bytesCopied += buffer.sizeInBytes;
             }
             recorded.bufferStarts.push_back(copy->second);
+            recorded.bufferSources.push_back(buffer.data);
+        }
+        if (!recorded.bufferSources.empty()) {
+            m_building.bySource.try_emplace(
+                std::pair{draw.vertexShaderBaseHash, recorded.bufferSources.front()},
+                static_cast<uint32_t>(index));
         }
         // Draws sharing one vertex-stage assembly take their place among it.
         uint32_t entry = *recorded.vertexEntry;
@@ -484,6 +492,14 @@ void VertexBlend::startBlending() {
         }
         if (std::ranges::find(excluded, drawn.vertexShaderBaseHash) != excluded.end()) {
             m_meshExcluded[drawn.mesh] = 1;
+        }
+    }
+    // A shader any of whose draws recur from their own buffers two frames
+    // apart keeps its objects' vertices in buffers of their own.
+    m_shadersKeepingBuffers.clear();
+    for (const Draw& drawn : m_latest.draws()) {
+        if (drawn.vertexEntry.has_value() && drawnFrom(m_twoBack, drawn).has_value()) {
+            m_shadersKeepingBuffers.insert({drawn.vertexShaderBaseHash, drawn.vertexShaderAuxHash});
         }
     }
     VertexReadGroups groups = groupVertexReads(m_latest.reads, meshCount);
@@ -631,7 +647,41 @@ std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index
     } else if (planner.partnerFoundByValues(entry)) {
         identity = PartnerIdentity::ByValues;
     }
-    return Job{index, *partner, *earlier, identity, index, &drawn.layout};
+    Job job{index, *partner, *earlier, identity, index, &drawn.layout};
+    if (identity == PartnerIdentity::ByPlace && keepsBuffers(drawn)) {
+        // Told apart by nothing else, an object the title keeps buffers for
+        // is its draw two frames back from the same buffers; with none, it
+        // is new at N, and any other it resembled -- a ring of the same age
+        // left further back -- is another object.
+        std::optional<size_t> own = drawnFrom(m_twoBack, drawn);
+        if (!own.has_value()) {
+            return VertexOutcome::NoPartner;
+        }
+        job.earlier = *own;
+        job.earlierByBuffers = true;
+    }
+    return job;
+}
+
+std::optional<size_t> VertexBlend::drawnFrom(const Frame& frame, const Draw& drawn) {
+    if (drawn.bufferSources.empty()) {
+        return std::nullopt;
+    }
+    auto found = frame.bySource.find({drawn.vertexShaderBaseHash, drawn.bufferSources.front()});
+    if (found == frame.bySource.end()) {
+        return std::nullopt;
+    }
+    const Draw& candidate = frame.draws()[found->second];
+    if (candidate.vertexShaderAuxHash != drawn.vertexShaderAuxHash ||
+        candidate.bufferSources != drawn.bufferSources || candidate.layout != drawn.layout) {
+        return std::nullopt;
+    }
+    return found->second;
+}
+
+bool VertexBlend::keepsBuffers(const Draw& drawn) const {
+    return m_shadersKeepingBuffers.contains(
+        {drawn.vertexShaderBaseHash, drawn.vertexShaderAuxHash});
 }
 
 std::optional<size_t> VertexBlend::drawOf(const Frame& frame, size_t entry, const Draw& drawn) {
@@ -823,7 +873,9 @@ void VertexBlend::placeByVertices(Job& job, Scratch& scratch) {
     size_t plannedEarlier = job.earlier;
     size_t plannedPartner = job.partner;
     gather(m_latest, drawn, scratch.after);
-    job.earlier = mostResembling(drawn, *job.layout, m_twoBack, job.earlier, scratch);
+    if (!job.earlierByBuffers) {
+        job.earlier = mostResembling(drawn, *job.layout, m_twoBack, job.earlier, scratch);
+    }
     job.partner = mostResembling(drawn, *job.layout, m_previous, job.partner, scratch);
     if (job.earlier != plannedEarlier || job.partner != plannedPartner) {
         ++m_partnersFoundByVertices;
