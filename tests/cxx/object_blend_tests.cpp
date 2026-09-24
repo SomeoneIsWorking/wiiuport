@@ -9,6 +9,7 @@
 #include "wiiuport/interp/TransformSubstitution.h"
 
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -50,6 +51,19 @@ void aMovingObjectIsDrawnHalfWayBetweenItsFrames() {
     check::equal(blend.drawsWritten(), uint64_t{1}, "and its draw written");
     check::equal(blend.framesEnded(), uint64_t{3}, "each frame's end counted with its wait");
     check::isTrue(blend.planningBusy().count() > 0, "and the planning thread's time counted");
+}
+
+void anObjectBlendedAllTheWayIsDrawnExactlyWhereTheTitleDrewIt() {
+    // At t=1 the in-between frame is frame N, bit for bit. a + (b - a) is not
+    // b in float for every pair; this one comes out 1.4e-6 short of -0.48986194,
+    // inside the range a blend may take, so nothing else would catch it.
+    ObjectBlend blend{1.0f};
+    std::vector<Draw> latest{{kBlockA, {-0.48986194f, 7.0f}}, {kOtherA, {5.0f, 5.0f}}};
+    armAfter(blend, {{kBlockA, {211.50984955f, 7.0f}}, {kOtherA, {5.0f, 5.0f}}},
+             {{kBlockB, {105.50984955f, 7.0f}}, {kOtherB, {5.0f, 5.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::isTrue(std::bit_cast<uint32_t>(uploaded[0][0]) == std::bit_cast<uint32_t>(-0.48986194f),
+                  "and drawn exactly where the title drew it in N");
 }
 
 void aStillObjectIsDrawnExactlyAsTheTitleDrewIt() {
@@ -888,6 +902,7 @@ namespace wiiuport::tests {
 
 void runObjectBlendTests() {
     aMovingObjectIsDrawnHalfWayBetweenItsFrames();
+    anObjectBlendedAllTheWayIsDrawnExactlyWhereTheTitleDrewIt();
     aStillObjectIsDrawnExactlyAsTheTitleDrewIt();
     anAddressReusedByAnotherObjectIsNotBlended();
     aNewObjectIsDrawnAsDrawnAndCounted();

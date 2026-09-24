@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <tuple>
 
@@ -294,7 +295,8 @@ VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::
             sameBits(a, b)) {
             return;
         }
-        float value = a + ((b - a) * t);
+        // Exact at both ends: at t=1 the vertex is N's bit for bit.
+        float value = std::lerp(a, b, t);
         if (!liesBetween(a, value, b)) {
             outside = true;
             return;

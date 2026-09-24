@@ -34,7 +34,7 @@ import sys
 import time
 from pathlib import Path
 
-from wiiuport.drive import press, release
+from wiiuport.gameplay import INTERVAL_SECONDS, PRESSES, press_into_world
 from wiiuport.headless import HeadlessSession
 from wiiuport.image import (
     arm_capture,
@@ -44,7 +44,7 @@ from wiiuport.image import (
     read_capture,
 )
 from wiiuport.paths import find_layout
-from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
+from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
 from wiiuport.control import (
     DEFAULT_PORT,
@@ -61,8 +61,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--keys", type=Path, help="keys.txt; defaults to $WIIUPORT_KEYS")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--boot", type=int, default=90)
-    parser.add_argument("--presses", type=int, default=12)
-    parser.add_argument("--interval", type=int, default=8)
+    parser.add_argument(
+        "--save",
+        type=Path,
+        help="the title's save folder, copied into the session; defaults to $WIIUPORT_SAVE. "
+        "Without one the title starts a new game and stops at its name-entry keyboard.",
+    )
+    parser.add_argument("--presses", type=int, default=PRESSES)
+    parser.add_argument("--interval", type=float, default=INTERVAL_SECONDS)
     parser.add_argument(
         "--settle", type=int, default=5, help="seconds to wait for both captures to land"
     )
@@ -72,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         game = resolve_game(args.game)
         keys = resolve_keys(args.keys)
+        save = resolve_save(args.save)
     except TitleUnavailable as unavailable:
         print(f"refused: {unavailable}", file=sys.stderr)
         return 2
@@ -89,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_env=runtime_env(args.port, continuous=False),
     )
     with session:
-        session.prepare(keys_source=keys)
+        session.prepare(keys_source=keys, save_source=save)
         with session.launch(layout.shell_command(game)) as running:
             deadline = time.monotonic() + args.boot
             ready = False
@@ -103,13 +110,12 @@ def main(argv: list[str] | None = None) -> int:
             if not ready:
                 print("refused: the channel never answered while booting.", file=sys.stderr)
                 return 1
-            for index in range(args.presses):
-                if running.poll() is not None:
-                    break
-                press("a" if index % 2 == 0 else "plus", port=args.port)
-                time.sleep(args.interval)
-            release(port=args.port)
-            time.sleep(5)
+            press_into_world(
+                args.port,
+                presses=args.presses,
+                interval=args.interval,
+                still_running=lambda: running.poll() is None,
+            )
 
             try:
                 report = read_transforms(args.port)
