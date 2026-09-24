@@ -37,6 +37,16 @@ HOST_PROVIDED: frozenset[str] = frozenset(
         "libc.so.6",
         "libm.so.6",
         "libgcc_s.so.1",
+        # GL's vendor-neutral dispatch (glvnd). It loads the host's driver by
+        # name, and a bundled copy older than the host's can fail to find it.
+        "libGL.so.1",
+        "libEGL.so.1",
+        "libGLX.so.0",
+        "libOpenGL.so.0",
+        "libGLdispatch.so.0",
+        # fontconfig reads the host's configuration, whose format moves with it.
+        "libfontconfig.so.1",
+        "libexpat.so.1",
         # The display, input and font stack every desktop session already runs; a
         # bundled copy can disagree with the host's server or drivers.
         "libX11.so.6",
