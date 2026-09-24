@@ -21,6 +21,7 @@
 #include <span>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -294,8 +295,10 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         std::optional<uint32_t> vertexEntry;
         uint32_t ordinal;
         VertexLayout layout;
-        // Where each buffer's copy starts in the frame's bytes.
+        // Where each buffer's copy starts in the frame's bytes, and where the
+        // guest keeps it.
         std::vector<size_t> bufferStarts;
+        std::vector<const void*> bufferSources;
         // The mesh it reads, by the frame's meshes: draws reading the same
         // copies share one.
         uint32_t mesh{0};
@@ -348,6 +351,11 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         std::unordered_map<std::pair<uint64_t, uint64_t>, std::vector<size_t>, PairHash> byShader;
         // Each mesh's id, by the copies it reads.
         std::map<std::vector<size_t>, uint32_t> meshes;
+        // The first kept draw of each vertex shader (base hash) from each
+        // first buffer, by where the guest keeps it: a title that keeps an
+        // object's vertices in buffers of its own, double-buffered as its
+        // blocks are, draws it from the same one two frames apart.
+        std::unordered_map<std::pair<uint64_t, const void*>, uint32_t, PairHash> bySource;
         // What every draw of the frame reads vertices from, a kept mesh's
         // once: the meshes whose bytes another reader draws are not blended.
         std::vector<VertexRead> reads;
@@ -389,6 +397,9 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         // m_meshLayouts, both kept until the blend of the frame is done.
         size_t plannedBy;
         const VertexLayout* layout;
+        // Its draw two frames back is known by the buffers it drew from, and
+        // is not searched for by its vertices.
+        bool earlierByBuffers{false};
     };
 
     // The layout every reader of a mesh fetches together: the first
@@ -460,6 +471,12 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // The draw a frame holds for an object's entry and a draw's place among
     // it, if it was kept and is laid out as `drawn` is.
     static std::optional<size_t> drawOf(const Frame& frame, size_t entry, const Draw& drawn);
+    // The draw of `frame` from the same guest buffers as `drawn`, by the same
+    // shader, if any.
+    static std::optional<size_t> drawnFrom(const Frame& frame, const Draw& drawn);
+    // Whether `drawn`'s shader keeps its objects' vertices in buffers of
+    // their own this frame (startBlending).
+    bool keepsBuffers(const Draw& drawn) const;
     void count(uint64_t shaderBaseHash, VertexOutcome outcome);
     void publishCounts();
 
@@ -516,6 +533,7 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::chrono::nanoseconds m_copying{0};
     std::chrono::nanoseconds m_waiting{0};
     std::atomic<uint64_t> m_partnersFoundByVertices{0};
+    std::unordered_set<std::pair<uint64_t, uint64_t>, PairHash> m_shadersKeepingBuffers;
     std::atomic<bool> m_blendingEnabled{true};
     std::mutex m_excludedMutex;
     std::vector<uint64_t> m_excluded;

@@ -297,20 +297,37 @@ struct ActorDraw {
     // Where in the buffer it reads its vertices start, in values: a draw
     // over part of another's mesh, as a toon outline reads the hair's.
     uint32_t fromValue{0};
+    // The buffer the title keeps its vertices in from frame to frame, by
+    // KeptBuffers' index; none, and each frame's are in a buffer of their own.
+    std::optional<size_t> keptIn{};
+};
+
+// Buffers the title keeps an object's vertices in across frames, at
+// addresses that do not move.
+struct KeptBuffers {
+    std::array<std::vector<std::byte>, 8> buffers;
 };
 
 // Where a guest's draw keeps its mesh: each frame's vertices in their own
-// buffer, as the title rewrites them.
+// buffer, as the title rewrites them, or in one it keeps.
 struct GuestFrame {
     std::vector<ActorDraw> draws;
     std::vector<std::vector<std::byte>> meshes;
+    KeptBuffers* kept;
 
-    explicit GuestFrame(std::vector<ActorDraw> drawn) : draws(std::move(drawn)) {
+    explicit GuestFrame(std::vector<ActorDraw> drawn, KeptBuffers* keptBuffers = nullptr)
+        : draws(std::move(drawn)), kept(keptBuffers) {
         for (const ActorDraw& draw : draws) {
             std::vector<std::byte> bytes(draw.mesh.size() * sizeof(float));
             for (size_t index = 0; index < draw.mesh.size(); ++index) {
                 putWord(kBigEndian, bytes.data() + (index * sizeof(float)),
                         std::bit_cast<uint32_t>(draw.mesh[index]));
+            }
+            if (std::optional<size_t> slot = draw.keptIn; slot.has_value()) {
+                std::vector<std::byte>& buffer = kept->buffers.at(*slot);
+                buffer.resize(bytes.size());
+                std::ranges::copy(bytes, buffer.begin());
+                bytes.clear();
             }
             meshes.push_back(std::move(bytes));
         }
@@ -318,8 +335,12 @@ struct GuestFrame {
 
     // The bytes the draw at `index` reads.
     std::span<const std::byte> meshOf(size_t index) const {
-        return std::span<const std::byte>(meshes[draws[index].passOver.value_or(index)])
-            .subspan(draws[index].fromValue * sizeof(float));
+        size_t reads = draws[index].passOver.value_or(index);
+        std::optional<size_t> slot = draws[reads].keptIn;
+        std::span<const std::byte> buffer =
+            slot.has_value() ? std::span<const std::byte>(kept->buffers.at(*slot))
+                             : std::span<const std::byte>(meshes[reads]);
+        return buffer.subspan(draws[index].fromValue * sizeof(float));
     }
 };
 
@@ -744,6 +765,38 @@ void aCloudNoSiblingPassedIsDrawnAsTheTitleDrewIt() {
     check::equal(blends.vertices.partnersFoundByVertices(), uint64_t{0}, "none found");
 }
 
+void aRingNewAtNInABufferOfItsOwnIsNotTakenForAnother() {
+    // Ripple rings drawn alike, told apart only by their place, each kept by
+    // the title in a pair of buffers of its own, as it double-buffers its
+    // blocks. A ring that shrank from 30 to 20 is gone at N, and a new one
+    // stands at 10: the old ring's two frames lie on a line through it, but
+    // the new ring's buffer was not drawn two frames back, so it is new.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    KeptBuffers kept;
+    auto rings = [&kept](uint32_t block, float uniform,
+                         const std::vector<std::pair<float, size_t>>& drawn) {
+        std::vector<ActorDraw> draws;
+        draws.reserve(drawn.size());
+        for (auto [radius, buffer] : drawn) {
+            draws.push_back(
+                {.block = block, .uniforms = {uniform}, .mesh = {radius}, .keptIn = buffer});
+        }
+        return GuestFrame(std::move(draws), &kept);
+    };
+    blends.record(rings(kSkyBlock, 1.0f, {{98.0f, 0}, {50.0f, 2}}));
+    blends.record(rings(kSkyBlockB, 2.0f, {{99.0f, 1}, {40.0f, 3}}));
+    blends.record(rings(kSkyBlock, 3.0f, {{100.0f, 0}, {30.0f, 2}}));
+    blends.record(rings(kSkyBlockB, 3.0f, {{101.0f, 1}, {20.0f, 3}}));
+    GuestFrame latest = rings(kSkyBlock, 3.0f, {{102.0f, 0}, {10.0f, 4}});
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 101.5f, "the ring kept in its buffers is blended from its own");
+    check::equal(drawn[1][0], 10.0f, "the new ring is drawn as the title drew it");
+    check::equal(blends.vertices.draws(VertexOutcome::NoPartner), uint64_t{1},
+                 "and counted with no partner");
+}
+
 void nothingIsReplacedBeforeThreeFramesArePlanned() {
     Blends blends;
     blends.objects.setPlanning(true);
@@ -822,6 +875,7 @@ void runVertexBlendTests() {
     aCloudIsToldFromOneBesideItByWhatItKeeps();
     aCloudThatHappensToStandHalfWayIsNotTakenForAnother();
     aCloudNoSiblingPassedIsDrawnAsTheTitleDrewIt();
+    aRingNewAtNInABufferOfItsOwnIsNotTakenForAnother();
     nothingIsReplacedBeforeThreeFramesArePlanned();
     aReplayOutOfStepStopsReplacing();
     verticesSwitchedOffAreDrawnAsTheTitleDrewThemAndBlendAgainOnceOn();
