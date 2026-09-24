@@ -13,7 +13,7 @@ from pathlib import Path
 from .cxxpolicy import CxxPolicyUnavailable, check_cxx_policy
 from .cxxtests import CxxTestsUnavailable, build_and_run
 from .cxxtidy import TidyUnavailable, check_tidy
-from .hostdeps import MissingHostPackages, Requirement, check
+from .lockedtools import LOCKED_BIN, LockedToolMissing, locked_tool
 from .paths import Layout
 from .structure import FIRST_PARTY_CXX_ROOTS, check_source_sizes
 
@@ -131,7 +131,9 @@ def gate_python_tests(layout: Layout) -> GateResult:
     )
 
 
-def check_formatting(sources: list[Path], cwd: Path) -> tuple[bool, str]:
+def check_formatting(
+    sources: list[Path], cwd: Path, bin_dir: Path = LOCKED_BIN
+) -> tuple[bool, str]:
     """Run the non-mutating clang-format check over exactly these sources.
 
     Separate from the gate so tests drive the shipping implementation rather
@@ -139,15 +141,12 @@ def check_formatting(sources: list[Path], cwd: Path) -> tuple[bool, str]:
     bare subprocess call raised FileNotFoundError, which is a crash, not a
     check telling you what to install.
     """
-    formatter = Requirement(
-        "clang-format", ("clang-tools-extra",), ("clang-format",), executables=("clang-format",)
-    )
     try:
-        check((formatter,))
-    except MissingHostPackages as missing:
+        formatter = locked_tool("clang-format", bin_dir)
+    except LockedToolMissing as missing:
         return False, f"formatting was never checked.\n{missing}"
     result = subprocess.run(
-        ["clang-format", "--dry-run", "--Werror", *[str(s) for s in sources]],
+        [str(formatter), "--dry-run", "--Werror", *[str(s) for s in sources]],
         cwd=cwd,
         capture_output=True,
         text=True,

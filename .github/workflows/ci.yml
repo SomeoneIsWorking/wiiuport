@@ -45,7 +45,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             $(uv run --frozen python tools/build_runtime.py --apt-packages) \
-            clang-format clang-tidy libtool
+            libtool
 
       # An accelerator only. The job must remain correct with an empty cache,
       # so nothing here is allowed to be a build input the cold path lacks.

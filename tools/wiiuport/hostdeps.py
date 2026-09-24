@@ -73,9 +73,6 @@ def find_library(name: str) -> Path | None:
 # host that is in fact ready.
 GATE_REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement("C++ compiler (clang)", ("clang",), ("clang",), executables=("clang", "clang++")),
-    Requirement(
-        "clang-format", ("clang-tools-extra",), ("clang-format",), executables=("clang-format",)
-    ),
     Requirement("CMake", ("cmake",), ("cmake",), executables=("cmake",)),
     Requirement("Ninja", ("ninja-build",), ("ninja-build",), executables=("ninja",)),
 )

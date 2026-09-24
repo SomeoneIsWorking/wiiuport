@@ -78,7 +78,7 @@ def test_an_unrun_check_group_is_named() -> None:
 
 def _runner(tidy: subprocess.CompletedProcess[str]):
     def run(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-        if command[0] == "clang-tidy":
+        if Path(command[0]).name == "clang-tidy":
             return subprocess.CompletedProcess(command, 0, ALL_GROUPS, "")
         return tidy
 
@@ -105,3 +105,8 @@ def test_a_failed_run_without_a_diagnostic_is_not_clean() -> None:
     report = run_tidy(Path("/r"), UNITS, _runner(broken))
     assert not report.passed
     assert "without a diagnostic" in report.failed_runs[0]
+
+
+def test_a_missing_locked_clang_tidy_refuses(tmp_path: Path) -> None:
+    with pytest.raises(TidyUnavailable, match="uv run --frozen"):
+        run_tidy(Path("/r"), UNITS, _runner(subprocess.CompletedProcess([], 0, "", "")), tmp_path)
