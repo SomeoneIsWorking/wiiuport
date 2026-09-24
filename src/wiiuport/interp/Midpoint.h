@@ -56,7 +56,8 @@ class Midpoint {
 
     // One value at N-2, its candidate's at N-1, and N.
     void add(float before, float between, float after) {
-        addExpected(before, between, after, (static_cast<double>(before) + after) / 2.0);
+        addExpected({.before = before, .between = between, .after = after},
+                    (static_cast<double>(before) + after) / 2.0);
     }
 
     // The same, where the candidate's own value at N-3 is known too: a path
@@ -70,7 +71,7 @@ class Midpoint {
             add(before, between, after);
             return;
         }
-        addExpected(before, between, after,
+        addExpected({.before = before, .between = between, .after = after},
                     (-static_cast<double>(threeBack) / 3.0) + before +
                         (static_cast<double>(after) / 3.0));
     }
@@ -104,8 +105,16 @@ class Midpoint {
     }
 
   private:
+    // One value at N-2, its candidate's at N-1, and N.
+    struct Sample {
+        float before;
+        float between;
+        float after;
+    };
+
     // `expected` is where the object would stand at N-1 on its path.
-    void addExpected(float before, float between, float after, double expected) {
+    void addExpected(Sample sample, double expected) {
+        auto [before, between, after] = sample;
         if (!movedIn(before, after)) {
             return;
         }
