@@ -87,6 +87,7 @@ void ObjectBlend::planHandedOver(const std::stop_token& stop) {
         lock.unlock();
         auto started = std::chrono::steady_clock::now();
         m_planner.setMapBlending(m_mapBlending.load());
+        m_planner.setPixelBlending(m_pixelBlending.load());
         for (size_t index = 0; index < count; ++index) {
             m_planner.add(m_taken[index]);
         }

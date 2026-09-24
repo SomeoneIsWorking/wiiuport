@@ -38,6 +38,9 @@ struct RecordedUniformAssembly {
     // Whether the draw writes any colour buffer; one that writes depth alone
     // renders a map a later draw looks up (LatteFrameHooks::UniformAssembly).
     bool writesColour{true};
+    // Whether the stage compares against a depth texture: it looks up a map,
+    // such as the light's, that the frame drew before it.
+    bool looksUpDepthMap{false};
     // The guest addresses of the uniform blocks this draw sourced, as
     // (bufferId, physicalAddress) pairs. This is the engine's own storage for
     // the object, and the only identity a recorded draw carries.

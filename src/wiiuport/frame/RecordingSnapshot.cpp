@@ -92,7 +92,8 @@ std::string RecordingSnapshot::framed() const {
             append(out, assembly.shaderBaseHash);
             append(out, assembly.shaderAuxHash);
             append(out, assembly.stageIndex);
-            appendU32(out, assembly.writesColour ? 1 : 0);
+            appendU32(out, (assembly.writesColour ? kWritesColour : 0) |
+                               (assembly.looksUpDepthMap ? kLooksUpDepthMap : 0));
             appendU32(out, assembly.blockSources.size());
             out.append(reinterpret_cast<const char*>(assembly.blockSources.data()),
                        assembly.blockSources.size() * sizeof(uint32_t));
@@ -107,7 +108,7 @@ std::string RecordingSnapshot::framed() const {
 std::vector<RecordingSnapshot::Frame> RecordingSnapshot::parse(std::string_view framed) {
     std::string_view magic(kMagic);
     if (!framed.starts_with(magic)) {
-        throw std::invalid_argument("the snapshot does not start with WIIUREC2");
+        throw std::invalid_argument("the snapshot does not start with WIIUREC3");
     }
     Reader reader(framed.substr(magic.size()));
     std::vector<Frame> frames(reader.take<uint32_t>());
@@ -118,7 +119,9 @@ std::vector<RecordingSnapshot::Frame> RecordingSnapshot::parse(std::string_view 
             assembly.shaderBaseHash = reader.take<uint64_t>();
             assembly.shaderAuxHash = reader.take<uint64_t>();
             assembly.stageIndex = reader.take<uint32_t>();
-            assembly.writesColour = reader.take<uint32_t>() != 0;
+            uint32_t flags = reader.take<uint32_t>();
+            assembly.writesColour = (flags & kWritesColour) != 0;
+            assembly.looksUpDepthMap = (flags & kLooksUpDepthMap) != 0;
             assembly.blockSources = reader.takeArray<uint32_t>(reader.take<uint32_t>());
             assembly.data = reader.takeArray<float>(reader.take<uint32_t>());
         }

@@ -778,6 +778,7 @@ bool ControlChannel::start(uint16_t port) {
                 m_objects.setPlanning(m_continuous.enabled() &&
                                       requestedFlag(query, "objects", true));
                 m_objects.setMapBlending(requestedFlag(query, "maps", true));
+                m_objects.setPixelBlending(requestedFlag(query, "pixels", true));
                 m_vertices.setBlending(requestedFlag(query, "vertices", true));
                 m_vertices.exclude(std::move(excluded));
                 return lucent::http::Response::json(200, "OK", interpolationJson());

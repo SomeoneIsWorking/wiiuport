@@ -47,6 +47,12 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
         m_mapBlending.store(blending);
     }
 
+    // Off, every pixel stage is drawn as the title drew it. A maintainer's
+    // discriminator, not a setting. Safe from any thread.
+    void setPixelBlending(bool blending) {
+        m_pixelBlending.store(blending);
+    }
+
     void onAssemblyRecorded(const frame::RecordedUniformAssembly& assembly) override;
     void onFrameRecorded(const frame::FrameRecording& recording) override;
 
@@ -160,6 +166,7 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
     ObjectPlanner m_planner;
     std::atomic<bool> m_planning{false};
     std::atomic<bool> m_mapBlending{true};
+    std::atomic<bool> m_pixelBlending{true};
 
     // Handed over and not yet taken, and the batch the planning thread is
     // working through. They swap, so both keep their capacity.

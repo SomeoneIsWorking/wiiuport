@@ -10,9 +10,9 @@ from wiiuport.interpolation import RECORDINGS_MAGIC, Interpolation, parse_record
 from wiiuport.control import ENV_CONTROL_PORT, ENV_INTERPOLATION, ControlUnavailable, runtime_env
 
 
-def assembly(base: int, sources: list[int], floats: list[float]) -> bytes:
+def assembly(base: int, sources: list[int], floats: list[float], flags: int = 1) -> bytes:
     return (
-        struct.pack("=QQIII", base, 0, 1, 1, len(sources))
+        struct.pack("=QQIII", base, 0, 1, flags, len(sources))
         + struct.pack(f"={len(sources)}I", *sources)
         + struct.pack("=I", len(floats))
         + struct.pack(f"={len(floats)}f", *floats)
@@ -37,6 +37,13 @@ def test_consecutive_frames_decode_in_order():
     assert frames[1].assemblies[0].floats == (3.0,)
 
 
+def test_each_flag_decodes_on_its_own():
+    frames = parse_recordings(snapshot([assembly(0xAA, [], [], 1), assembly(0xBB, [], [], 2)]))
+    colour, lookUp = frames[0].assemblies
+    assert (colour.writesColour, colour.looksUpDepthMap) == (True, False)
+    assert (lookUp.writesColour, lookUp.looksUpDepthMap) == (False, True)
+
+
 def test_a_truncated_snapshot_is_refused_rather_than_cut_short():
     body = snapshot([assembly(0xAA, [], [1.0, 2.0])])
     with pytest.raises(ControlUnavailable, match="truncated"):
@@ -49,7 +56,7 @@ def test_trailing_bytes_are_refused():
 
 
 def test_a_foreign_body_is_refused():
-    with pytest.raises(ControlUnavailable, match="WIIUREC2"):
+    with pytest.raises(ControlUnavailable, match="WIIUREC3"):
         parse_recordings(b"OTHERMAG" + bytes(4))
 
 

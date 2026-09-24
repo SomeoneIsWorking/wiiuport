@@ -215,7 +215,8 @@ void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
     // as history, and its entries read as unmatched in a plan never ready.
     Outcome outcome = Outcome::Unmatched;
     if (assembly.stageIndex == kPixelStage) {
-        outcome = m_framesHeld >= 2 ? planPixelStage(entry) : Outcome::Shading;
+        outcome =
+            m_framesHeld >= 2 ? planPixelStage(entry, assembly.looksUpDepthMap) : Outcome::Shading;
     } else if (!assembly.writesColour && !m_mapBlending) {
         outcome = Outcome::Shading;
     } else if (m_framesHeld >= 2 && !assembly.writesColour) {
@@ -230,17 +231,24 @@ void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
     ++m_buildingPlan.outcomes[static_cast<size_t>(outcome)];
 }
 
-ObjectPlanner::Outcome ObjectPlanner::planPixelStage(size_t entry) {
+ObjectPlanner::Outcome ObjectPlanner::planPixelStage(size_t entry, bool looksUpDepthMap) {
     // A pixel stage follows its draw's vertex stage. Behind a vertex stage
     // that moved an object, it shades that object, and what it animates --
     // a colour, where the camera stands for its lighting -- is the object's:
     // it is planned as an object is, by its own blocks. Behind anything
     // else it shades a pass, such as the look-up of the light's map, which
     // holds the light multiplied into the camera and is drawn at N.
+    //
+    // A stage that compares against a depth map looks that map up itself:
+    // where on the map a pixel lands is carried with the light, which the
+    // map was drawn with at N. Blended, the object falls in its own shadow.
+    if (looksUpDepthMap) {
+        return Outcome::Shading;
+    }
     bool shadesABlendedObject = entry > 0 &&
                                 m_building.key(entry - 1).shader.stageIndex != kPixelStage &&
                                 m_buildingPlan.outcomeOf[entry - 1] == Outcome::Blended;
-    if (!shadesABlendedObject) {
+    if (!m_pixelBlending || !shadesABlendedObject) {
         return Outcome::Shading;
     }
     Outcome outcome = plan(entry);

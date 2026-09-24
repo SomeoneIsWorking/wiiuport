@@ -34,6 +34,8 @@ struct Draw {
     bool writesColour{true};
     // A block every draw of a pass sources alike, as a shadow cascade's.
     uint32_t passBlock{0};
+    // A stage that compares against a depth texture, as the light's look-up.
+    bool looksUpDepthMap{false};
 
     std::vector<uint32_t> sources() const;
 };
