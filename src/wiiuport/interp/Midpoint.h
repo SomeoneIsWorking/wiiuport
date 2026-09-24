@@ -34,6 +34,18 @@ class Midpoint {
         return isNumber(before) && isNumber(after) && !sameBits(before, after);
     }
 
+    // How far the title's own rounding can set a value off its path, in
+    // units in its last place. A uniform is typically a four-term dot
+    // product (a matrix row times a vector), each term and each sum rounded,
+    // so it can stand up to about four units off the exact value: that much
+    // at each end moves the midpoint as far, and that much at N-1 again.
+    static constexpr double kRoundingUnits = 8.0;
+
+    // How far rounding alone can set a value of this size off its path.
+    static double rounding(float value) {
+        return kRoundingUnits * unitInLastPlace(value);
+    }
+
     // The distance from a float to the next one away from zero.
     static double unitInLastPlace(float value) {
         float magnitude = std::abs(value);
@@ -55,13 +67,13 @@ class Midpoint {
             ++m_stood;
         }
         double moved = static_cast<double>(after) - before;
-        // The title rounds the value it draws at N-1 to a float: within one
-        // unit in its last place of the candidate, the object is on it. Far
-        // from the origin a move is a few of those units, and rounding alone
-        // would otherwise set the object off its own path.
+        // The title rounds what it computes to a float: within its rounding
+        // of the candidate, the object is on it. Far from the origin a move
+        // is a few units in the last place, and rounding alone would
+        // otherwise set the object off its own path.
         double off =
             std::max(0.0, std::abs(((static_cast<double>(before) + after) / 2.0) - between) -
-                              unitInLastPlace(between));
+                              rounding(between));
         m_stepSquared += moved * moved;
         m_residualSquared += off * off;
         ++m_compared;

@@ -511,6 +511,20 @@ void anObjectFarFromTheOriginIsKnownThroughItsRounding() {
     check::equal(uploaded[0][0], 0.5f * (0.695f + 0.698f), "and turned half way");
 }
 
+void aPlaceTheTitleComputedIsKnownThroughItsArithmeticsRounding() {
+    // A sea caster found by its values, as the snapshot's were: its place in
+    // the light's map is a dot product the title rounds at every frame, and
+    // goes 2972.37207, 2972.37305, 2972.37134 -- four units in the float's
+    // last place off its midpoint at N-1, in a register of its own.
+    std::vector<Draw> latest{{kBlockA, {0.698f, 0.0f, 0.0f, 0.0f, 2972.37134f, 0.0f, 0.0f, 0.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {0.692f, 0.0f, 0.0f, 0.0f, 2972.37207f, 0.0f, 0.0f, 0.0f}}},
+             {{kBlockB, {0.695f, 0.0f, 0.0f, 0.0f, 2972.37305f, 0.0f, 0.0f, 0.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "the caster is blended");
+    check::equal(uploaded[0][0], 0.5f * (0.695f + 0.698f), "and turned half way");
+}
+
 void anObjectKnownByItsBlocksThatStoppedAtNMinusOneIsHeld() {
     // Walked long enough for its blocks to be paired, then stopped a frame
     // before N: its own draw at N-1 holds N, which is where it stands
@@ -931,6 +945,7 @@ void runObjectBlendTests() {
     aValueFlippingEveryFrameIsNotAveraged();
     aMoveTooSmallToHalveIsNotDrawnBetween();
     anObjectFarFromTheOriginIsKnownThroughItsRounding();
+    aPlaceTheTitleComputedIsKnownThroughItsArithmeticsRounding();
     anObjectKnownByItsBlocksThatStoppedAtNMinusOneIsHeld();
     anObjectKnownByItsBlocksThatStoodUntilNMinusOneIsBlended();
     anObjectFoundByItsValuesThatStoodUntilNMinusOneIsBlended();

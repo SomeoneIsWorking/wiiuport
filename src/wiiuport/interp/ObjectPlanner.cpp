@@ -296,7 +296,7 @@ ObjectPlanner::SearchPoint ObjectPlanner::placeSearchPoint(const AssemblyKey& ke
             continue;
         }
         double rounding =
-            Midpoint::unitInLastPlace(std::max(std::abs(before[index]), std::abs(after[index])));
+            Midpoint::rounding(std::max(std::abs(before[index]), std::abs(after[index])));
         roundingSquared += rounding * rounding;
     }
     // An object that moved in no value of its own draws the same with any
