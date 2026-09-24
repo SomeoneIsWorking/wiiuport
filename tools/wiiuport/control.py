@@ -467,6 +467,15 @@ def read_setup(port: int = DEFAULT_PORT, timeout: float = 2.0) -> SetupStatus:
     )
 
 
+def request_quit(port: int = DEFAULT_PORT, timeout: float = 5.0) -> None:
+    """Ask the running product to stop as a player closing its window does.
+
+    Refused with the runtime's reason while no title runs. A signal is no
+    substitute: the emulated system's handler ends the process on SIGTERM
+    without the host's shutdown, so only this exercises the path players take."""
+    request_bytes("POST", "/quit", port, timeout)
+
+
 def read_transforms(port: int = DEFAULT_PORT, timeout: float = 5.0) -> TransformReport:
     """Read /transforms, refusing by reason rather than returning empty."""
     url = f"http://127.0.0.1:{port}/transforms"

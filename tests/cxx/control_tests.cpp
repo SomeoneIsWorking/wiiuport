@@ -214,6 +214,35 @@ void aShownSetupScreenReportsWhatItIsWaitingFor() {
                   "and a screen that closed is no longer reported as one");
 }
 
+// A host as the channel sees one: it counts the stops it was asked for.
+struct FakeHost final : public wiiuport::control::HostStopTarget {
+    int stopsRequested = 0;
+
+    void requestStop() override {
+        ++stopsRequested;
+    }
+};
+
+void aQuitWithNoHostRunningIsRefusedAndAQuitWithOneReachesIt() {
+    Fixture fixture;
+    bool accepted = true;
+    std::string body = fixture.channel.requestHostStop(accepted);
+    check::isTrue(!accepted, "with no title running there is no host to stop");
+    check::isTrue(contains(body, "\"stopping\":false"), "and the refusal says so");
+
+    FakeHost host;
+    fixture.channel.setHostStop(&host);
+    body = fixture.channel.requestHostStop(accepted);
+    check::isTrue(accepted, "a registered host takes the request");
+    check::equal(host.stopsRequested, 1, "and is asked to stop exactly once");
+    check::isTrue(contains(body, "\"stopping\":true"), "which the reply reports");
+
+    fixture.channel.setHostStop(nullptr);
+    fixture.channel.requestHostStop(accepted);
+    check::isTrue(!accepted, "a host that unregistered is not asked again");
+    check::equal(host.stopsRequested, 1, "and was not");
+}
+
 void anUnstartedChannelIsNotRunning() {
     Fixture fixture;
     check::isTrue(!fixture.channel.running(), "a channel nobody started is off");
@@ -232,6 +261,7 @@ void runControlTests() {
     aFoundTransformIsReportedWithItsValues();
     aChannelWithNoSetupScreenSaysSoRatherThanReportingAClosedOne();
     aShownSetupScreenReportsWhatItIsWaitingFor();
+    aQuitWithNoHostRunningIsRefusedAndAQuitWithOneReachesIt();
     anUnstartedChannelIsNotRunning();
 }
 

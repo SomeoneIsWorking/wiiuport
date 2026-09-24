@@ -123,6 +123,12 @@ bool ShellWindow::publishGeometry() {
     return true;
 }
 
+void ShellWindow::requestClose() {
+    SDL_Event quit{};
+    quit.type = SDL_EVENT_QUIT;
+    SDL_PushEvent(&quit);
+}
+
 bool ShellWindow::pumpEvents(HostEventObserver& observer) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {

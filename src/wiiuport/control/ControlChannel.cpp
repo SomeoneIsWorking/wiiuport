@@ -26,7 +26,7 @@ lucent::http::Response notFound() {
         "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, "
         "POST /shadowcheck, "
         "POST /neighbourcheck, POST /blends, POST /pacing, "
-        "POST /objects, POST /draws, POST /recordings and POST /input.\n");
+        "POST /objects, POST /draws, POST /recordings, POST /input and POST /quit.\n");
 }
 
 // The one-shot routes each own a frame boundary, and so does continuous
@@ -187,6 +187,21 @@ std::string ControlChannel::controllersJson() const {
 
 void ControlChannel::setSetupStatus(const SetupStatusSource* status) {
     m_setupStatus = status;
+}
+
+void ControlChannel::setHostStop(HostStopTarget* target) {
+    m_hostStop.store(target);
+}
+
+std::string ControlChannel::requestHostStop(bool& accepted) {
+    HostStopTarget* target = m_hostStop.load();
+    accepted = target != nullptr;
+    if (!accepted) {
+        return "{\"stopping\":false,\"reason\":\"no title is running, so no host is there to "
+               "stop\"}\n";
+    }
+    target->requestStop();
+    return "{\"stopping\":true}\n";
 }
 
 std::string ControlChannel::setupJson() const {
@@ -947,6 +962,12 @@ bool ControlChannel::start(uint16_t port) {
                     std::string("{\"armed\":") + (armed ? "true" : "false") +
                         ",\"imagesReceived\":" + std::to_string(m_capture.imagesReceived()) +
                         "}\n");
+            }
+            if (request.method == "POST" && request.path() == "/quit") {
+                auto accepted = false;
+                auto body = requestHostStop(accepted);
+                return lucent::http::Response::json(accepted ? 202 : 409,
+                                                    accepted ? "Accepted" : "Conflict", body);
             }
             if (request.method == "POST" && request.path() == "/input") {
                 auto accepted = false;
