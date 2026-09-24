@@ -742,6 +742,29 @@ void aCloudIsToldFromOneBesideItByWhatItKeeps() {
     check::equal(drawn[0][1], 0.75f, "in its own");
 }
 
+void aPatchIsNotTakenForTheRowBesideItByAValueThatFlips() {
+    // Two patches of a grid, told apart only by place, each with a value
+    // that flips with the title's double buffering: the same at N-2 and N,
+    // other at N-1, and further from the first patch's own than from the
+    // second's. By what moved, the first patch a frame before is its own.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    auto patches = [](uint32_t block, float uniform, float step, float flip, float besideFlip) {
+        return GuestFrame(
+            {{block, {uniform}, {step, flip}}, {block, {uniform}, {208.0f + step, besideFlip}}});
+    };
+    blends.record(patches(kSkyBlock, 1.0f, -1.0f, 100.0f, 100.0f));
+    blends.record(patches(kSkyBlockB, 2.0f, -1.0f, 100.0f, 100.0f));
+    blends.record(patches(kSkyBlock, 3.0f, 0.0f, 100.0f, 100.0f));
+    blends.record(patches(kSkyBlockB, 3.0f, 1.0f, -1000.0f, 150.0f));
+    GuestFrame latest = patches(kSkyBlock, 3.0f, 2.0f, 100.0f, 100.0f);
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 1.5f, "the patch is drawn from where it was");
+    check::equal(drawn[0][1], 100.0f, "with its flipping value as N has it");
+    check::equal(drawn[1][0], 209.5f, "and the row beside it from where it was");
+}
+
 void aCloudThatHappensToStandHalfWayIsNotTakenForAnother() {
     // The first draw's cloud is new two frames back, so its step is taken
     // from another cloud, 600 away; a third cloud a frame before happens to
@@ -889,6 +912,7 @@ void runVertexBlendTests() {
     cloudsReorderedSinceTwoFramesBackAreBlendedFromTheirOwn();
     aMeshTheTitleDrewUnderOtherBlocksAFrameBeforeIsBlendedFromThere();
     aCloudIsToldFromOneBesideItByWhatItKeeps();
+    aPatchIsNotTakenForTheRowBesideItByAValueThatFlips();
     aCloudThatHappensToStandHalfWayIsNotTakenForAnother();
     aCloudNoSiblingPassedIsDrawnAsTheTitleDrewIt();
     aRingNewAtNInABufferOfItsOwnIsNotTakenForAnother();
