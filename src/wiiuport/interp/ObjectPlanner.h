@@ -268,6 +268,17 @@ class ObjectPlanner {
         return m_mapValuesMoved;
     }
 
+    // Values blended pixel stages moved as another object's pixel stages did
+    // -- the look-up of the light's map, the light multiplied into the camera
+    // -- and so drew at N, over the values those stages moved.
+    uint64_t pixelPassValuesHeld() const {
+        return m_pixelPassValuesHeld;
+    }
+
+    uint64_t pixelValuesMoved() const {
+        return m_pixelValuesMoved;
+    }
+
     // Objects drawn at N -- unverified or unmatched -- whose matrices were
     // carried through the in-between camera (SharedTransforms), and how many
     // 4x4s that was.
@@ -347,6 +358,13 @@ class ObjectPlanner {
     // the frame's draws into maps source; the entry itself where every block
     // it sources is fresh.
     uint64_t mapObjectOf(size_t entry) const;
+    // Puts back at N, in the building frame's blended pixel stages, what
+    // they moved as the pixel stages of another object did: the look-up of
+    // the light's map is the same in every object's, and is drawn at N with
+    // the map it looks up (planMaps). What an object's own stage animates is
+    // its own and stays blended. An object is named by the vertex stage its
+    // pixel stage follows.
+    void holdPixelPass();
     // Draws the building frame's objects that are drawn at N -- unverified
     // or unmatched -- through the in-between camera, once every draw of it is
     // planned: in the values they share with its blended ones
@@ -460,6 +478,8 @@ class ObjectPlanner {
     // Reused every frame: the pass's values in its draws into maps, and how
     // many of those draws source each block.
     MapPassValues m_mapPass;
+    // The same for the pass's values in the frame's blended pixel stages.
+    MapPassValues m_pixelPass;
     std::unordered_map<uint32_t, uint32_t> m_mapBlockUses;
     // The frame's draws into maps and their draws in N-2, in entry order.
     std::vector<std::pair<size_t, std::optional<size_t>>> m_mapEarlier;
@@ -473,6 +493,8 @@ class ObjectPlanner {
     uint64_t m_valuesShared{0};
     uint64_t m_mapValuesHeld{0};
     uint64_t m_mapValuesMoved{0};
+    uint64_t m_pixelPassValuesHeld{0};
+    uint64_t m_pixelValuesMoved{0};
     uint64_t m_partnersDerived{0};
     uint64_t m_partnersSearched{0};
     uint64_t m_partnersReidentified{0};

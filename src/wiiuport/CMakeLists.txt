@@ -92,6 +92,8 @@ add_library(wiiuport STATIC
   interp/MapPassValues.h
   interp/SharedValues.cpp
   interp/SharedValues.h
+  interp/SharedVertexReads.cpp
+  interp/SharedVertexReads.h
   interp/SlotPool.cpp
   interp/SlotPool.h
   interp/RestoreCheck.h

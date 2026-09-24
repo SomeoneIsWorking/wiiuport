@@ -524,6 +524,9 @@ std::string ControlChannel::interpolationJson() const {
     body += ",\"objectValuesShared\":" + std::to_string(objects.planner().valuesShared());
     body += ",\"objectMapValuesHeld\":" + std::to_string(objects.planner().mapValuesHeld());
     body += ",\"objectMapValuesMoved\":" + std::to_string(objects.planner().mapValuesMoved());
+    body +=
+        ",\"objectPixelPassValuesHeld\":" + std::to_string(objects.planner().pixelPassValuesHeld());
+    body += ",\"objectPixelValuesMoved\":" + std::to_string(objects.planner().pixelValuesMoved());
     body += ",\"objectUnblendedCarried\":" + std::to_string(objects.planner().unblendedCarried());
     body += ",\"objectsLeftAtN\":" + std::to_string(objects.planner().leftAtN());
     body += ",\"objectTransformsCarried\":" + std::to_string(objects.planner().transformsCarried());

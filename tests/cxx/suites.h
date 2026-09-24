@@ -25,6 +25,7 @@ void runObjectBlendSharedValueTests();
 // is the same failure on every run, and chosen with --seed to look further.
 void runDrawTreeTests(uint32_t seed);
 void runVertexBlendTests();
+void runSharedVertexReadsTests();
 void runSlotPoolTests();
 void runGateTests();
 void runShadowTests();

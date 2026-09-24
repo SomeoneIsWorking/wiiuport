@@ -96,6 +96,33 @@ double squaredStep(std::span<const float> from, std::span<const float> to,
     return squared;
 }
 
+// Whether an object stepped from N-1 to N no further than from N-2 to N-1,
+// over the values it moved in from N-2 to N outside frame state: an object
+// turning back retraces its step, where a slot the title set back to the start
+// of another run -- a ripple ring respawned at the swimmer -- leaps.
+struct ObjectSteps {
+    std::span<const float> before;
+    std::span<const float> oneBack;
+    std::span<const float> latest;
+};
+
+bool steppedNoFurther(const ObjectSteps& object, const FrameState& state) {
+    double toOneBack = 0.0;
+    double toLatest = 0.0;
+    for (size_t index = 0; index < object.latest.size(); ++index) {
+        float oneBack = object.oneBack[index];
+        if (state.at(index) || !movedAt(object.before, object.latest, index) ||
+            !isNumber(oneBack)) {
+            continue;
+        }
+        double stepped = static_cast<double>(oneBack) - object.before[index];
+        double stepping = static_cast<double>(object.latest[index]) - oneBack;
+        toOneBack += stepped * stepped;
+        toLatest += stepping * stepping;
+    }
+    return toLatest <= toOneBack;
+}
+
 // Whether `blended` lies strictly between the object's two neighbours:
 // nearer each of them than they are to each other, over the values it moved
 // in that are numbers in all three. This is what an in-between frame
@@ -231,6 +258,7 @@ void ObjectPlanner::endFrame() {
     // its objects through.
     if (m_framesHeld >= 2) {
         planMaps();
+        holdPixelPass();
         seeUnblendedThroughTheCamera();
     }
     ++m_framesPlanned;
@@ -414,9 +442,13 @@ std::optional<size_t> ObjectPlanner::derivedPartner(const AssemblyKey& key,
         }
         return entry;
     }
-    // A stop or a turn at N-1 sets the object's own draw off its midpoint.
-    // Blocks reused by another object name a draw standing elsewhere; the
-    // object's own is the one nearest it by its values too.
+    // A stop or a turn at N-1 sets the object's own draw off its midpoint,
+    // stepping on no further than it came. Blocks reused by another object
+    // name a draw standing elsewhere; the object's own is the one nearest it
+    // by its values too.
+    if (!steppedNoFurther({before, between.values(*entry), after}, frameState(key.shader))) {
+        return std::nullopt;
+    }
     placeSearchPoint(key, before, after);
     DrawTree::Nearest nearest =
         between.nearest(key.shader, {m_point, std::numeric_limits<double>::infinity(),
@@ -770,6 +802,35 @@ void ObjectPlanner::planMaps() {
             m_mapValuesMoved += sameBits(before[index], after[index]) ? 0 : 1;
         }
         m_mapValuesHeld += m_mapPass.holdThePass(
+            before, after,
+            std::span<float>(plan.floats.data() + plan.blendedAt[entry], after.size()));
+    }
+}
+
+void ObjectPlanner::holdPixelPass() {
+    Plan& plan = m_buildingPlan;
+    const KeyedFrame& twoBack = m_frames[1];
+    auto blendedPixelStage = [&](size_t entry) {
+        return plan.outcomeOf[entry] == Outcome::Blended &&
+               m_building.key(entry).shader.stageIndex == kPixelStage;
+    };
+    m_pixelPass.clear();
+    for (size_t entry = 0; entry < m_building.size(); ++entry) {
+        if (blendedPixelStage(entry)) {
+            m_pixelPass.add(entry - 1, twoBack.values(plan.earlierAt[entry]),
+                            m_building.values(entry));
+        }
+    }
+    for (size_t entry = 0; entry < m_building.size(); ++entry) {
+        if (!blendedPixelStage(entry)) {
+            continue;
+        }
+        std::span<const float> before = twoBack.values(plan.earlierAt[entry]);
+        std::span<const float> after = m_building.values(entry);
+        for (size_t index = 0; index < after.size(); ++index) {
+            m_pixelValuesMoved += sameBits(before[index], after[index]) ? 0 : 1;
+        }
+        m_pixelPassValuesHeld += m_pixelPass.holdThePass(
             before, after,
             std::span<float>(plan.floats.data() + plan.blendedAt[entry], after.size()));
     }
