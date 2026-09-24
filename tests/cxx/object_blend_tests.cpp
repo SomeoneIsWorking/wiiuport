@@ -192,6 +192,40 @@ void oneObjectsBlocksPairEveryShaderDrawingIt() {
     check::equal(blend.objects(Outcome::Blended), uint64_t{2}, "both are blended");
 }
 
+void aPartnerSearchedForIsKnownFoundByValues() {
+    // The body's partner is found by its values, and pairs the blocks the
+    // outline's partner is then named by.
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {0.0f, 7.0f}}, {kBlockA, {0.0f, 1.0f}, kOutline}},
+             {{kBlockB, {1.0f, 7.0f}}, {kBlockB, {1.0f, 1.0f}, kOutline}},
+             {{kBlockA, {2.0f, 7.0f}}, {kBlockA, {2.0f, 1.0f}, kOutline}});
+    check::isTrue(blend.planner().partnerFoundByValues(0), "the body's was found by values");
+    check::isTrue(!blend.planner().partnerFoundByValues(1), "the outline's by its blocks");
+}
+
+void anotherObjectTurnedOtherwiseOnItsPathIsNotFoundByValues() {
+    // Seen in the surf: the draw half way along where a piece stands is
+    // another piece, turned otherwise. Its turn is small beside the move and
+    // lands over both, but not in the register that turns.
+    std::vector<Draw> latest{{kBlockA, {2.0f, 0.0f, 0.0f, 0.0f, 0.02f, 0.0f, 0.0f, 0.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}}},
+             {{kBlockB, {1.0f, 0.0f, 0.0f, 0.0f, 0.3f, 0.0f, 0.0f, 0.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{0}, "it is not blended");
+    check::equal(uploaded[0][0], 2.0f, "and is drawn at N");
+}
+
+void anObjectTurningAsItMovesIsFoundByValues() {
+    std::vector<Draw> latest{{kBlockA, {2.0f, 0.0f, 0.0f, 0.0f, 0.02f, 0.0f, 0.0f, 0.0f}}};
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, {{kBlockA, {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}}},
+             {{kBlockB, {1.0f, 0.0f, 0.0f, 0.0f, 0.01f, 0.0f, 0.0f, 0.0f}}}, latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "it is blended");
+    check::equal(uploaded[0][0], 1.5f, "half way from N-1");
+}
+
 void aValueTheObjectHeldIsDrawnAsItsOwn() {
     // N-1's draw passes through the middle of the actor's move but holds 40
     // where the actor held 7: another object, or the actor's value flipping
@@ -1185,6 +1219,9 @@ void runObjectBlendTests() {
     aNewObjectIsDrawnAsDrawnAndCounted();
     aPartnerFoundOnceIsCarriedAndRechecked();
     oneObjectsBlocksPairEveryShaderDrawingIt();
+    aPartnerSearchedForIsKnownFoundByValues();
+    anotherObjectTurnedOtherwiseOnItsPathIsNotFoundByValues();
+    anObjectTurningAsItMovesIsFoundByValues();
     aValueTheObjectHeldIsDrawnAsItsOwn();
     aTileWhoseBlocksPassedToAnotherIsFoundByItsValues();
     anObjectDrawnFromBlocksNewToItIsFoundByItsValues();

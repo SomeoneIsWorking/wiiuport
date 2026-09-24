@@ -43,6 +43,24 @@ Midpoint measure(std::span<const float> before, std::span<const float> after,
     return midpoint;
 }
 
+// Whether the object's midpoint lands on `between` in every register it
+// moved in, not only over all of them. A partner found by its values has
+// nothing else vouching for it, and over all of them the register that moved
+// furthest -- where it stands -- carries the check for another object turned
+// or coloured otherwise.
+bool landsInEveryRegister(std::span<const float> before, std::span<const float> after,
+                          std::span<const float> between, const FrameState& state) {
+    for (size_t start = 0; start < after.size(); start += ObjectPlanner::kRegisterFloats) {
+        size_t count = std::min(ObjectPlanner::kRegisterFloats, after.size() - start);
+        if (!measure(before.subspan(start, count), after.subspan(start, count),
+                     between.subspan(start, count), state.from(start))
+                 .landsOn()) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // The squared length of an object's step from `from` to `to`, over the
 // values it moved in outside frame state.
 double squaredStep(std::span<const float> from, std::span<const float> to,
@@ -130,6 +148,7 @@ void ObjectPlanner::Plan::clear() {
     partnerAt.clear();
     earlierAt.clear();
     stepAt.clear();
+    foundByValues.clear();
     floats.clear();
     outcomeOf.clear();
     leftAtN.clear();
@@ -145,6 +164,7 @@ void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
     m_buildingPlan.partnerAt.push_back(kNotBlended);
     m_buildingPlan.earlierAt.push_back(kNotBlended);
     m_buildingPlan.stepAt.push_back(std::numeric_limits<double>::quiet_NaN());
+    m_buildingPlan.foundByValues.push_back(0);
     // Planned only against two whole frames; before that the frame is kept
     // as history, and its entries read as unmatched in a plan never ready.
     Outcome outcome = Outcome::Unmatched;
@@ -475,18 +495,18 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
             ++m_partnersSearched;
             std::span<const float> before = twoBack.values(*earlier);
             std::optional<size_t> found = searchPartner(key, before, after);
-            if (found.has_value() &&
-                measure(before, after, between.values(*found), frameState(key.shader)).landsOn()) {
+            if (found.has_value() && landsInEveryRegister(before, after, between.values(*found),
+                                                          frameState(key.shader))) {
                 m_searchAgainAt.erase(hash);
                 learn(key, between.key(*found));
-                return Found{*earlier, *found};
+                return Found{*earlier, *found, true};
             }
             // Its draw in N-1 is where it stood in N-2 when it stood still
             // until N-1, off its midpoint.
             if (std::optional<size_t> stood = standingAsBefore(key, before, after)) {
                 m_searchAgainAt.erase(hash);
                 learn(key, between.key(*stood));
-                return Found{*earlier, *stood};
+                return Found{*earlier, *stood, true};
             }
             m_searchAgainAt.insert_or_assign(hash, m_framesPlanned + kSearchRetryInterval);
         }
@@ -507,9 +527,9 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
         }
         std::optional<size_t> found = searchPartner(key, before, after);
         if (found.has_value() &&
-            measure(before, after, between.values(*found), frameState(key.shader)).landsOn()) {
+            landsInEveryRegister(before, after, between.values(*found), frameState(key.shader))) {
             ++m_partnersReidentified;
-            return Found{*nearest, *found};
+            return Found{*nearest, *found, true};
         }
     }
     m_reidentifyAgainAt.insert_or_assign(hash, m_framesPlanned + kSearchRetryInterval);
@@ -586,6 +606,7 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     m_valuesAlternating += alternating;
     m_buildingPlan.blendedAt[entry] = static_cast<uint32_t>(start);
     m_buildingPlan.partnerAt[entry] = static_cast<uint32_t>(*found->partner);
+    m_buildingPlan.foundByValues[entry] = found->byValues ? 1 : 0;
     m_buildingPlan.stepAt[entry] = squaredStep(oneBack, after, frameState(key.shader));
     return Outcome::Blended;
 }
@@ -692,6 +713,10 @@ std::optional<size_t> ObjectPlanner::partnerOf(size_t entry) const {
         return std::nullopt;
     }
     return at;
+}
+
+bool ObjectPlanner::partnerFoundByValues(size_t entry) const {
+    return entry < m_plan.foundByValues.size() && m_plan.foundByValues[entry] != 0;
 }
 
 std::optional<size_t> ObjectPlanner::earlierOf(size_t entry) const {

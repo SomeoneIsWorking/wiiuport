@@ -117,7 +117,11 @@ enum class PartnerIdentity : uint8_t {
     // Its object shares its shader and blocks with other draws of the frame
     // and is told apart only by its place among them, which the title
     // reorders: the vertices themselves must show it.
-    ByPlace
+    ByPlace,
+    // Its object was found by the uniforms it drew with, which vouch for
+    // them alone: another object standing where its uniforms passed brings
+    // other vertices, so they must show it too.
+    ByValues
 };
 
 // Blends a draw's vertex bytes at `t` from `before`, its partner's in N-1, to
