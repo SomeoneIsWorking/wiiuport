@@ -16,6 +16,20 @@ bool movedAt(std::span<const float> before, std::span<const float> after, size_t
     return Midpoint::movedIn(before[index], after[index]);
 }
 
+// Bit for bit the same in every value that is not frame state.
+bool sameOutsideFrameState(std::span<const float> a, std::span<const float> b,
+                           const FrameState& state) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (size_t index = 0; index < a.size(); ++index) {
+        if (!state.at(index) && std::memcmp(&a[index], &b[index], sizeof(float)) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // The object's midpoint test against `between`, over the values it moved in
 // that are its own -- not frame state, which every candidate holds alike.
 Midpoint measure(std::span<const float> before, std::span<const float> after,
@@ -140,6 +154,7 @@ void ObjectPlanner::endFrame() {
     ++m_framesPlanned;
     // Swapping keeps every frame's storage, so a steady scene allocates
     // nothing frame to frame.
+    std::swap(m_frames[3], m_frames[2]);
     std::swap(m_frames[2], m_frames[1]);
     std::swap(m_frames[1], m_frames[0]);
     std::swap(m_frames[0], m_building);
@@ -307,18 +322,15 @@ std::optional<size_t> ObjectPlanner::derivedPartner(const AssemblyKey& key,
     if (midpoint.landsOn()) {
         return entry;
     }
-    // One that stood bit for bit still from N-2 to N-1 has no step there to
-    // check its move against. The title moves some every other frame -- the
-    // wind's sway -- and their step from N-3 is the check: the midpoint of
-    // N-3 and N lands on N-1. Otherwise it was set off or put somewhere else
-    // -- a quad parked and placed, a tile snapped to the next cell -- which
-    // look alike, and it is drawn at N, as its vertices are
-    // (VertexOutcome::Started).
+    // One that stood bit for bit still from N-2 to N-1 sets off from where
+    // it stood: the wind's sway resting at the end of its swing, or stepped
+    // every other frame.
     if (midpoint.stoodAtStart()) {
-        if (movedEveryOtherFrame(*derived, after, between.values(*entry), key.shader)) {
-            return entry;
+        if (!seenMoving(key, *derived, before, after) ||
+            !nearestWhereItWent(key.shader, after, *entry)) {
+            return std::nullopt;
         }
-        return std::nullopt;
+        return entry;
     }
     // A stop or a turn at N-1 sets the object's own draw off its midpoint.
     // Blocks reused by another object name a draw standing elsewhere; the
@@ -334,20 +346,74 @@ std::optional<size_t> ObjectPlanner::derivedPartner(const AssemblyKey& key,
     return std::nullopt;
 }
 
-bool ObjectPlanner::movedEveryOtherFrame(const AssemblyKey& derived, std::span<const float> after,
-                                         std::span<const float> oneBack,
-                                         const ShaderKey& shader) const {
+bool ObjectPlanner::seenMoving(const AssemblyKey& key, const AssemblyKey& oneBack,
+                               std::span<const float> stood, std::span<const float> after) const {
     if (m_framesHeld < m_frames.size()) {
         return false;
     }
-    // The blocks alternate with the title's double buffering: N-3 drew with
-    // N-1's.
-    const KeyedFrame& threeBack = m_frames[2];
-    std::optional<size_t> entry = threeBack.find(derived);
-    if (!entry.has_value() || threeBack.values(*entry).size() != after.size()) {
+    // N-3 drew with N-1's blocks, N-4 with N's.
+    std::optional<size_t> threeBack = m_frames[2].find(oneBack);
+    std::optional<size_t> fourBack = m_frames[3].find(key);
+    if (!threeBack.has_value() || !fourBack.has_value()) {
         return false;
     }
-    return measure(threeBack.values(*entry), after, oneBack, frameState(shader)).landsOn();
+    FrameState state = frameState(key.shader);
+    std::span<const float> threeBackValues = m_frames[2].values(*threeBack);
+    std::span<const float> fourBackValues = m_frames[3].values(*fourBack);
+    if (threeBackValues.size() != after.size() || fourBackValues.size() != after.size()) {
+        return false;
+    }
+    // Standing proves nothing of who stood: blocks the title passes from one
+    // object to another stand a still one where the other was. Moving, the
+    // object is its own: stepped every other frame, it passes at N-1 through
+    // where it stood, half way from N-3 to N; or it came to stand, easing or
+    // at the end of a sway, passing at N-3 half way from N-4. One seen only
+    // standing -- resting since N-3, or another object -- is drawn at N.
+    Midpoint stepping = measure(threeBackValues, after, stood, state);
+    Midpoint arriving = measure(fourBackValues, stood, threeBackValues, state);
+    return (stepping.moved() > 0 && stepping.landsOn()) ||
+           (arriving.moved() > 0 && arriving.landsOn());
+}
+
+void ObjectPlanner::placeOutsideFrameState(std::span<const float> values, const FrameState& state) {
+    m_point.assign(values.size(), std::numeric_limits<double>::quiet_NaN());
+    for (size_t index = 0; index < values.size(); ++index) {
+        if (!state.at(index) && isNumber(values[index])) {
+            m_point[index] = values[index];
+        }
+    }
+}
+
+bool ObjectPlanner::nearestWhereItWent(const ShaderKey& shader, std::span<const float> after,
+                                       size_t candidate) {
+    // Blocks that passed to another object name its draw, and the draw
+    // standing where the object stood is that other's: the object's own is
+    // also the one nearest where it went.
+    placeOutsideFrameState(after, frameState(shader));
+    DrawTree::Nearest nearest =
+        m_frames[0].nearest(shader, {m_point, std::numeric_limits<double>::infinity(),
+                                     static_cast<uint32_t>(candidate)});
+    m_partnerCandidates += nearest.compared;
+    return nearest.entry == candidate;
+}
+
+std::optional<size_t> ObjectPlanner::standingAsBefore(const AssemblyKey& key,
+                                                      std::span<const float> before,
+                                                      std::span<const float> after) {
+    // Frame state moves with the camera between N-2 and N-1 and is left
+    // out; everything else is found bit for bit.
+    FrameState state = frameState(key.shader);
+    const KeyedFrame& between = m_frames[0];
+    placeOutsideFrameState(before, state);
+    DrawTree::Nearest stood = between.nearest(key.shader, {m_point, 0.0, std::nullopt});
+    m_partnerCandidates += stood.compared;
+    if (!stood.entry.has_value() ||
+        !sameOutsideFrameState(between.values(*stood.entry), before, state) ||
+        !seenMoving(key, between.key(*stood.entry), before, after) ||
+        !nearestWhereItWent(key.shader, after, *stood.entry)) {
+        return std::nullopt;
+    }
+    return stood.entry;
 }
 
 std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey& key,
@@ -379,6 +445,13 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
                 m_searchAgainAt.erase(hash);
                 learn(key, between.key(*found));
                 return Found{*earlier, *found};
+            }
+            // Its draw in N-1 is where it stood in N-2 when it stood still
+            // until N-1, off its midpoint.
+            if (std::optional<size_t> stood = standingAsBefore(key, before, after)) {
+                m_searchAgainAt.erase(hash);
+                learn(key, between.key(*stood));
+                return Found{*earlier, *stood};
             }
             m_searchAgainAt.insert_or_assign(hash, m_framesPlanned + kSearchRetryInterval);
         }

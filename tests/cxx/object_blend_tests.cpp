@@ -823,22 +823,135 @@ void anObjectKnownByItsBlocksThatStoppedAtNMinusOneIsHeld() {
     check::equal(uploaded[0][0], 3.0f, "and drawn where it stopped");
 }
 
-void anObjectKnownByItsBlocksThatStoodUntilNMinusOneIsDrawnAtN() {
-    // Walked, parked from N-2 to N-1, and put somewhere else by N: its step
-    // from N-3 does not pass through where it stood, and it is drawn at N.
+void anObjectKnownByItsBlocksThatStoodUntilNMinusOneIsBlended() {
+    // Walked, stood, and moved again after N-1: it sets off from where it
+    // stood, and is its own draw there.
     ObjectBlend blend{kHalfway};
     blend.setPlanning(true);
     record(blend, {{kBlockA, {0.0f, 7.0f}}});
     record(blend, {{kBlockB, {1.0f, 7.0f}}});
     record(blend, {{kBlockA, {2.0f, 7.0f}}});
-    record(blend, {{kBlockB, {-100.0f, 7.0f}}});
-    record(blend, {{kBlockA, {-100.0f, 7.0f}}});
-    std::vector<Draw> placed{{kBlockB, {3.0f, 7.0f}}};
-    record(blend, placed);
+    record(blend, {{kBlockB, {2.0f, 7.0f}}});
+    std::vector<Draw> moved{{kBlockA, {3.0f, 7.0f}}};
+    record(blend, moved);
     blend.armOnce();
-    auto uploaded = replay(blend, placed);
+    auto uploaded = replay(blend, moved);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "it is blended");
+    check::equal(uploaded[0][0], 2.5f, "half way from where it stood");
+}
+
+void anObjectFoundByItsValuesThatStoodUntilNMinusOneIsBlended() {
+    // Stepped every other frame, it stood still at the start of each move
+    // and its blocks were never paired: its search, run again, finds it
+    // where it stood, half way from N-3 to N.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    uint64_t searchedAgain = 2 + wiiuport::interp::ObjectPlanner::kSearchRetryInterval;
+    for (uint64_t frame = 0; frame < searchedAgain; ++frame) {
+        record(blend,
+               {{frame % 2 == 0 ? kBlockA : kBlockB, {static_cast<float>(frame / 2), 7.0f}}});
+    }
+    float stood = static_cast<float>(searchedAgain / 2 - 1);
+    std::vector<Draw> stepped{{kBlockA, {stood + 1.0f, 7.0f}}};
+    record(blend, stepped);
+    blend.armOnce();
+    auto uploaded = replay(blend, stepped);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "it is blended");
+    check::equal(uploaded[0][0], stood + 0.5f, "half way from where it stood");
+}
+
+void aTileWhoseBlocksPassedToAnotherIsNotBlendedFromWhereTheOtherStood() {
+    // Two sea tiles standing still under a value every tile moves in, their
+    // blocks learned. At N the grid shifts and each tile's blocks pass to
+    // the other: the draw they name stood still until N-1, a hundred units
+    // from where the tile is.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kBlockA, {0.0f, 0.5f}}, {kOtherA, {100.0f, 0.5f}}});
+    record(blend, {{kBlockB, {0.0f, 0.75f}}, {kOtherB, {100.0f, 0.75f}}});
+    record(blend, {{kBlockA, {0.0f, 1.0f}}, {kOtherA, {100.0f, 1.0f}}});
+    record(blend, {{kBlockB, {0.0f, 1.5f}}, {kOtherB, {100.0f, 1.5f}}});
+    std::vector<Draw> shifted{{kBlockA, {100.0f, 2.0f}}, {kOtherA, {0.0f, 2.0f}}};
+    record(blend, shifted);
+    blend.armOnce();
+    auto uploaded = replay(blend, shifted);
+    check::isTrue(uploaded[0][0] == 100.0f && uploaded[1][0] == 0.0f,
+                  "neither tile is drawn half way to the other");
+}
+
+void aDrawWithNoNumberWhereTheObjectHeldDoesNotStandWhereItStood() {
+    // Found by its values, the draw in N-1 stands where the object stood in
+    // what it moved, but holds no number where it held one: it does not
+    // stand as the object stood, bit for bit.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kBlockA, {0.0f, 7.0f}}});
+    record(blend, {{kBlockB, {9.0f, 7.0f}}});
+    record(blend, {{kBlockA, {0.0f, 7.0f}}});
+    record(blend, {{kBlockB, {0.0f, std::nanf("")}}});
+    std::vector<Draw> moved{{kBlockA, {2.0f, 7.0f}}};
+    record(blend, moved);
+    blend.armOnce();
+    replay(blend, moved);
+    check::equal(blend.objects(Outcome::Unverified), uint64_t{1}, "it has no partner");
+}
+
+void aSwayTurningBackThroughTheValueItPassedIsBlended() {
+    // Its angle in whole steps: up to the end of its swing, standing there
+    // from N-2 to N-1, and back down through the very value it passed at
+    // N-3 -- on its way from N-4, where a flip would have stood.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kBlockA, {0.0f, 7.0f}}});
+    record(blend, {{kBlockB, {1.0f, 7.0f}}});
+    record(blend, {{kBlockA, {2.0f, 7.0f}}});
+    record(blend, {{kBlockB, {3.0f, 7.0f}}});
+    record(blend, {{kBlockA, {3.0f, 7.0f}}});
+    std::vector<Draw> back{{kBlockB, {2.0f, 7.0f}}};
+    record(blend, back);
+    blend.armOnce();
+    auto uploaded = replay(blend, back);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "it is blended");
+    check::equal(uploaded[0][0], 2.5f, "half way from where it turned");
+}
+
+void anObjectSeenOnlyStandingIsDrawnAtNSettingOff() {
+    // Standing from N-4 to N-1: nothing tells it from another object the
+    // title's blocks passed to it.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kBlockA, {0.0f, 7.0f}}});
+    record(blend, {{kBlockB, {1.0f, 7.0f}}});
+    record(blend, {{kBlockA, {2.0f, 7.0f}}});
+    record(blend, {{kBlockB, {2.0f, 7.0f}}});
+    record(blend, {{kBlockA, {2.0f, 7.0f}}});
+    record(blend, {{kBlockB, {2.0f, 7.0f}}});
+    std::vector<Draw> setOff{{kBlockA, {3.0f, 7.0f}}};
+    record(blend, setOff);
+    blend.armOnce();
+    auto uploaded = replay(blend, setOff);
     check::equal(blend.objects(Outcome::Blended), uint64_t{0}, "it is not blended");
-    check::equal(uploaded[0][0], 3.0f, "but drawn as the title drew it");
+    check::equal(uploaded[0][0], 3.0f, "drawn at N");
+}
+
+void aStillSpriteWhoseBlocksPassToAnotherIsNotBlendedToIt() {
+    // Seen on the shore: a sprite's blocks name a large one standing still
+    // from N-3 to N-1 and a small one at N-4 and N. Neither frame on either
+    // side of the stand is half way to the other.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kBlockA, {0.0f, 7.0f}}});
+    record(blend, {{kBlockB, {12.0f, 7.0f}}});
+    record(blend, {{kBlockA, {24.0f, 7.0f}}});
+    record(blend, {{kBlockB, {72.0f, 7.0f}}});
+    record(blend, {{kBlockA, {72.0f, 7.0f}}});
+    record(blend, {{kBlockB, {72.0f, 7.0f}}});
+    std::vector<Draw> small{{kBlockA, {24.0f, 7.0f}}};
+    record(blend, small);
+    blend.armOnce();
+    auto uploaded = replay(blend, small);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{0}, "it is not blended");
+    check::equal(uploaded[0][0], 24.0f, "the small one is drawn at N");
 }
 
 void anObjectTheTitleMovesEveryOtherFrameIsBlended() {
@@ -1073,7 +1186,13 @@ void runObjectBlendTests() {
     aMoveTooSmallToHalveIsNotDrawnBetween();
     anObjectFarFromTheOriginIsKnownThroughItsRounding();
     anObjectKnownByItsBlocksThatStoppedAtNMinusOneIsHeld();
-    anObjectKnownByItsBlocksThatStoodUntilNMinusOneIsDrawnAtN();
+    anObjectKnownByItsBlocksThatStoodUntilNMinusOneIsBlended();
+    anObjectFoundByItsValuesThatStoodUntilNMinusOneIsBlended();
+    aTileWhoseBlocksPassedToAnotherIsNotBlendedFromWhereTheOtherStood();
+    aDrawWithNoNumberWhereTheObjectHeldDoesNotStandWhereItStood();
+    aSwayTurningBackThroughTheValueItPassedIsBlended();
+    anObjectSeenOnlyStandingIsDrawnAtNSettingOff();
+    aStillSpriteWhoseBlocksPassToAnotherIsNotBlendedToIt();
     anObjectTheTitleMovesEveryOtherFrameIsBlended();
     anObjectKnownByItsBlocksThatTurnedBackIsBlended();
     blocksReusedByAnotherObjectDoNotNameThePartner();
