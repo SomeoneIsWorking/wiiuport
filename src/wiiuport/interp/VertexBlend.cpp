@@ -98,6 +98,11 @@ bool liesBetween(float a, float blended, float b) {
 // the same, then how far apart the rest lie, where numbers in both. An
 // object keeps what it does not animate -- a texture cell -- where another of
 // its kind beside it differs, so what it kept outranks how near it stands.
+// Given the second draw's own vertices two frames back, only what moved from
+// there counts toward how near: a value it holds at both ends and the
+// candidate otherwise is flipping with the title's double buffering, and it
+// flips alike in every candidate -- the sea's patches, 430,000 apart in it
+// whichever row, 208 apart in what moved between the right one and the next.
 struct Resemblance {
     size_t same{0};
     double apartSquared{0.0};
@@ -111,13 +116,16 @@ struct Resemblance {
 };
 
 Resemblance resemblance(const VertexLayout& layout, std::span<const std::byte> first,
-                        std::span<const std::byte> second) {
+                        std::span<const std::byte> second, std::span<const std::byte> twoBack) {
     Resemblance resemblance;
     forEachFloat(layout, [&](size_t word, Endian endian) {
         uint32_t a = readWord(first.data() + word, endian);
         uint32_t b = readWord(second.data() + word, endian);
         if (a == b) {
             ++resemblance.same;
+            return;
+        }
+        if (!twoBack.empty() && readWord(twoBack.data() + word, endian) == b) {
             return;
         }
         float x = std::bit_cast<float>(a);
@@ -847,9 +855,10 @@ void VertexBlend::gather(const Frame& frame, const Draw& draw, std::vector<std::
 }
 
 size_t VertexBlend::mostResembling(const Draw& drawn, const VertexLayout& layout,
-                                   const Frame& frame, size_t planned, Scratch& scratch) const {
+                                   const Frame& frame, size_t planned,
+                                   std::span<const std::byte> twoBack, Scratch& scratch) const {
     gather(frame, frame.draws()[planned], scratch.candidate);
-    Resemblance closest = resemblance(layout, scratch.candidate, scratch.after);
+    Resemblance closest = resemblance(layout, scratch.candidate, scratch.after, twoBack);
     size_t found = planned;
     auto shader = frame.byShader.find({drawn.vertexShaderBaseHash, drawn.vertexShaderAuxHash});
     if (shader == frame.byShader.end()) {
@@ -860,7 +869,7 @@ size_t VertexBlend::mostResembling(const Draw& drawn, const VertexLayout& layout
             continue;
         }
         gather(frame, frame.draws()[index], scratch.candidate);
-        Resemblance candidate = resemblance(layout, scratch.candidate, scratch.after);
+        Resemblance candidate = resemblance(layout, scratch.candidate, scratch.after, twoBack);
         if (candidate.closerThan(closest)) {
             closest = candidate;
             found = index;
@@ -875,9 +884,11 @@ void VertexBlend::placeByVertices(Job& job, Scratch& scratch) {
     size_t plannedPartner = job.partner;
     gather(m_latest, drawn, scratch.after);
     if (!job.earlierByBuffers) {
-        job.earlier = mostResembling(drawn, *job.layout, m_twoBack, job.earlier, scratch);
+        job.earlier = mostResembling(drawn, *job.layout, m_twoBack, job.earlier, {}, scratch);
     }
-    job.partner = mostResembling(drawn, *job.layout, m_previous, job.partner, scratch);
+    gather(m_twoBack, m_twoBack.draws()[job.earlier], scratch.twoBack);
+    job.partner =
+        mostResembling(drawn, *job.layout, m_previous, job.partner, scratch.twoBack, scratch);
     if (job.earlier != plannedEarlier || job.partner != plannedPartner) {
         ++m_partnersFoundByVertices;
     }
