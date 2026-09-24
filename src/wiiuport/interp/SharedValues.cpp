@@ -1,15 +1,12 @@
 #include "wiiuport/interp/SharedValues.h"
 
+#include "wiiuport/interp/Blendable.h"
 #include "wiiuport/interp/Midpoint.h"
 
 #include <algorithm>
 #include <bit>
 
 namespace wiiuport::interp {
-
-uint64_t SharedValues::endsOf(float twoBack, float latest) {
-    return (uint64_t{std::bit_cast<uint32_t>(twoBack)} << 32) | std::bit_cast<uint32_t>(latest);
-}
 
 void SharedValues::clear() {
     m_wanted.clear();

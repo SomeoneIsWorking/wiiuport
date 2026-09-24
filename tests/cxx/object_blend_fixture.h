@@ -32,6 +32,8 @@ struct Draw {
     uint32_t freshBlock{0};
     uint32_t stage{0};
     bool writesColour{true};
+    // A block every draw of a pass sources alike, as a shadow cascade's.
+    uint32_t passBlock{0};
 
     std::vector<uint32_t> sources() const;
 };

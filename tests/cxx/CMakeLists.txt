@@ -19,6 +19,7 @@ add_executable(wiiuport_tests
   vertex_blend_tests.cpp
   slot_pool_tests.cpp
   gate_tests.cpp
+  map_pass_tests.cpp
   shadow_tests.cpp
   # The shipping implementation, compiled into the tests rather than
   # reimplemented beside them. It is free of the emulated system on purpose,

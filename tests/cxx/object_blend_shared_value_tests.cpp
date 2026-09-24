@@ -275,24 +275,48 @@ void aValueBlendedDrawsDisagreeOnIsNotShared() {
     check::equal(blend.planner().leftAtN(), uint64_t{1}, "counted as left at N");
 }
 
-void theLightsMapAndItsLookUpAreDrawnAtN() {
-    // A caster drawn into the shadow map -- depth alone -- and the pixel
-    // stage looking the map up both moved with the light, as the walker
-    // moved of itself: only the walker is drawn between.
+void aDrawIntoTheMapMovesWithItsObjectAndHoldsTheLight() {
+    // The walker and the pier are both drawn into the light's map through the
+    // cascade's block, and both hold the light, which moved with the camera;
+    // the walker also moved of itself. The pixel stage looking the map up
+    // holds the light too.
+    constexpr uint32_t kCascade = 0xf4003000;
     auto frame = [](float walker, float light) {
         return std::vector<Draw>{
             {kBlockA, {walker, 7.0f}},
-            {kOtherA, {5.0f, light}, kActorShader, 0, 0, false},
-            {kTileA, {light, light}, kPierShader, 0, ObjectPlanner::kPixelStage}};
+            {kOtherA, {walker, light}, kActorShader, 0, 0, false, kCascade},
+            {kTileA, {5.0f, light}, kActorShader, 0, 0, false, kCascade},
+            {kTileB, {light, light}, kPierShader, 0, ObjectPlanner::kPixelStage}};
     };
     std::vector<Draw> latest = frame(2.0f, 12.0f);
     ObjectBlend blend{kHalfway};
     armAfter(blend, frame(0.0f, 10.0f), frame(1.0f, 11.0f), latest);
     auto uploaded = replay(blend, latest);
-    check::equal(blend.objects(Outcome::Shading), uint64_t{2}, "the caster and look-up shade");
     check::equal(uploaded[0][0], 1.5f, "the walker is drawn half way");
-    check::isTrue(uploaded[1] == latest[1].values, "the caster as the title drew it");
-    check::isTrue(uploaded[2] == latest[2].values, "and the look-up as the title drew it");
+    check::equal(uploaded[1][0], 1.5f, "and into the map half way, so its shadow moves with it");
+    check::equal(uploaded[1][1], 12.0f, "under the light the look-up holds");
+    check::isTrue(uploaded[2] == latest[2].values, "the pier into the map as the title drew it");
+    check::isTrue(uploaded[3] == latest[3].values, "and the look-up as the title drew it");
+    check::equal(blend.objects(Outcome::Shading), uint64_t{1}, "only the look-up shades");
+    check::equal(blend.planner().mapValuesHeld(), uint64_t{1},
+                 "the light held in the walker's draw; the pier's, moving only with it, is held");
+    check::equal(blend.objects(Outcome::Held), uint64_t{1}, "as a still object is");
+}
+
+void withMapBlendingOffADrawIntoTheMapIsDrawnAsTheTitleDrewIt() {
+    constexpr uint32_t kCascade = 0xf4003000;
+    auto frame = [](float walker, float light) {
+        return std::vector<Draw>{{kBlockA, {walker, 7.0f}},
+                                 {kOtherA, {walker, light}, kActorShader, 0, 0, false, kCascade}};
+    };
+    std::vector<Draw> latest = frame(2.0f, 12.0f);
+    ObjectBlend blend{kHalfway};
+    blend.setMapBlending(false);
+    armAfter(blend, frame(0.0f, 10.0f), frame(1.0f, 11.0f), latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(uploaded[0][0], 1.5f, "the walker is still drawn half way");
+    check::isTrue(uploaded[1] == latest[1].values, "its draw into the map as the title drew it");
+    check::equal(blend.objects(Outcome::Shading), uint64_t{1}, "as a pixel stage is");
 }
 
 } // namespace
@@ -305,7 +329,8 @@ void runObjectBlendSharedValueTests() {
     anUnverifiedObjectIsSeenThroughTheInBetweenCamera();
     aValueBlendedDrawsDisagreeOnIsNotShared();
     aPassValueIsOneValueInEveryShaderThatReadsIt();
-    theLightsMapAndItsLookUpAreDrawnAtN();
+    aDrawIntoTheMapMovesWithItsObjectAndHoldsTheLight();
+    withMapBlendingOffADrawIntoTheMapIsDrawnAsTheTitleDrewIt();
     aMatrixEveryBlendedDrawChangedAlikeCarriesAnObjectDrawnAtN();
     aMatrixTheBlendedDrawsChangedEachTheirOwnWayIsNoCamera();
     aWindowSharedValuesAlreadyDrewIsLeftToThem();

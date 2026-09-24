@@ -7,10 +7,14 @@ using wiiuport::interp::ObjectBlend;
 namespace wiiuport::tests::object_blend {
 
 std::vector<uint32_t> Draw::sources() const {
-    if (freshBlock == 0) {
-        return {1, block};
+    std::vector<uint32_t> words = {1, block};
+    if (freshBlock != 0) {
+        words.insert(words.end(), {2, freshBlock});
     }
-    return {1, block, 2, freshBlock};
+    if (passBlock != 0) {
+        words.insert(words.end(), {3, passBlock});
+    }
+    return words;
 }
 
 ReplayedDraw::ReplayedDraw(const Draw& draw) : sources(draw.sources()), values(draw.values) {

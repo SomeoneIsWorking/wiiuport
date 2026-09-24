@@ -4,6 +4,7 @@
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/interp/AssemblyKey.h"
 #include "wiiuport/interp/KeyedFrame.h"
+#include "wiiuport/interp/MapPassValues.h"
 #include "wiiuport/interp/SharedTransforms.h"
 #include "wiiuport/interp/SharedValues.h"
 
@@ -14,6 +15,7 @@
 #include <span>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace wiiuport::interp {
@@ -91,6 +93,12 @@ class ObjectPlanner {
     // Drops every frame held: three more are needed before a plan is ready.
     void forget();
 
+    // Off, a draw into the light's map is drawn at N as a pixel stage is,
+    // from its next add(). A maintainer's discriminator, not a setting.
+    void setMapBlending(bool blending) {
+        m_mapBlending = blending;
+    }
+
     // Whether N was planned against two whole frames before it.
     bool ready() const {
         return m_framesHeld >= kFramesToPlan;
@@ -136,15 +144,12 @@ class ObjectPlanner {
         // N-1 and N: nearer each than they are to each other. An object that
         // moved less than a float can halve is one, and is drawn at N.
         Outside,
-        // Draws the light's map or looks it up, and is drawn at N: a draw
-        // that writes depth alone renders a map a later draw samples (the
-        // shadow map), and a pixel stage's values shade rather than place.
-        // The map and its look-up must hold one light. The look-up holds it
+        // A pixel stage's values, drawn at N: they shade rather than place.
+        // Among them is the look-up of the light's map, which holds the light
         // multiplied into the camera, whose blend value by value is neither
-        // the light's nor the camera's: measured on Wind Waker HD, a turning
-        // camera with the casters blended, or the look-up, or both, put
-        // the pier in its own shadow in the in-between frame, and with both
-        // at N it was not.
+        // the light's nor the camera's. A draw into the map itself is planned
+        // as an object is, and holds the light at N (MapPassValues), so the
+        // map and its look-up hold one light.
         Shading,
         Count
     };
@@ -246,6 +251,16 @@ class ObjectPlanner {
         return m_valuesShared;
     }
 
+    // Values blended draws into a map moved as another object's draws did --
+    // the light -- and so drew at N, over the values those draws moved.
+    uint64_t mapValuesHeld() const {
+        return m_mapValuesHeld;
+    }
+
+    uint64_t mapValuesMoved() const {
+        return m_mapValuesMoved;
+    }
+
     // Objects drawn at N -- unverified or unmatched -- whose matrices were
     // carried through the in-between camera (SharedTransforms), and how many
     // 4x4s that was.
@@ -290,6 +305,8 @@ class ObjectPlanner {
         // Whether the partner was found by values, by entry (Found).
         std::vector<uint8_t> foundByValues;
         std::vector<float> floats;
+        // Whether the entry draws into a map, writing depth alone, by entry.
+        std::vector<uint8_t> drawsMap;
         // What each entry came to, by entry.
         std::vector<Outcome> outcomeOf;
         // The entries left at N, in entry order.
@@ -301,6 +318,21 @@ class ObjectPlanner {
 
     // Plans the building frame's entry against N-1 and N-2.
     Outcome plan(size_t entry);
+    // Held at N from its draw in N-2, with its partner in N-1 derived from
+    // its blocks for the vertex blend.
+    Outcome held(size_t entry, size_t earlier);
+    // Plans the building frame's draws into maps once all of them are in:
+    // the pass's values are told by every one of them (MapPassValues), a
+    // draw that moved nothing else is held, the rest are planned as objects
+    // and hold the pass at N in their blend -- before anything learns what
+    // they drew.
+    void planMaps();
+    // A draw into a map's draw in N-2 by its key, holding as many values.
+    std::optional<size_t> earlierMapDraw(size_t entry) const;
+    // The object a draw into a map draws: its own block, the one fewest of
+    // the frame's draws into maps source; the entry itself where every block
+    // it sources is fresh.
+    uint64_t mapObjectOf(size_t entry) const;
     // Draws the building frame's objects that are drawn at N -- unverified
     // or unmatched -- through the in-between camera, once every draw of it is
     // planned: in the values they share with its blended ones
@@ -395,6 +427,7 @@ class ObjectPlanner {
     std::array<KeyedFrame, 4> m_frames;
     Plan m_plan;
     size_t m_framesHeld{0};
+    bool m_mapBlending{true};
     bool m_latestUnindexed{false};
     uint64_t m_framesPlanned{0};
     uint64_t m_heldPartnersDerived{0};
@@ -410,6 +443,12 @@ class ObjectPlanner {
     // the unverified ones, sorted, which are all that is looked up.
     SharedValues m_shared;
     SharedTransforms m_transforms;
+    // Reused every frame: the pass's values in its draws into maps, and how
+    // many of those draws source each block.
+    MapPassValues m_mapPass;
+    std::unordered_map<uint32_t, uint32_t> m_mapBlockUses;
+    // The frame's draws into maps and their draws in N-2, in entry order.
+    std::vector<std::pair<size_t, std::optional<size_t>>> m_mapEarlier;
     std::vector<ShaderKey> m_unverifiedShaders;
     // Reused per object: which of its values came from SharedValues.
     std::vector<uint8_t> m_sharedAt;
@@ -418,6 +457,8 @@ class ObjectPlanner {
     uint64_t m_leftAtN{0};
     uint64_t m_unverifiedSharingValues{0};
     uint64_t m_valuesShared{0};
+    uint64_t m_mapValuesHeld{0};
+    uint64_t m_mapValuesMoved{0};
     uint64_t m_partnersDerived{0};
     uint64_t m_partnersSearched{0};
     uint64_t m_partnersReidentified{0};

@@ -25,4 +25,10 @@ inline bool sameBits(std::span<const float> l, std::span<const float> r) {
     return l.size() == r.size() && std::memcmp(l.data(), r.data(), l.size_bytes()) == 0;
 }
 
+// A value's two ends, N-2's and N's, bit for bit, as one key: the same move
+// made by several draws keys alike.
+inline uint64_t endsOf(float twoBack, float latest) {
+    return (uint64_t{std::bit_cast<uint32_t>(twoBack)} << 32) | std::bit_cast<uint32_t>(latest);
+}
+
 } // namespace wiiuport::interp
