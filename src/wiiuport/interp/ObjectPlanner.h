@@ -86,7 +86,7 @@ class ObjectPlanner {
 
     // Whether N was planned against two whole frames before it.
     bool ready() const {
-        return m_framesHeld >= m_frames.size();
+        return m_framesHeld >= kFramesToPlan;
     }
 
     // N, the frame the plan is for.
@@ -197,6 +197,8 @@ class ObjectPlanner {
     // whose only key is its place in the draw order. Searching for them every
     // frame was measured as seven tenths of the planning time.
     static constexpr uint64_t kSearchRetryInterval = 8;
+    // N-1 and N-2 whole, and N built: the frames a plan needs.
+    static constexpr size_t kFramesToPlan = 3;
 
     // Searches not run because the same object's search of that kind failed
     // recently.
@@ -288,11 +290,22 @@ class ObjectPlanner {
 
     FrameState frameState(const ShaderKey& shader) const;
 
-    // Whether the object whose draw in N is `after`, and whose draw in N-1
-    // is `oneBack` under the `derived` key, passed through N-1 on its way
-    // from N-3: moving every other frame, it stood from N-2 to N-1.
-    bool movedEveryOtherFrame(const AssemblyKey& derived, std::span<const float> after,
-                              std::span<const float> oneBack, const ShaderKey& shader) const;
+    // The draw in N-1 standing where the object whose draws in N-2 and N
+    // are `before` and `after` stood, in all but frame state, and nearest
+    // where it went; none when no draw is both.
+    std::optional<size_t> standingAsBefore(const AssemblyKey& key, std::span<const float> before,
+                                           std::span<const float> after);
+    // Whether `candidate` is the draw in N-1 nearest `after`, in all but
+    // frame state.
+    bool nearestWhereItWent(const ShaderKey& shader, std::span<const float> after,
+                            size_t candidate);
+    // The point at `values`, frame state left out.
+    void placeOutsideFrameState(std::span<const float> values, const FrameState& state);
+    // Whether the object keyed `key`, standing in N-2 and N-1 as `stood`
+    // (its draw in N-1 keyed `oneBack`) and drawn at N as `after`, was seen
+    // moving by N-4: its earlier draws pass through where they stood.
+    bool seenMoving(const AssemblyKey& key, const AssemblyKey& oneBack,
+                    std::span<const float> stood, std::span<const float> after) const;
 
     // An object's draws in N-2 and N-1: where it stood two frames back, and
     // its partner -- none when it stood exactly where it stands in N.
@@ -347,9 +360,9 @@ class ObjectPlanner {
     // The frame the guest is drawing, and its plan.
     KeyedFrame m_building;
     Plan m_buildingPlan;
-    // Whole frames, latest first: N-1, N-2 and N-3 while N is building, and
-    // the plan for N-1.
-    std::array<KeyedFrame, 3> m_frames;
+    // Whole frames, latest first: N-1 to N-4 while N is building, and the
+    // plan for N-1. N-3 and N-4 only show whether one standing was seen moving.
+    std::array<KeyedFrame, 4> m_frames;
     Plan m_plan;
     size_t m_framesHeld{0};
     bool m_latestUnindexed{false};
