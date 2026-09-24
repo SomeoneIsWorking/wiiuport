@@ -51,7 +51,7 @@ void twoButtonsAreHeldTogether() {
 
 void aStickIsHeldUntilChanged() {
     InputDriver driver;
-    driver.setLeftStick(0.5f, -0.25f);
+    driver.setLeftStick({.x = 0.5f, .y = -0.25f});
     auto driven = false;
     auto first = polled(driver, driven);
     check::near(first.leftStickX, 0.5f, 1e-6f, "the stick is driven");
@@ -64,7 +64,7 @@ void aCentredStickIsStillBeingDriven() {
     // Centring is an instruction, not an absence of one: a title being walked
     // forward has to be able to stop without handing the pad back.
     InputDriver driver;
-    driver.setLeftStick(0.0f, 0.0f);
+    driver.setLeftStick({});
     auto driven = false;
     polled(driver, driven);
     check::isTrue(driven, "a centred stick still drives the player");

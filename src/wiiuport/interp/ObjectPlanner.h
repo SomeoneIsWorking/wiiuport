@@ -119,7 +119,7 @@ class ObjectPlanner {
 
     // What each object in a planned frame came to. Their sum is the objects
     // planned; none is dropped without a reason.
-    enum class Outcome : uint32_t {
+    enum class Outcome : uint8_t {
         // Moved, and its midpoint landed on its partner: drawn blended.
         Blended,
         // Unchanged since N-2: drawn as it was, which is the blend.
@@ -330,6 +330,10 @@ class ObjectPlanner {
     // The last step `plan` saw the object keyed `key` take, carried from its
     // draw in N-1; NaN where none was seen.
     double carriedStep(const AssemblyKey& key) const;
+
+    // Whether an object's last failed search of one kind, in `againAt`, was
+    // too recent to run it again.
+    bool waiting(const std::unordered_map<uint64_t, uint64_t>& againAt, uint64_t hash) const;
 
     // An object's draws in N-2 and N-1: where it stood two frames back, and
     // its partner -- none when it stood exactly where it stands in N.

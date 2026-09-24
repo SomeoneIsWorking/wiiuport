@@ -427,7 +427,7 @@ void aCensusNamesTheAttributeTheTitleRewrote() {
                  "the position the title moved changed in each frame compared");
     check::equal(byAttribute[{{0x4, 0}, 1, 0x1A}].changed, uint64_t{0},
                  "the colour it left did not, though it shares the buffer");
-    check::equal(byAttribute[{{0x4, 0}, 0, 0x30}].bytesHashed, uint64_t{3 * 2 * 12},
+    check::equal(byAttribute[{{0x4, 0}, 0, 0x30}].bytesHashed, uint64_t{3} * 2 * 12,
                  "only the attribute's own bytes are read, vertex by vertex");
 }
 

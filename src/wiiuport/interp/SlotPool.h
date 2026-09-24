@@ -50,7 +50,7 @@ class SlotPool {
     }
 
   private:
-    void serve(std::stop_token stop, size_t worker);
+    void serve(const std::stop_token& stop, size_t worker);
 
     Work m_work;
     size_t m_slots{0};

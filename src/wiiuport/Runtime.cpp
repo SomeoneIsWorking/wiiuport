@@ -10,7 +10,7 @@
 namespace wiiuport {
 namespace {
 
-bool requestFrameCapture(LatteFrameHooks::CaptureCallback callback) {
+bool requestFrameCapture(LatteFrameHooks::CaptureCallback&& callback) {
     return LatteFrameHooks::RequestFrameCapture(std::move(callback));
 }
 

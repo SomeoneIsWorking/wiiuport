@@ -1,6 +1,7 @@
 #include "wiiuport/input/InputDriver.h"
 
 #include <algorithm>
+#include <array>
 
 namespace wiiuport::input {
 namespace {
@@ -9,21 +10,24 @@ namespace {
 // this one, and silently driving every player would be a surprise.
 constexpr std::size_t kDrivenPlayerIndex = 0;
 
-const std::vector<NamedButton> kButtons{
-    {"a", VPADInputHooks::kButtonA},       {"b", VPADInputHooks::kButtonB},
-    {"x", VPADInputHooks::kButtonX},       {"y", VPADInputHooks::kButtonY},
-    {"l", VPADInputHooks::kButtonL},       {"r", VPADInputHooks::kButtonR},
-    {"zl", VPADInputHooks::kButtonZL},     {"zr", VPADInputHooks::kButtonZR},
-    {"plus", VPADInputHooks::kButtonPlus}, {"minus", VPADInputHooks::kButtonMinus},
-    {"up", VPADInputHooks::kButtonUp},     {"down", VPADInputHooks::kButtonDown},
-    {"left", VPADInputHooks::kButtonLeft}, {"right", VPADInputHooks::kButtonRight},
-};
+constexpr auto kButtons = std::to_array<NamedButton>({
+    {"a", VPADInputHooks::kButtonA},
+    {"b", VPADInputHooks::kButtonB},
+    {"x", VPADInputHooks::kButtonX},
+    {"y", VPADInputHooks::kButtonY},
+    {"l", VPADInputHooks::kButtonL},
+    {"r", VPADInputHooks::kButtonR},
+    {"zl", VPADInputHooks::kButtonZL},
+    {"zr", VPADInputHooks::kButtonZR},
+    {"plus", VPADInputHooks::kButtonPlus},
+    {"minus", VPADInputHooks::kButtonMinus},
+    {"up", VPADInputHooks::kButtonUp},
+    {"down", VPADInputHooks::kButtonDown},
+    {"left", VPADInputHooks::kButtonLeft},
+    {"right", VPADInputHooks::kButtonRight},
+});
 
 } // namespace
-
-const std::vector<NamedButton>& InputDriver::buttons() {
-    return kButtons;
-}
 
 const NamedButton* InputDriver::buttonNamed(const std::string& name) {
     auto found = std::find_if(kButtons.begin(), kButtons.end(), [&name](const NamedButton& button) {
@@ -51,10 +55,10 @@ bool InputDriver::Poll(size_t playerIndex, VPADInputHooks::Injection& injection)
         return press.readsRemaining == 0;
     });
     injection.holdMask = mask;
-    injection.leftStickX = m_leftStickX;
-    injection.leftStickY = m_leftStickY;
-    injection.rightStickX = m_rightStickX;
-    injection.rightStickY = m_rightStickY;
+    injection.leftStickX = m_leftStick.x;
+    injection.leftStickY = m_leftStick.y;
+    injection.rightStickX = m_rightStick.x;
+    injection.rightStickY = m_rightStick.y;
     m_lastMask = mask;
     m_pollsAnswered += 1;
     return true;
@@ -70,27 +74,23 @@ void InputDriver::press(uint32_t mask, uint32_t reads) {
     m_driving = true;
 }
 
-void InputDriver::setLeftStick(float x, float y) {
+void InputDriver::setLeftStick(StickPosition position) {
     std::lock_guard<std::mutex> guard(m_mutex);
-    m_leftStickX = x;
-    m_leftStickY = y;
+    m_leftStick = position;
     m_driving = true;
 }
 
-void InputDriver::setRightStick(float x, float y) {
+void InputDriver::setRightStick(StickPosition position) {
     std::lock_guard<std::mutex> guard(m_mutex);
-    m_rightStickX = x;
-    m_rightStickY = y;
+    m_rightStick = position;
     m_driving = true;
 }
 
 void InputDriver::release() {
     std::lock_guard<std::mutex> guard(m_mutex);
     m_pressed.clear();
-    m_leftStickX = 0.0f;
-    m_leftStickY = 0.0f;
-    m_rightStickX = 0.0f;
-    m_rightStickY = 0.0f;
+    m_leftStick = {};
+    m_rightStick = {};
     m_driving = false;
     m_lastMask = 0;
 }

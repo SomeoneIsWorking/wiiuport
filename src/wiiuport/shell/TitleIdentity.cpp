@@ -1,5 +1,6 @@
 #include "wiiuport/shell/TitleIdentity.h"
 
+#include <charconv>
 #include <format>
 
 namespace wiiuport::shell {
@@ -9,18 +10,9 @@ std::optional<TitleIdentity> TitleIdentity::parse(std::string_view text) {
         return std::nullopt;
     }
     uint64_t id = 0;
-    for (char digit : text) {
-        uint64_t value = 0;
-        if (digit >= '0' && digit <= '9') {
-            value = static_cast<uint64_t>(digit - '0');
-        } else if (digit >= 'a' && digit <= 'f') {
-            value = static_cast<uint64_t>(digit - 'a' + 10);
-        } else if (digit >= 'A' && digit <= 'F') {
-            value = static_cast<uint64_t>(digit - 'A' + 10);
-        } else {
-            return std::nullopt;
-        }
-        id = (id << 4) | value;
+    auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), id, 16);
+    if (error != std::errc{} || end != text.data() + text.size()) {
+        return std::nullopt;
     }
     return TitleIdentity(id);
 }

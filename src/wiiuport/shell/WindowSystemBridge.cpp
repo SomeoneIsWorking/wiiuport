@@ -44,6 +44,9 @@ void UpdateWindowTitles(bool /*isIdle*/, bool /*isLoading*/, double /*fps*/) {
     // is a front-end flourish the product does not need.
 }
 
+// Cemu's interface returns each size through two int references. The
+// signature is the fork's upstream contract, not this shell's to reshape.
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
 void GetWindowSize(int& w, int& h) {
     w = g_windowInfo.width;
     h = g_windowInfo.height;
@@ -63,6 +66,8 @@ void GetPadWindowPhysSize(int& w, int& h) {
     w = g_windowInfo.phys_pad_width;
     h = g_windowInfo.phys_pad_height;
 }
+
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 double GetWindowDPIScale() {
     return g_windowInfo.dpi_scale;

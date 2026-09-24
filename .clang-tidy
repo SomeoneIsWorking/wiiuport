@@ -8,6 +8,8 @@ Checks: >
   readability-braces-around-statements
 WarningsAsErrors: '*'
 HeaderFilterRegex: '^.*/src/wiiuport/.*'
+# The fork's headers are reached through src/wiiuport/../../external paths.
+ExcludeHeaderFilterRegex: '^.*/external/.*'
 FormatStyle: file
 CheckOptions:
   readability-braces-around-statements.ShortStatementLines: '0'

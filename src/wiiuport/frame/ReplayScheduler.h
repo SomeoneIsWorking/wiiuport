@@ -74,7 +74,7 @@ class ReplayScheduler final : public FrameShownListener {
     // consumed by the swap that ends the frame after. Capturing: that swap
     // has happened, so this frame end replays into the same colour buffer
     // and presents it.
-    enum class Phase {
+    enum class Phase : uint8_t {
         Idle,
         Requested,
         Capturing

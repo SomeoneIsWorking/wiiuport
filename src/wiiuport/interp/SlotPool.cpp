@@ -7,7 +7,7 @@ namespace wiiuport::interp {
 SlotPool::SlotPool(size_t workers, Work work) : m_work(std::move(work)) {
     m_workers.reserve(workers);
     for (size_t worker = 0; worker < workers; ++worker) {
-        m_workers.emplace_back([this, worker](std::stop_token stop) {
+        m_workers.emplace_back([this, worker](const std::stop_token& stop) {
             serve(stop, worker);
         });
     }
@@ -56,7 +56,7 @@ void SlotPool::waitAll() const {
     }
 }
 
-void SlotPool::serve(std::stop_token stop, size_t worker) {
+void SlotPool::serve(const std::stop_token& stop, size_t worker) {
     uint64_t served = 0;
     std::unique_lock lock(m_mutex);
     while (m_started.wait(lock, stop, [&] {

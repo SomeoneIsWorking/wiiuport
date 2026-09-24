@@ -31,8 +31,7 @@ class Midpoint {
     // one the same at both ends is drawn at N whatever N-1 holds, and one N-1
     // holds otherwise is flipping with the title's double buffering.
     static bool movedIn(float before, float after) {
-        return isNumber(before) && isNumber(after) &&
-               std::bit_cast<uint32_t>(before) != std::bit_cast<uint32_t>(after);
+        return isNumber(before) && isNumber(after) && !sameBits(before, after);
     }
 
     // The distance from a float to the next one away from zero.
@@ -52,7 +51,7 @@ class Midpoint {
         if (!isNumber(between)) {
             return;
         }
-        if (std::bit_cast<uint32_t>(between) == std::bit_cast<uint32_t>(before)) {
+        if (sameBits(between, before)) {
             ++m_stood;
         }
         double moved = static_cast<double>(after) - before;

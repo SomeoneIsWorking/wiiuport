@@ -44,7 +44,7 @@ class FrameCapture {
     static constexpr size_t kSlotCount = 5;
     // How a capture is armed, injected so a test drives this without a
     // renderer. Returns false when no capture could be armed.
-    using Request = bool (*)(LatteFrameHooks::CaptureCallback callback);
+    using Request = bool (*)(LatteFrameHooks::CaptureCallback&& callback);
 
     explicit FrameCapture(Request request);
 

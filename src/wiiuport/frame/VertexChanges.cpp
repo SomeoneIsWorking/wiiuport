@@ -8,13 +8,8 @@ namespace wiiuport::frame {
 
 namespace {
 
-struct Hashed {
-    uint64_t hash{0};
-    uint64_t bytes{0};
-};
-
-Hashed hashVertexBytes(const LatteFrameHooks::DrawPrepared& draw) {
-    Hashed hashed;
+HashedBytes hashVertexBytes(const LatteFrameHooks::DrawPrepared& draw) {
+    HashedBytes hashed;
     for (uint32_t index = 0; index < draw.vertexBufferCount; ++index) {
         const LatteFrameHooks::DrawPrepared::VertexBuffer& buffer = draw.vertexBuffers[index];
         std::string_view data(static_cast<const char*>(buffer.data), buffer.sizeInBytes);
@@ -30,15 +25,15 @@ Hashed hashVertexBytes(const LatteFrameHooks::DrawPrepared& draw) {
 void VertexChanges::onDraw(const LatteFrameHooks::DrawPrepared& draw) {
     VertexShader shader{draw.vertexShaderBaseHash, draw.vertexShaderAuxHash};
     if (!draw.vertexUniforms) {
-        Hashed hashed = hashVertexBytes(draw);
+        HashedBytes hashed = hashVertexBytes(draw);
         std::lock_guard lock(m_mutex);
-        m_withoutUniforms.add(shader, hashed.hash, hashed.bytes);
+        m_withoutUniforms.add(shader, hashed);
         return;
     }
     std::lock_guard lock(m_mutex);
     if (m_censusTaken < m_censusAsked) {
-        Hashed hashed = hashVertexBytes(draw);
-        m_withUniforms.add(shader, hashed.hash, hashed.bytes);
+        HashedBytes hashed = hashVertexBytes(draw);
+        m_withUniforms.add(shader, hashed);
         addAttributes(shader, draw);
     }
 }
@@ -60,10 +55,10 @@ void VertexChanges::addAttributes(const VertexShader& shader,
                 break;
             }
         }
-        m_attributes.add(
-            {shader, attribute.semanticId, attribute.format},
-            std::hash<std::string_view>{}(std::string_view(m_gathered.data(), m_gathered.size())),
-            m_gathered.size());
+        m_attributes.add({shader, attribute.semanticId, attribute.format},
+                         {.hash = std::hash<std::string_view>{}(
+                              std::string_view(m_gathered.data(), m_gathered.size())),
+                          .bytes = m_gathered.size()});
     }
 }
 
@@ -96,12 +91,11 @@ VertexChanges::Census VertexChanges::census() const {
     return {m_censusAsked, m_censusTaken, m_withUniforms.counts(), m_attributes.counts()};
 }
 
-template <typename Key>
-void VertexChanges::Tally<Key>::add(const Key& key, uint64_t hash, uint64_t bytes) {
+template <typename Key> void VertexChanges::Tally<Key>::add(const Key& key, HashedBytes hashed) {
     Counts& counts = m_counts[key];
     ++counts.draws;
-    counts.bytesHashed += bytes;
-    m_frame[key].push_back(hash);
+    counts.bytesHashed += hashed.bytes;
+    m_frame[key].push_back(hashed.hash);
 }
 
 template <typename Key> void VertexChanges::Tally<Key>::compareFrame() {

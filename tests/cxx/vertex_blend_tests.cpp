@@ -44,7 +44,7 @@ struct Vertex {
 };
 
 // A word as the guest keeps it: most significant byte first for big endian.
-void putWord(std::byte* at, uint32_t word, uint8_t endian) {
+void putWord(uint8_t endian, std::byte* at, uint32_t word) {
     for (uint32_t index = 0; index < 4; ++index) {
         uint32_t shift = endian == kBigEndian ? 24 - (index * 8) : index * 8;
         at[index] = static_cast<std::byte>((word >> shift) & 0xffu);
@@ -69,7 +69,7 @@ std::vector<std::byte> bytesOf(const std::vector<Vertex>& vertices, uint8_t endi
                                       std::bit_cast<uint32_t>(vertices[index].position[2]),
                                       vertices[index].colour};
         for (size_t word = 0; word < words.size(); ++word) {
-            putWord(bytes.data() + (index * kStride) + (word * 4), words[word], endian);
+            putWord(endian, bytes.data() + (index * kStride) + (word * 4), words[word]);
         }
     }
     return bytes;
@@ -292,8 +292,8 @@ struct GuestFrame {
         for (const ActorDraw& draw : draws) {
             std::vector<std::byte> bytes(draw.mesh.size() * sizeof(float));
             for (size_t index = 0; index < draw.mesh.size(); ++index) {
-                putWord(bytes.data() + (index * sizeof(float)),
-                        std::bit_cast<uint32_t>(draw.mesh[index]), kBigEndian);
+                putWord(kBigEndian, bytes.data() + (index * sizeof(float)),
+                        std::bit_cast<uint32_t>(draw.mesh[index]));
             }
             meshes.push_back(std::move(bytes));
         }
@@ -445,14 +445,21 @@ void eachMeshOfOneObjectIsBlendedFromItsOwnDrawAFrameBefore() {
     // draws, which must name its own draws a frame and two frames before.
     Blends blends;
     blends.objects.setPlanning(true);
-    auto walker = [](uint32_t block, float uniform, float body, float cape) {
-        ActorDraw second{block, {}, {cape}};
-        second.sharesUniforms = true;
-        return GuestFrame({{block, {uniform, 7.0f}, {body}}, second});
+
+    struct WalkerAt {
+        float uniform;
+        float body;
+        float cape;
     };
-    blends.record(walker(kBlockA, 0.0f, 10.0f, 100.0f));
-    blends.record(walker(kBlockB, 1.0f, 12.0f, 120.0f));
-    GuestFrame latest = walker(kBlockA, 2.0f, 14.0f, 140.0f);
+
+    auto walker = [](uint32_t block, WalkerAt at) {
+        ActorDraw second{block, {}, {at.cape}};
+        second.sharesUniforms = true;
+        return GuestFrame({{block, {at.uniform, 7.0f}, {at.body}}, second});
+    };
+    blends.record(walker(kBlockA, {.uniform = 0.0f, .body = 10.0f, .cape = 100.0f}));
+    blends.record(walker(kBlockB, {.uniform = 1.0f, .body = 12.0f, .cape = 120.0f}));
+    GuestFrame latest = walker(kBlockA, {.uniform = 2.0f, .body = 14.0f, .cape = 140.0f});
     blends.record(latest);
     std::vector<std::vector<float>> drawn = blends.replay(latest);
     check::equal(drawn[0][0], 13.0f, "the object's first mesh is drawn half way");

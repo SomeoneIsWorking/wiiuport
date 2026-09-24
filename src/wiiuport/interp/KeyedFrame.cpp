@@ -1,7 +1,8 @@
 #include "wiiuport/interp/KeyedFrame.h"
 
+#include "wiiuport/interp/Blendable.h"
+
 #include <algorithm>
-#include <cstring>
 #include <stdexcept>
 
 namespace wiiuport::interp {
@@ -152,7 +153,7 @@ void KeyedFrame::flagShared(std::span<const uint32_t> group) {
     std::span<const float> first = values(group[0]);
     for (size_t position = 0; position < common; ++position) {
         bool shared = std::all_of(group.begin(), group.end(), [&](uint32_t entry) {
-            return std::memcmp(&values(entry)[position], &first[position], sizeof(float)) == 0;
+            return sameBits(values(entry)[position], first[position]);
         });
         m_shared.push_back(shared ? 1 : 0);
     }

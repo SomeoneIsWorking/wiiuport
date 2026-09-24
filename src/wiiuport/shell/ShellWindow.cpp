@@ -8,8 +8,10 @@ namespace wiiuport::shell {
 namespace {
 
 // Cemu stores an X11 window id in a void*, which is how its own front end
-// passes it. Kept in one place so the cast is described once.
+// passes it. Kept in one place so the cast is described once; the integer is
+// an XID, never a pointer, so there is no provenance for the cast to lose.
 void* asHandle(uint64_t id) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr): the fork's handle contract.
     return reinterpret_cast<void*>(static_cast<uintptr_t>(id));
 }
 
@@ -126,8 +128,6 @@ bool ShellWindow::pumpEvents(HostEventObserver& observer) {
         observer.onHostEvent(event);
         switch (event.type) {
         case SDL_EVENT_QUIT:
-            m_quitRequested = true;
-            break;
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             m_quitRequested = true;
             break;

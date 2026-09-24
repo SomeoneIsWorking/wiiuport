@@ -36,22 +36,31 @@ std::filesystem::path userDataDirectory() {
     return path;
 }
 
+// Where an XDG base directory is named, and where it is under the home
+// directory when it is not.
+struct XdgDirectory {
+    const char* variable;
+    const char* homeFallback;
+};
+
+inline constexpr XdgDirectory kXdgConfig{.variable = "XDG_CONFIG_HOME", .homeFallback = ".config"};
+inline constexpr XdgDirectory kXdgCache{.variable = "XDG_CACHE_HOME", .homeFallback = ".cache"};
+
 // Linux keeps configuration and caches apart from data; the other hosts do
 // not, and putting them together there is what the platform expects.
-std::filesystem::path xdgDirectory(const char* variable, const char* fallback,
+std::filesystem::path xdgDirectory(const XdgDirectory& directory,
                                    const std::filesystem::path& userData) {
 #if defined(__linux__) || defined(__FreeBSD__)
-    const char* configured = SDL_getenv(variable);
+    const char* configured = SDL_getenv(directory.variable);
     if (configured != nullptr && configured[0] != '\0') {
         return std::filesystem::path(configured) / kApplicationFolder;
     }
     const char* home = SDL_getenv("HOME");
     if (home != nullptr && home[0] != '\0') {
-        return std::filesystem::path(home) / fallback / kApplicationFolder;
+        return std::filesystem::path(home) / directory.homeFallback / kApplicationFolder;
     }
 #else
-    (void)variable;
-    (void)fallback;
+    (void)directory;
 #endif
     return userData;
 }
@@ -75,10 +84,8 @@ bool HostPaths::publish(const std::filesystem::path& executablePath) {
         m_error = "the host would not say where user data belongs";
         return false;
     }
-    std::filesystem::path config =
-        isPortable ? portable : xdgDirectory("XDG_CONFIG_HOME", ".config", userData);
-    std::filesystem::path cache =
-        isPortable ? portable : xdgDirectory("XDG_CACHE_HOME", ".cache", userData);
+    std::filesystem::path config = isPortable ? portable : xdgDirectory(kXdgConfig, userData);
+    std::filesystem::path cache = isPortable ? portable : xdgDirectory(kXdgCache, userData);
 
     std::set<std::filesystem::path> failedWriteAccess;
     ActiveSettings::SetPaths(isPortable, executable, userData, config, cache, directory,

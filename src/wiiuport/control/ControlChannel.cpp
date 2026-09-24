@@ -55,23 +55,26 @@ std::string_view withheldName(LatteFrameHooks::WithheldEffect effect) {
     return "unknown";
 }
 
-// One `key=value` pair at a time out of a query string. Returns false at the
-// end; an unparseable pair stops the walk rather than being skipped, because
-// a silently ignored parameter is a press the caller believes it sent.
-bool nextParameter(std::string_view& rest, std::string_view& key, std::string_view& value) {
+struct QueryParameter {
+    std::string_view key;
+    std::string_view value;
+};
+
+// One `key=value` pair at a time out of a query string, empty at the end; an
+// unparseable pair stops the walk rather than being skipped, because a
+// silently ignored parameter is a press the caller believes it sent.
+std::optional<QueryParameter> nextParameter(std::string_view& rest) {
     if (rest.empty()) {
-        return false;
+        return std::nullopt;
     }
     auto amp = rest.find('&');
     auto pair = rest.substr(0, amp);
     rest = amp == std::string_view::npos ? std::string_view{} : rest.substr(amp + 1);
     auto equals = pair.find('=');
     if (equals == std::string_view::npos) {
-        return false;
+        return std::nullopt;
     }
-    key = pair.substr(0, equals);
-    value = pair.substr(equals + 1);
-    return true;
+    return QueryParameter{.key = pair.substr(0, equals), .value = pair.substr(equals + 1)};
 }
 
 // Enough digits that two transforms which differ are never printed the same.
@@ -547,9 +550,8 @@ std::string ControlChannel::substitutionJson() const {
 // wrong image.
 size_t ControlChannel::requestedSlot(const std::string& query) {
     std::string_view rest(query);
-    std::string_view key;
-    std::string_view value;
-    while (nextParameter(rest, key, value)) {
+    while (auto parameter = nextParameter(rest)) {
+        auto [key, value] = *parameter;
         if (key == "slot") {
             return static_cast<size_t>(std::strtoul(std::string(value).c_str(), nullptr, 10));
         }
@@ -562,9 +564,8 @@ size_t ControlChannel::requestedSlot(const std::string& query) {
 // silently disabling a control.
 bool ControlChannel::requestedFlag(const std::string& query, std::string_view name, bool fallback) {
     std::string_view rest(query);
-    std::string_view key;
-    std::string_view value;
-    while (nextParameter(rest, key, value)) {
+    while (auto parameter = nextParameter(rest)) {
+        auto [key, value] = *parameter;
         if (key == name) {
             return !(value == "0" || value == "false");
         }
@@ -575,10 +576,9 @@ bool ControlChannel::requestedFlag(const std::string& query, std::string_view na
 bool ControlChannel::requestedHashes(const std::string& query, std::string_view name,
                                      std::vector<uint64_t>& hashes) {
     std::string_view rest(query);
-    std::string_view key;
-    std::string_view value;
     hashes.clear();
-    while (nextParameter(rest, key, value)) {
+    while (auto parameter = nextParameter(rest)) {
+        auto [key, value] = *parameter;
         if (key != name) {
             continue;
         }
@@ -595,9 +595,8 @@ bool ControlChannel::requestedHashes(const std::string& query, std::string_view 
 size_t ControlChannel::requestedCount(const std::string& query, std::string_view name,
                                       size_t fallback) {
     std::string_view rest(query);
-    std::string_view key;
-    std::string_view value;
-    while (nextParameter(rest, key, value)) {
+    while (auto parameter = nextParameter(rest)) {
+        auto [key, value] = *parameter;
         if (key != name) {
             continue;
         }
@@ -617,9 +616,8 @@ size_t ControlChannel::requestedCount(const std::string& query, std::string_view
 
 float ControlChannel::requestedBlend(const std::string& query, float fallback) {
     std::string_view rest(query);
-    std::string_view key;
-    std::string_view value;
-    while (nextParameter(rest, key, value)) {
+    while (auto parameter = nextParameter(rest)) {
+        auto [key, value] = *parameter;
         if (key == "t") {
             char* end = nullptr;
             std::string text(value);
@@ -638,19 +636,16 @@ float ControlChannel::requestedBlend(const std::string& query, float fallback) {
 std::string ControlChannel::applyInput(const std::string& query, bool& accepted) {
     accepted = false;
     std::string_view rest(query);
-    std::string_view key;
-    std::string_view value;
     uint32_t reads = kDefaultPressReads;
     uint32_t mask = 0;
     auto unknown = std::string();
     auto releasing = false;
     auto haveLeftStick = false;
     auto haveRightStick = false;
-    float leftX = 0.0f;
-    float leftY = 0.0f;
-    float rightX = 0.0f;
-    float rightY = 0.0f;
-    while (nextParameter(rest, key, value)) {
+    input::StickPosition left;
+    input::StickPosition right;
+    while (auto parameter = nextParameter(rest)) {
+        auto [key, value] = *parameter;
         if (key == "reads") {
             reads = static_cast<uint32_t>(std::strtoul(std::string(value).c_str(), nullptr, 10));
             continue;
@@ -671,16 +666,16 @@ std::string ControlChannel::applyInput(const std::string& query, bool& accepted)
         if (key == "leftx" || key == "lefty" || key == "rightx" || key == "righty") {
             auto number = std::strtof(std::string(value).c_str(), nullptr);
             if (key == "leftx") {
-                leftX = number;
+                left.x = number;
                 haveLeftStick = true;
             } else if (key == "lefty") {
-                leftY = number;
+                left.y = number;
                 haveLeftStick = true;
             } else if (key == "rightx") {
-                rightX = number;
+                right.x = number;
                 haveRightStick = true;
             } else {
-                rightY = number;
+                right.y = number;
                 haveRightStick = true;
             }
             continue;
@@ -696,11 +691,11 @@ std::string ControlChannel::applyInput(const std::string& query, bool& accepted)
         accepted = true;
     }
     if (haveLeftStick) {
-        m_input.setLeftStick(leftX, leftY);
+        m_input.setLeftStick(left);
         accepted = true;
     }
     if (haveRightStick) {
-        m_input.setRightStick(rightX, rightY);
+        m_input.setRightStick(right);
         accepted = true;
     }
     if (mask != 0) {

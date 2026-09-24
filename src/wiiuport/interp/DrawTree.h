@@ -121,7 +121,7 @@ class DrawTree {
         Search(const DrawTree& tree, const Group& group, const DrawValues& values,
                const Query& query);
         // Searches a node whose box is `boxSquared` from the point.
-        void visit(uint32_t node, double boxSquared);
+        void visit(const Node& node, double boxSquared);
         // The squared distance to a node's box: no draw in it is nearer.
         double boxDistance(const Node& node) const;
 

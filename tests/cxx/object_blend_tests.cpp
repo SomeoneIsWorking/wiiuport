@@ -121,14 +121,22 @@ void armAfter(ObjectBlend& blend, const std::vector<Draw>& twoBack,
 }
 
 // One actor walking one unit a frame, and a second standing still.
-const std::vector<Draw> kWalkTwoBack{{kBlockA, {0.0f, 7.0f}}, {kOtherA, {5.0f, 5.0f}}};
-const std::vector<Draw> kWalkOneBack{{kBlockB, {1.0f, 7.0f}}, {kOtherB, {5.0f, 5.0f}}};
-const std::vector<Draw> kWalkLatest{{kBlockA, {2.0f, 7.0f}}, {kOtherA, {5.0f, 5.0f}}};
+std::vector<Draw> walkTwoBack() {
+    return {{kBlockA, {0.0f, 7.0f}}, {kOtherA, {5.0f, 5.0f}}};
+}
+
+std::vector<Draw> walkOneBack() {
+    return {{kBlockB, {1.0f, 7.0f}}, {kOtherB, {5.0f, 5.0f}}};
+}
+
+std::vector<Draw> walkLatest() {
+    return {{kBlockA, {2.0f, 7.0f}}, {kOtherA, {5.0f, 5.0f}}};
+}
 
 void aMovingObjectIsDrawnHalfWayBetweenItsFrames() {
     ObjectBlend blend{kHalfway};
-    armAfter(blend, kWalkTwoBack, kWalkOneBack, kWalkLatest);
-    auto uploaded = replay(blend, kWalkLatest);
+    armAfter(blend, walkTwoBack(), walkOneBack(), walkLatest());
+    auto uploaded = replay(blend, walkLatest());
     check::equal(uploaded[0][0], 1.5f, "the walker half way between frames N-1 and N");
     check::equal(uploaded[0][1], 7.0f, "and what did not move stays put");
     check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "one object blended");
@@ -139,8 +147,8 @@ void aMovingObjectIsDrawnHalfWayBetweenItsFrames() {
 
 void aStillObjectIsDrawnExactlyAsTheTitleDrewIt() {
     ObjectBlend blend{kHalfway};
-    armAfter(blend, kWalkTwoBack, kWalkOneBack, kWalkLatest);
-    auto uploaded = replay(blend, kWalkLatest);
+    armAfter(blend, walkTwoBack(), walkOneBack(), walkLatest());
+    auto uploaded = replay(blend, walkLatest());
     check::isTrue(uploaded[1] == std::vector<float>{5.0f, 5.0f}, "bit for bit");
     check::equal(blend.objects(Outcome::Held), uint64_t{1}, "and counted as held");
 }
@@ -168,7 +176,7 @@ void aNewObjectIsDrawnAsDrawnAndCounted() {
 
 void aPartnerFoundOnceIsCarriedAndRechecked() {
     ObjectBlend blend{kHalfway};
-    armAfter(blend, kWalkTwoBack, kWalkOneBack, kWalkLatest);
+    armAfter(blend, walkTwoBack(), walkOneBack(), walkLatest());
     uint64_t searched = blend.planner().partnersSearched();
     record(blend, {{kBlockB, {3.0f, 7.0f}}, {kOtherB, {5.0f, 5.0f}}});
     blend.armOnce();
@@ -325,8 +333,8 @@ void aFrameWithNoDrawsStillLeavesTheOneBeforeSearchable() {
 
 void aKeptSnapshotIsPlannedAgainAsTheProductPlansIt() {
     std::vector<wiiuport::frame::RecordingSnapshot::Frame> frames;
-    for (const std::vector<Draw>* draws : {&kWalkTwoBack, &kWalkOneBack, &kWalkLatest}) {
-        wiiuport::frame::FrameRecording frame = frameOf(*draws);
+    for (const std::vector<Draw>& draws : {walkTwoBack(), walkOneBack(), walkLatest()}) {
+        wiiuport::frame::FrameRecording frame = frameOf(draws);
         frames.push_back(
             {true, {frame.uniformAssemblies().begin(), frame.uniformAssemblies().end()}});
     }
@@ -391,9 +399,9 @@ void twoDrawsFromOneBlockAreTwoObjects() {
 
 void aReplayOutOfStepWithTheRecordingStopsWriting() {
     ObjectBlend blend{kHalfway};
-    armAfter(blend, kWalkTwoBack, kWalkOneBack, kWalkLatest);
+    armAfter(blend, walkTwoBack(), walkOneBack(), walkLatest());
     // The replay's first draw is not the recording's first.
-    auto uploaded = replay(blend, {kWalkLatest[1], kWalkLatest[0]});
+    auto uploaded = replay(blend, {walkLatest()[1], walkLatest()[0]});
     check::equal(blend.replaysDiverged(), uint64_t{1}, "the divergence is counted");
     check::equal(uploaded[1][0], 2.0f, "and nothing after it is written, even a planned blend");
     check::equal(blend.drawsWritten(), uint64_t{0}, "so no draw was written at all");
@@ -402,10 +410,10 @@ void aReplayOutOfStepWithTheRecordingStopsWriting() {
 void nothingIsWrittenWhenNotArmed() {
     ObjectBlend blend{kHalfway};
     blend.setPlanning(true);
-    for (const auto* frame : {&kWalkTwoBack, &kWalkOneBack, &kWalkLatest}) {
-        record(blend, *frame);
+    for (const std::vector<Draw>& frame : {walkTwoBack(), walkOneBack(), walkLatest()}) {
+        record(blend, frame);
     }
-    replay(blend, kWalkLatest);
+    replay(blend, walkLatest());
     check::equal(blend.drawsWritten(), uint64_t{0}, "an unarmed blend writes nothing");
     ObjectBlend young{kHalfway};
     young.setPlanning(true);
@@ -647,6 +655,7 @@ std::array<float, 16> placedAt(float x, float y, float z) {
 
 std::vector<float> halfWay(const std::vector<float>& one, const std::vector<float>& other) {
     std::vector<float> between;
+    between.reserve(one.size());
     for (size_t index = 0; index < one.size(); ++index) {
         between.push_back(one[index] + ((other[index] - one[index]) * kHalfway));
     }
@@ -881,11 +890,13 @@ void anObjectFoundByItsValuesThatStoodUntilNMinusOneIsBlended() {
     ObjectBlend blend{kHalfway};
     blend.setPlanning(true);
     uint64_t searchedAgain = 2 + wiiuport::interp::ObjectPlanner::kSearchRetryInterval;
+    // A whole step every second frame.
     for (uint64_t frame = 0; frame < searchedAgain; ++frame) {
-        record(blend,
-               {{frame % 2 == 0 ? kBlockA : kBlockB, {static_cast<float>(frame / 2), 7.0f}}});
+        uint64_t steps = frame / 2;
+        record(blend, {{frame % 2 == 0 ? kBlockA : kBlockB, {static_cast<float>(steps), 7.0f}}});
     }
-    float stood = static_cast<float>(searchedAgain / 2 - 1);
+    uint64_t stepsBeforeLast = (searchedAgain / 2) - 1;
+    float stood = static_cast<float>(stepsBeforeLast);
     std::vector<Draw> stepped{{kBlockA, {stood + 1.0f, 7.0f}}};
     record(blend, stepped);
     blend.armOnce();
@@ -1143,30 +1154,36 @@ void aHeldStillWorldReplaysByteIdenticalToTheTitlesFrame() {
 
 void turningPlanningOffForgetsTheFramesItHeld() {
     ObjectBlend blend{kHalfway};
-    armAfter(blend, kWalkTwoBack, kWalkOneBack, kWalkLatest);
+    armAfter(blend, walkTwoBack(), walkOneBack(), walkLatest());
     blend.setPlanning(false);
-    record(blend, kWalkTwoBack);
+    record(blend, walkTwoBack());
     blend.setPlanning(true);
-    record(blend, kWalkOneBack);
-    record(blend, kWalkLatest);
+    record(blend, walkOneBack());
+    record(blend, walkLatest());
     check::isTrue(!blend.armOnce(), "frames from before it was off are not blended across");
-    record(blend, kWalkTwoBack);
+    record(blend, walkTwoBack());
     check::isTrue(blend.armOnce(), "three new frames are");
 }
 
 // Frame N as the census sees it: the walker blended, the stander held, and
 // two outline draws that are new.
-const std::vector<Draw> kCensusLatest{{kBlockA, {2.0f, 7.0f}},
-                                      {kOtherA, {5.0f, 5.0f}},
-                                      {0xf4005000, {1.0f, 2.0f, 3.0f}, kOutline},
-                                      {0xf4006000, {4.0f}, kOutline}};
+std::vector<Draw> censusLatest() {
+    return {{kBlockA, {2.0f, 7.0f}},
+            {kOtherA, {5.0f, 5.0f}},
+            {0xf4005000, {1.0f, 2.0f, 3.0f}, kOutline},
+            {0xf4006000, {4.0f}, kOutline}};
+}
 
 void aCensusGroupsTheFramesObjectsByShaderMostUnblendedFirst() {
     ObjectBlend blend{kHalfway};
     blend.requestCensus(1);
-    armAfter(blend, kWalkTwoBack, kWalkOneBack, kCensusLatest);
-    auto census = blend.census();
-    check::isTrue(census.has_value(), "a requested census is taken once a frame is planned");
+    armAfter(blend, walkTwoBack(), walkOneBack(), censusLatest());
+    auto taken = blend.census();
+    const auto* census =
+        check::valueOf(taken, "a requested census is taken once a frame is planned");
+    if (census == nullptr) {
+        return;
+    }
     check::equal(census->frames, uint64_t{1}, "of the one frame asked for");
     check::equal(census->objects, uint64_t{4}, "of every object in the frame");
     check::equal(census->shaders, uint64_t{2}, "under the shaders that drew them");
@@ -1182,18 +1199,26 @@ void aCensusGroupsTheFramesObjectsByShaderMostUnblendedFirst() {
 
 void aCensusAddsUpTheFramesAskedForAndNoMore() {
     ObjectBlend blend{kHalfway};
-    armAfter(blend, kWalkTwoBack, kWalkOneBack, kWalkLatest);
+    armAfter(blend, walkTwoBack(), walkOneBack(), walkLatest());
     check::isTrue(!blend.census().has_value(), "no census nobody asked for");
     blend.requestCensus(2);
-    record(blend, kWalkTwoBack);
+    record(blend, walkTwoBack());
     check::isTrue(!blend.census().has_value(), "none after one of the two frames");
-    record(blend, kWalkOneBack);
-    auto census = blend.census();
-    check::isTrue(census.has_value(), "one after both");
+    record(blend, walkOneBack());
+    auto taken = blend.census();
+    const auto* census = check::valueOf(taken, "one after both");
+    if (census == nullptr) {
+        return;
+    }
     check::equal(census->frames, uint64_t{2}, "counting both frames");
     check::equal(census->objects, uint64_t{4}, "and both frames' objects");
-    record(blend, kWalkLatest);
-    check::equal(blend.census()->frames, uint64_t{2}, "and nothing after");
+    record(blend, walkLatest());
+    auto after = blend.census();
+    const auto* unchanged = check::valueOf(after, "the census is kept");
+    if (unchanged == nullptr) {
+        return;
+    }
+    check::equal(unchanged->frames, uint64_t{2}, "and nothing after");
 }
 
 void aCensusOfAnUnplannedFrameIsRefused() {

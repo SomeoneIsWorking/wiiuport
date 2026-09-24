@@ -34,10 +34,6 @@ bool bitsBefore(std::span<const float> l, std::span<const float> r) {
     return std::memcmp(l.data(), r.data(), l.size_bytes()) < 0;
 }
 
-bool sameBits(std::span<const float> l, std::span<const float> r) {
-    return l.size() == r.size() && std::memcmp(l.data(), r.data(), l.size_bytes()) == 0;
-}
-
 } // namespace
 
 void DrawTree::clear() {
@@ -166,7 +162,8 @@ DrawTree::Nearest DrawTree::nearest(uint32_t group, const DrawValues& values,
         return {};
     }
     Search search(*this, searched, values, query);
-    search.visit(searched.root, search.boxDistance(m_nodes[searched.root]));
+    const Node& root = m_nodes[searched.root];
+    search.visit(root, search.boxDistance(root));
     return search.result();
 }
 
@@ -264,11 +261,10 @@ void DrawTree::Search::consider(uint32_t entry) {
     }
 }
 
-void DrawTree::Search::visit(uint32_t index, double boxSquared) {
+void DrawTree::Search::visit(const Node& node, double boxSquared) {
     if (!couldBeFound(boxSquared)) {
         return;
     }
-    const Node& node = m_tree.m_nodes[index];
     for (uint32_t at = node.begin; at < node.loose; ++at) {
         consider(m_tree.m_entries[at]);
     }
@@ -276,14 +272,16 @@ void DrawTree::Search::visit(uint32_t index, double boxSquared) {
         return;
     }
     // The nearer box first: the draw found there bounds the other.
-    double below = boxDistance(m_tree.m_nodes[node.below]);
-    double above = boxDistance(m_tree.m_nodes[node.above]);
+    const Node& belowNode = m_tree.m_nodes[node.below];
+    const Node& aboveNode = m_tree.m_nodes[node.above];
+    double below = boxDistance(belowNode);
+    double above = boxDistance(aboveNode);
     if (below <= above) {
-        visit(node.below, below);
-        visit(node.above, above);
+        visit(belowNode, below);
+        visit(aboveNode, above);
     } else {
-        visit(node.above, above);
-        visit(node.below, below);
+        visit(aboveNode, above);
+        visit(belowNode, below);
     }
 }
 

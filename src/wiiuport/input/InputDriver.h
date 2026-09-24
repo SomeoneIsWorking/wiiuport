@@ -15,6 +15,12 @@ struct NamedButton {
     uint32_t mask;
 };
 
+// Where a stick is held, each axis in [-1, 1].
+struct StickPosition {
+    float x{0.0f};
+    float y{0.0f};
+};
+
 // A press that lasts a bounded number of gamepad reads.
 //
 // Duration is counted in reads rather than seconds because a press has to
@@ -34,12 +40,8 @@ struct HeldPress {
 // build that never uses it behaves exactly as upstream.
 class InputDriver final : public VPADInputHooks::Source {
   public:
-    // Every button the control channel will accept by name, and the only
-    // place those names are defined.
-    static const std::vector<NamedButton>& buttons();
-
-    // Null when the name is not one of them, so a typo refuses rather than
-    // silently pressing nothing.
+    // Null when the name is not one the control channel accepts, so a typo
+    // refuses rather than silently pressing nothing.
     static const NamedButton* buttonNamed(const std::string& name);
 
     bool Poll(std::size_t playerIndex, VPADInputHooks::Injection& injection) override;
@@ -50,8 +52,8 @@ class InputDriver final : public VPADInputHooks::Source {
 
     // Held until changed. Zero on both axes means the stick is centred, which
     // is not the same as this player not being driven.
-    void setLeftStick(float x, float y);
-    void setRightStick(float x, float y);
+    void setLeftStick(StickPosition position);
+    void setRightStick(StickPosition position);
 
     // Stop driving entirely and hand the player back to real controllers.
     void release();
@@ -67,10 +69,8 @@ class InputDriver final : public VPADInputHooks::Source {
   private:
     mutable std::mutex m_mutex;
     std::vector<HeldPress> m_pressed;
-    float m_leftStickX{0.0f};
-    float m_leftStickY{0.0f};
-    float m_rightStickX{0.0f};
-    float m_rightStickY{0.0f};
+    StickPosition m_leftStick;
+    StickPosition m_rightStick;
     bool m_driving{false};
     uint64_t m_pollsSeen{0};
     uint64_t m_pollsAnswered{0};

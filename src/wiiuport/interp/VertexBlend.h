@@ -63,7 +63,7 @@ struct VertexLayout {
 };
 
 // What blending one draw's vertices came to.
-enum class VertexOutcome : uint32_t {
+enum class VertexOutcome : uint8_t {
     // Its float values lie strictly between the partner's and its own, and it
     // is drawn from them.
     Blended,

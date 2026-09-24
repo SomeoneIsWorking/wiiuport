@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .cxxpolicy import CxxPolicyUnavailable, check_cxx_policy
 from .cxxtests import CxxTestsUnavailable, build_and_run
+from .cxxtidy import TidyUnavailable, check_tidy
 from .hostdeps import MissingHostPackages, Requirement, check
 from .paths import Layout
 from .structure import FIRST_PARTY_CXX_ROOTS, check_source_sizes
@@ -208,6 +209,20 @@ def gate_cxx_tests(layout: Layout) -> GateResult:
     return GateResult("c++ tests", report.passed, report.checks, report.output)
 
 
+def gate_cxx_tidy(layout: Layout) -> GateResult:
+    """clang-tidy over every first-party unit, from the database that builds it.
+
+    Examined counts units; a finding in a header is reported once however many
+    units include it.
+    """
+    try:
+        report = check_tidy(layout)
+    except TidyUnavailable as unavailable:
+        return GateResult("c++ lint (clang-tidy)", False, 0, str(unavailable))
+    detail = "\n".join([*report.diagnostics, *report.failed_runs])
+    return GateResult("c++ lint (clang-tidy)", report.passed, report.units, detail)
+
+
 GATES = (
     gate_python_lint,
     gate_python_format,
@@ -219,6 +234,7 @@ GATES = (
     # warm developer machine passes on a database CI does not have yet.
     gate_cxx_tests,
     gate_cxx_policy,
+    gate_cxx_tidy,
     gate_structure,
 )
 
