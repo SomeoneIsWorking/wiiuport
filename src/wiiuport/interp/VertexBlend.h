@@ -85,8 +85,8 @@ enum class VertexOutcome : uint8_t {
     // Its partner's draw, or its own two frames back, has other buffers or
     // attributes, or there is none.
     ShapeDiffers,
-    // A value's blend would not lie strictly between the two frames': a move
-    // of an ulp. Drawn as the title drew it.
+    // Every value that moved moved by an ulp, so none has a value strictly
+    // between the two frames'. Drawn as the title drew it.
     Outside,
     // Its vertices changed only in values that are not floats to blend.
     NotFloats,

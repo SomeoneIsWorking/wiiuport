@@ -293,12 +293,14 @@ VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::
         float b = readFloat(after, word, endian);
         // Only what moved from N-2 to N: a value N-2 and N agree on is
         // flipping, not moving, whatever N-1 holds.
-        if (outside || !Midpoint::movedIn(readFloat(twoBack, word, endian), b) || !isNumber(a) ||
+        if (!Midpoint::movedIn(readFloat(twoBack, word, endian), b) || !isNumber(a) ||
             sameBits(a, b)) {
             return;
         }
         // Exact at both ends: at t=1 the vertex is N's bit for bit.
         float value = std::lerp(a, b, t);
+        // A move of an ulp has no value between its ends; it stays at N, and
+        // the rest of the mesh, halved, still lies between its two frames.
         if (!liesBetween(a, value, b)) {
             outside = true;
             return;
@@ -306,11 +308,10 @@ VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::
         writeWord(out.data() + word, std::bit_cast<uint32_t>(value), endian);
         ++blended;
     });
-    if (outside) {
-        std::copy(after.begin(), after.end(), out.begin());
-        return VertexOutcome::Outside;
+    if (blended > 0) {
+        return VertexOutcome::Blended;
     }
-    return blended > 0 ? VertexOutcome::Blended : VertexOutcome::Unchanged;
+    return outside ? VertexOutcome::Outside : VertexOutcome::Unchanged;
 }
 
 Midpoint vertexMidpoint(const VertexLayout& layout, std::span<const std::byte> twoBack,

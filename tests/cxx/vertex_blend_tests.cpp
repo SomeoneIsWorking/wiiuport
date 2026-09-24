@@ -176,6 +176,21 @@ void aMoveTooSmallToHalveIsOutside() {
     check::isTrue(outcome == VertexOutcome::Outside, "an ulp's move has no value between");
 }
 
+void anUlpsMoveStaysAtNWhileTheRestOfTheMeshIsHalved() {
+    float one = 1.0f;
+    float next = std::nextafter(one, 2.0f);
+    float down = one - (next - one);
+    std::vector<std::byte> twoBack = bytesOf({{{down, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> before = bytesOf({{{one, 2.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> after = bytesOf({{{next, 4.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> out(after.size());
+    VertexOutcome outcome =
+        blendVertexBytes(layoutOf(1, kBigEndian), twoBack, before, after, kHalfway, kByBlocks, out);
+    check::isTrue(outcome == VertexOutcome::Blended, "a mesh that moved is blended");
+    check::isTrue(out == bytesOf({{{next, 3.0f, 0.0f}, 0}}, kBigEndian),
+                  "the ulp's move is drawn at N and the rest half way");
+}
+
 void aValueThatIsNotANumberIsTakenFromN() {
     float nan = std::nanf("");
     std::vector<std::byte> twoBack = bytesOf({{{4.0f, -2.0f, 0.0f}, 0}}, kBigEndian);
@@ -854,6 +869,7 @@ void runVertexBlendTests() {
     aMeshWhoseOnlyChangeIsNotFloatsIsNotBlended();
     aByteOrderTheDecoderDoesNotReadIsNotBlended();
     aMoveTooSmallToHalveIsOutside();
+    anUlpsMoveStaysAtNWhileTheRestOfTheMeshIsHalved();
     aValueThatIsNotANumberIsTakenFromN();
     anotherMeshAFrameBeforeIsNotBlendedTowards();
     anotherObjectsMeshFoundByUniformsIsNotBlendedTowards();
