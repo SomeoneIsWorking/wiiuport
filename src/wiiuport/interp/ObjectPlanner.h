@@ -195,6 +195,12 @@ class ObjectPlanner {
         return m_partnersReidentified;
     }
 
+    // Partners found by their values off the object's midpoint but on its
+    // path through its draw at N-3: it turned at N-1.
+    uint64_t partnersTurned() const {
+        return m_partnersTurned;
+    }
+
     // What the searches cost: draws compared against an object, in N-2 to
     // find it by its values and in N-1 to find its partner. A search is
     // exact, so these, not the searches, are what a scene makes expensive.
@@ -322,6 +328,10 @@ class ObjectPlanner {
     // A pixel stage's outcome: planned behind a blended vertex stage,
     // Shading otherwise.
     Outcome planPixelStage(size_t entry);
+    // Whether an object found by its values at `candidate` in N-1 passed
+    // through it on the curve over its draws at N-3, N-2 and N.
+    bool turnedThrough(std::span<const float> before, std::span<const float> after,
+                       size_t candidate) const;
     // Held at N from its draw in N-2, with its partner in N-1 derived from
     // its blocks for the vertex blend.
     Outcome held(size_t entry, size_t earlier);
@@ -466,6 +476,7 @@ class ObjectPlanner {
     uint64_t m_partnersDerived{0};
     uint64_t m_partnersSearched{0};
     uint64_t m_partnersReidentified{0};
+    uint64_t m_partnersTurned{0};
     uint64_t m_reidentifyAttempts{0};
     uint64_t m_nearestCandidates{0};
     uint64_t m_partnerCandidates{0};

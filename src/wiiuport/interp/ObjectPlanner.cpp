@@ -61,6 +61,27 @@ bool landsInEveryRegister(std::span<const float> before, std::span<const float> 
     return true;
 }
 
+// Whether the object's path over N-3, N-2 and N passes through `between` in
+// every register it moved in: the check for an object that turned at N-1,
+// whose midpoint is off its own draw there.
+bool curvesThroughEveryRegister(std::span<const float> threeBack, std::span<const float> before,
+                                std::span<const float> after, std::span<const float> between,
+                                const FrameState& state) {
+    for (size_t start = 0; start < after.size(); start += ObjectPlanner::kRegisterFloats) {
+        size_t end = std::min(start + ObjectPlanner::kRegisterFloats, after.size());
+        Midpoint curve;
+        for (size_t index = start; index < end; ++index) {
+            if (!state.at(index)) {
+                curve.addCurved(threeBack[index], before[index], between[index], after[index]);
+            }
+        }
+        if (!curve.landsOn()) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // The squared length of an object's step from `from` to `to`, over the
 // values it moved in outside frame state.
 double squaredStep(std::span<const float> from, std::span<const float> to,
@@ -526,6 +547,12 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
                 learn(key, between.key(*found));
                 return Found{.earlier = *earlier, .partner = found, .byValues = true};
             }
+            if (found.has_value() && turnedThrough(before, after, *found)) {
+                ++m_partnersTurned;
+                m_searchAgainAt.erase(hash);
+                learn(key, between.key(*found));
+                return Found{.earlier = *earlier, .partner = found, .byValues = true};
+            }
             // Its draw in N-1 is where it stood in N-2 when it stood still
             // until N-1, off its midpoint.
             if (std::optional<size_t> stood = standingAsBefore(key, before, after)) {
@@ -559,6 +586,24 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
     }
     m_reidentifyAgainAt.insert_or_assign(hash, m_framesPlanned + kSearchRetryInterval);
     return std::nullopt;
+}
+
+bool ObjectPlanner::turnedThrough(std::span<const float> before, std::span<const float> after,
+                                  size_t candidate) const {
+    // The candidate's blocks are its own two frames apart, so they name its
+    // draw at N-3; a candidate that is another object names that one's.
+    if (m_framesHeld < m_frames.size()) {
+        return false;
+    }
+    const KeyedFrame& between = m_frames[0];
+    const KeyedFrame& threeBack = m_frames[2];
+    std::optional<size_t> earliest = threeBack.find(between.key(candidate));
+    if (!earliest.has_value() || threeBack.values(*earliest).size() != after.size()) {
+        return false;
+    }
+    return curvesThroughEveryRegister(threeBack.values(*earliest), before, after,
+                                      between.values(candidate),
+                                      frameState(between.key(candidate).shader));
 }
 
 bool ObjectPlanner::waiting(const std::unordered_map<uint64_t, uint64_t>& againAt,
