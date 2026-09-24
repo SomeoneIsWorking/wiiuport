@@ -90,8 +90,8 @@ Quaternion slerp(Quaternion a, const Quaternion& b, float t) {
     if (dot > kNearlyParallel) {
         // Too close for the angle to be recovered accurately; a straight lerp
         // and a normalise is within float precision of the arc here.
-        result = Quaternion{a.w + (b.w - a.w) * t, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t,
-                            a.z + (b.z - a.z) * t};
+        result = Quaternion{std::lerp(a.w, b.w, t), std::lerp(a.x, b.x, t), std::lerp(a.y, b.y, t),
+                            std::lerp(a.z, b.z, t)};
     } else {
         float theta = std::acos(dot);
         float sinTheta = std::sin(theta);
@@ -158,9 +158,9 @@ Transform3x4 Transform3x4::blend(const Transform3x4& from, const Transform3x4& t
                   result.m_values);
     Vec3 a = from.translation();
     Vec3 b = to.translation();
-    result.m_values[3] = a.x + (b.x - a.x) * clamped;
-    result.m_values[7] = a.y + (b.y - a.y) * clamped;
-    result.m_values[11] = a.z + (b.z - a.z) * clamped;
+    result.m_values[3] = std::lerp(a.x, b.x, clamped);
+    result.m_values[7] = std::lerp(a.y, b.y, clamped);
+    result.m_values[11] = std::lerp(a.z, b.z, clamped);
     return result;
 }
 

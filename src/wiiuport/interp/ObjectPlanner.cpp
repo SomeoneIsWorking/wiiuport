@@ -589,8 +589,9 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
             continue;
         }
         if (isNumber(a) && isNumber(b)) {
-            // Exact where the two agree: a + 0 is a.
-            floats.push_back(a + ((b - a) * m_t));
+            // std::lerp is exact at both ends and where the two agree; at t=1
+            // the value is N's bit for bit, which a + (b - a) * t is not.
+            floats.push_back(std::lerp(a, b, m_t));
             continue;
         }
         if (a != b) {

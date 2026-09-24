@@ -120,6 +120,20 @@ void aMovedMeshIsBlendedValueByValueInEitherByteOrder() {
     checkBlendsHalfWay(kLittleEndian, "little endian");
 }
 
+void aMeshBlendedAllTheWayIsDrawnExactlyAsTheTitleDrewIt() {
+    // At t=1 what is drawn is frame N byte for byte. a + (b - a) is not b in
+    // float for every pair: this one lands 1.4e-6 short, inside the range a
+    // blend may take.
+    std::vector<std::byte> twoBack = bytesOf({{{211.50984955f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> before = bytesOf({{{105.50984955f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> after = bytesOf({{{-0.48986194f, 0.0f, 0.0f}, 0}}, kBigEndian);
+    std::vector<std::byte> out(after.size());
+    VertexOutcome outcome =
+        blendVertexBytes(layoutOf(1, kBigEndian), twoBack, before, after, 1.0f, kByBlocks, out);
+    const std::vector<std::byte>& drawn = outcome == VertexOutcome::Blended ? out : after;
+    check::isTrue(drawn == after, "a mesh blended all the way is drawn as the title drew it");
+}
+
 void aMeshThatDidNotMoveIsUnchangedAndByteIdentical() {
     std::vector<std::byte> bytes = bytesOf({{{1.0f, 2.0f, 3.0f}, 0x44444444}}, kBigEndian);
     std::vector<std::byte> out(bytes.size());
@@ -735,6 +749,7 @@ namespace wiiuport::tests {
 void runVertexBlendTests() {
     aLayoutDescribesOnlyTheDrawItWasTakenFrom();
     aMovedMeshIsBlendedValueByValueInEitherByteOrder();
+    aMeshBlendedAllTheWayIsDrawnExactlyAsTheTitleDrewIt();
     aMeshThatDidNotMoveIsUnchangedAndByteIdentical();
     aMeshWhoseOnlyChangeIsNotFloatsIsNotBlended();
     aByteOrderTheDecoderDoesNotReadIsNotBlended();
