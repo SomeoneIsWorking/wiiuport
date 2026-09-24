@@ -4,6 +4,7 @@
 
 #include "wiiuport/control/ControlChannel.h"
 #include "wiiuport/frame/FrameCapture.h"
+#include "wiiuport/frame/FrameGate.h"
 #include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameShapeLog.h"
 #include "wiiuport/frame/GuestStateGuard.h"
@@ -99,6 +100,10 @@ class Runtime {
         return m_continuous;
     }
 
+    frame::FrameGate& frameGate() {
+        return m_gate;
+    }
+
   private:
     inline static Runtime* s_instance{nullptr};
     inline static std::once_flag s_created;
@@ -126,6 +131,7 @@ class Runtime {
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
     frame::PresentPacing m_scanOut{&frame::PresentPacing::Clock::now};
     input::InputDriver m_input;
+    frame::FrameGate m_gate;
     control::ControlChannel m_control{control::ControlChannel::Sources{
         .recorder = m_recorder,
         .replayer = m_replayer,
@@ -146,6 +152,7 @@ class Runtime {
         .pacing = m_pacing,
         .scanOut = m_scanOut,
         .vertexChanges = m_recorder.vertexChanges(),
+        .gate = m_gate,
     }};
     bool m_hooksInstalled{false};
 };

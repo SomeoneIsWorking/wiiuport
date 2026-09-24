@@ -59,6 +59,8 @@ Runtime::Runtime()
     // After the scheduler, so the frame end that runs the replay has already
     // run it by the time the blend is taken down.
     m_recorder.addFrameShownListener(&m_interpolator);
+    // Last, so every one-shot of the frame has run before the title is held.
+    m_recorder.addFrameShownListener(&m_gate);
     m_recorder.addPresentListener(&m_presenter);
     // The blends only ever see the runtime's own replayed draws; the recorder
     // is what keeps the guest's frames out of their reach.
