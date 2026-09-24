@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -49,6 +50,14 @@ inline void equal(const T& actual, const U& expected, const std::string& what) {
     std::ostringstream message;
     message << "  FAIL " << what << ": " << actual << " != " << expected << "\n";
     std::fputs(message.str().c_str(), stdout);
+}
+
+// What an optional holds, its presence counted as a check. Null when it
+// holds nothing, so the test returns instead of reading an empty optional.
+template <typename T>
+inline const T* valueOf(const std::optional<T>& optional, const std::string& what) {
+    isTrue(optional.has_value(), what);
+    return optional.has_value() ? &optional.value() : nullptr;
 }
 
 } // namespace check

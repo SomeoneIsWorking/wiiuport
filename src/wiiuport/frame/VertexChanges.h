@@ -9,6 +9,12 @@
 
 namespace wiiuport::frame {
 
+// A draw's vertex bytes as one hash, and how many bytes went into it.
+struct HashedBytes {
+    uint64_t hash{0};
+    uint64_t bytes{0};
+};
+
 // Whether the title's draws read vertex bytes it rewrote since the frame
 // before, by vertex shader. A uniform blend moves what uniforms place; the
 // geometry the title writes into vertex buffers each frame -- an effect built
@@ -84,7 +90,7 @@ class VertexChanges {
     // One class of draws' hashes and counts, by whatever read the bytes.
     template <typename Key> class Tally {
       public:
-        void add(const Key& key, uint64_t hash, uint64_t bytes);
+        void add(const Key& key, HashedBytes hashed);
         void compareFrame();
         void clear();
 

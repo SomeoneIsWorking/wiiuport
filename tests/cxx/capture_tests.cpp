@@ -13,7 +13,7 @@ namespace {
 LatteFrameHooks::CaptureCallback g_armed;
 bool g_accept = true;
 
-bool recordArming(LatteFrameHooks::CaptureCallback callback) {
+bool recordArming(LatteFrameHooks::CaptureCallback&& callback) {
     if (!g_accept) {
         return false;
     }
@@ -21,11 +21,16 @@ bool recordArming(LatteFrameHooks::CaptureCallback callback) {
     return true;
 }
 
-void deliver(int width, int height, uint8_t value) {
-    std::array<uint8_t, 12> pixels{};
+// Four pixels by one, RGB: wider than it is tall, so a width and height
+// swapped anywhere on the way reads back wrong.
+constexpr int kImageWidth = 4;
+constexpr int kImageHeight = 1;
+
+void deliver(uint8_t value) {
+    std::array<uint8_t, size_t{kImageWidth} * kImageHeight * 3> pixels{};
     pixels.fill(value);
-    LatteFrameHooks::FrameImage image{pixels.data(), static_cast<uint32_t>(pixels.size()), width,
-                                      height, true};
+    LatteFrameHooks::FrameImage image{pixels.data(), static_cast<uint32_t>(pixels.size()),
+                                      kImageWidth, kImageHeight, true};
     g_armed(image);
 }
 
@@ -42,10 +47,10 @@ void aDeliveredImageIsHeldByCopy() {
     g_accept = true;
     FrameCapture capture(&recordArming);
     check::isTrue(capture.armOnce(), "arming is accepted");
-    deliver(2, 2, 0x7f);
+    deliver(0x7f);
     auto image = capture.lastImage();
-    check::equal(image.width, 2, "the width survives");
-    check::equal(image.height, 2, "so does the height");
+    check::equal(image.width, kImageWidth, "the width survives");
+    check::equal(image.height, kImageHeight, "so does the height");
     check::equal(image.rgb.size(), size_t{12}, "and every byte");
     check::equal(int{image.rgb[11]}, 0x7f, "with the values intact");
     check::equal(capture.imagesReceived(), uint64_t{1}, "one image received");
@@ -67,7 +72,7 @@ void theFramingCarriesItsOwnDimensions() {
     g_accept = true;
     FrameCapture capture(&recordArming);
     capture.armOnce();
-    deliver(2, 2, 0x40);
+    deliver(0x40);
     auto framed = capture.lastImageFramed();
     check::equal(framed.size(), FrameCapture::kHeaderBytes + 12,
                  "the body is its header plus its pixels");

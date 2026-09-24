@@ -36,7 +36,7 @@ TitleSelection::Validator accepting() {
     };
 }
 
-TitleSelection::Validator refusing(std::string reason) {
+TitleSelection::Validator refusing(const std::string& reason) {
     return [reason](const std::filesystem::path&) {
         return reason;
     };
@@ -100,7 +100,8 @@ void aTitleThatStoppedWorkingIsForgottenOutLoud() {
 void anEmptyRecordIsAFailureAndNotAnAnswer() {
     std::filesystem::path directory = freshConfigDirectory();
     TitleSelection selection(directory, accepting());
-    std::ofstream(selection.recordPath(), std::ios::trunc);
+    std::ofstream emptied(selection.recordPath(), std::ios::trunc);
+    emptied.close();
     check::isTrue(selection.remembered().empty(), "an empty record remembers nothing");
     check::isTrue(selection.lastError().find("is empty") != std::string::npos,
                   "and is reported as a record that could not be read");
@@ -108,13 +109,19 @@ void anEmptyRecordIsAFailureAndNotAnAnswer() {
 
 void aTitleIdIsSixteenHexDigits() {
     std::optional<TitleIdentity> lower = TitleIdentity::parse("0005000010143500");
-    check::isTrue(lower.has_value(), "an ID as it is written is read");
-    check::equal(lower->id(), uint64_t{0x0005000010143500}, "as the number it names");
-    check::equal(TitleIdentity::parse("0005000010143AbC")->id(), uint64_t{0x0005000010143abc},
-                 "in either case");
+    std::optional<TitleIdentity> mixed = TitleIdentity::parse("0005000010143AbC");
+    const TitleIdentity* lowerId = check::valueOf(lower, "an ID as it is written is read");
+    const TitleIdentity* mixedId = check::valueOf(mixed, "in either case");
+    if (lowerId == nullptr || mixedId == nullptr) {
+        return;
+    }
+    check::equal(lowerId->id(), uint64_t{0x0005000010143500}, "as the number it names");
+    check::equal(mixedId->id(), uint64_t{0x0005000010143abc}, "whatever the case of its digits");
     check::isTrue(!TitleIdentity::parse("000500001014350").has_value(), "fifteen digits are not");
     check::isTrue(!TitleIdentity::parse("0x05000010143500").has_value(), "nor a prefixed one");
     check::isTrue(!TitleIdentity::parse("000500001014350g").has_value(), "nor one not in hex");
+    check::isTrue(!TitleIdentity::parse("-005000010143500").has_value(), "nor a signed one");
+    check::isTrue(!TitleIdentity::parse(" 005000010143500").has_value(), "nor a padded one");
     check::isTrue(!TitleIdentity::parse("").has_value(), "nor nothing");
 }
 

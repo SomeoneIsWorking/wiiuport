@@ -26,7 +26,7 @@ namespace wiiuport::interp {
 //
 // Held inline, so a frame of keys is built without an allocation per draw.
 struct AssemblyKey {
-    static constexpr size_t kMaxSourceWords = LatteFrameHooks::kMaxUniformBlockSources * 2;
+    static constexpr size_t kMaxSourceWords = size_t{LatteFrameHooks::kMaxUniformBlockSources} * 2;
     // Stands in for the address of a block no frame two back sourced.
     static constexpr uint32_t kFreshBlock = UINT32_MAX;
 

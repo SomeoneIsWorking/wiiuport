@@ -145,7 +145,7 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
     // it for every draw would cost more than planning one.
     static constexpr size_t kWakeBatch = 32;
 
-    void planHandedOver(std::stop_token stop);
+    void planHandedOver(const std::stop_token& stop);
     // Returns once every draw handed over has been planned.
     void waitUntilPlanned();
     // Adds the frame just planned to a requested census.

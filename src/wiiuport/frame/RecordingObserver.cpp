@@ -1,6 +1,7 @@
 #include "wiiuport/frame/RecordingObserver.h"
 
 #include <algorithm>
+#include <span>
 #include <utility>
 
 namespace wiiuport::frame {
@@ -50,7 +51,8 @@ void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly
     recorded.writesColour = assembly.writesColour;
     std::span<const uint32_t> sources = sourceWordsOf(assembly);
     recorded.blockSources.assign(sources.begin(), sources.end());
-    recorded.data.assign(assembly.data, assembly.data + assembly.sizeInBytes / sizeof(float));
+    std::span<const float> values(assembly.data, assembly.sizeInBytes / sizeof(float));
+    recorded.data.assign(values.begin(), values.end());
     if (!m_inFlight.addUniformAssembly(recorded)) {
         return;
     }

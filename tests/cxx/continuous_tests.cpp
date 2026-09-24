@@ -89,7 +89,9 @@ using Clock = ContinuousInterpolator::Clock;
 
 // The fake world the interpolator runs against: a clock that moves a fixed
 // step each time it is read, and submissions counted instead of executed.
-Clock::time_point g_now{};
+// Held as a duration since the clock's epoch: a duration's construction
+// cannot throw, and the fake reads it as a time point.
+Clock::duration g_sinceEpoch{};
 constexpr std::chrono::milliseconds kReadStep{2};
 std::vector<std::string> g_sequence;
 bool g_presentAccepted = true;
@@ -98,8 +100,8 @@ bool g_captureAccepted = true;
 LatteFrameHooks::GuestStateRestore g_restore{};
 
 Clock::time_point fakeNow() {
-    g_now += kReadStep;
-    return g_now;
+    g_sinceEpoch += kReadStep;
+    return Clock::time_point(g_sinceEpoch);
 }
 
 bool fakeSubmitList(const void*, uint32_t) {
@@ -126,7 +128,7 @@ LatteFrameHooks::GuestStateRestore fakeRestore() {
     return g_restore;
 }
 
-bool fakeCapture(LatteFrameHooks::CaptureCallback) {
+bool fakeCapture(LatteFrameHooks::CaptureCallback&&) {
     g_sequence.emplace_back("capture");
     return g_captureAccepted;
 }
@@ -136,7 +138,7 @@ LatteFrameHooks::PresentArguments tvScanBuffer() {
 }
 
 void resetFakes() {
-    g_now = {};
+    g_sinceEpoch = {};
     g_sequence.clear();
     g_presentAccepted = true;
     g_captureAccepted = true;
@@ -189,7 +191,7 @@ struct Rig {
         tracker.onFrameRecorded(frame);
         objects.onFrameRecorded(frame);
         continuous.onFrameRecorded(frame);
-        g_now += milliseconds(33);
+        g_sinceEpoch += milliseconds(33);
     }
 };
 

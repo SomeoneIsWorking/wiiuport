@@ -50,7 +50,7 @@ class FrameRecording {
     // A frame that grows past this is refused rather than recorded in part: a
     // partial frame replays as a partial image, which is harder to see than a
     // missing one. The measured run needed well under a megabyte a frame.
-    static constexpr size_t kDefaultByteBudget = 64u * 1024u * 1024u;
+    static constexpr size_t kDefaultByteBudget = size_t{64} * 1024 * 1024;
 
     explicit FrameRecording(size_t byteBudget = kDefaultByteBudget);
 

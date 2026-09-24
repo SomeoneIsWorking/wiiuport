@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 #include <limits>
 
 namespace wiiuport::interp {
@@ -23,7 +22,7 @@ bool sameOutsideFrameState(std::span<const float> a, std::span<const float> b,
         return false;
     }
     for (size_t index = 0; index < a.size(); ++index) {
-        if (!state.at(index) && std::memcmp(&a[index], &b[index], sizeof(float)) != 0) {
+        if (!state.at(index) && !sameBits(a[index], b[index])) {
             return false;
         }
     }
@@ -80,8 +79,16 @@ double squaredStep(std::span<const float> from, std::span<const float> to,
 // in that are numbers in all three. This is what an in-between frame
 // promises, so it is checked on the values drawn rather than assumed from the
 // partner check; a value it did not move in is drawn at N by design.
-bool liesBetween(std::span<const float> before, std::span<const float> oneBack,
-                 std::span<const float> blended, std::span<const float> latest) {
+// One object's values at N-2, N-1 and N, and those drawn between N-1 and N.
+struct BlendedObject {
+    std::span<const float> before;
+    std::span<const float> oneBack;
+    std::span<const float> blended;
+    std::span<const float> latest;
+};
+
+bool liesBetween(const BlendedObject& object) {
+    auto [before, oneBack, blended, latest] = object;
     double apart = 0.0;
     double fromOneBack = 0.0;
     double fromLatest = 0.0;
@@ -100,18 +107,6 @@ bool liesBetween(std::span<const float> before, std::span<const float> oneBack,
         fromLatest += vb * vb;
     }
     return fromOneBack < apart && fromLatest < apart;
-}
-
-// Whether an object's last failed search of one kind was too recent to run
-// it again.
-bool waiting(const std::unordered_map<uint64_t, uint64_t>& againAt, uint64_t hash,
-             uint64_t framesPlanned) {
-    auto failed = againAt.find(hash);
-    return failed != againAt.end() && failed->second > framesPlanned;
-}
-
-bool equalValues(std::span<const float> l, std::span<const float> r) {
-    return l.size() == r.size() && std::memcmp(l.data(), r.data(), l.size_bytes()) == 0;
 }
 
 } // namespace
@@ -479,17 +474,17 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
     if (earlier.has_value()) {
         if (std::optional<size_t> derived = derivedPartner(key, twoBack.values(*earlier), after)) {
             ++m_partnersDerived;
-            if (equalValues(between.values(*derived), after)) {
+            if (sameBits(between.values(*derived), after)) {
                 return Found{*earlier, std::nullopt};
             }
-            return Found{*earlier, *derived};
+            return Found{.earlier = *earlier, .partner = derived};
         }
     }
     uint64_t hash = key.hash();
     // By blocks and by values fail for different objects -- a new one has no
     // blocks to search by -- so each waits on its own failures.
     if (earlier.has_value()) {
-        if (waiting(m_searchAgainAt, hash, m_framesPlanned)) {
+        if (waiting(m_searchAgainAt, hash)) {
             ++m_searchesDeferred;
         } else {
             ++m_partnersSearched;
@@ -499,19 +494,19 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
                                                           frameState(key.shader))) {
                 m_searchAgainAt.erase(hash);
                 learn(key, between.key(*found));
-                return Found{*earlier, *found, true};
+                return Found{.earlier = *earlier, .partner = found, .byValues = true};
             }
             // Its draw in N-1 is where it stood in N-2 when it stood still
             // until N-1, off its midpoint.
             if (std::optional<size_t> stood = standingAsBefore(key, before, after)) {
                 m_searchAgainAt.erase(hash);
                 learn(key, between.key(*stood));
-                return Found{*earlier, *stood, true};
+                return Found{.earlier = *earlier, .partner = stood, .byValues = true};
             }
             m_searchAgainAt.insert_or_assign(hash, m_framesPlanned + kSearchRetryInterval);
         }
     }
-    if (waiting(m_reidentifyAgainAt, hash, m_framesPlanned)) {
+    if (waiting(m_reidentifyAgainAt, hash)) {
         ++m_searchesDeferred;
         return std::nullopt;
     }
@@ -522,18 +517,24 @@ std::optional<ObjectPlanner::Found> ObjectPlanner::findPartner(const AssemblyKey
     if (nearest.has_value() && nearest != earlier) {
         ++m_partnersSearched;
         std::span<const float> before = twoBack.values(*nearest);
-        if (equalValues(before, after)) {
+        if (sameBits(before, after)) {
             return Found{*nearest, std::nullopt};
         }
         std::optional<size_t> found = searchPartner(key, before, after);
         if (found.has_value() &&
             landsInEveryRegister(before, after, between.values(*found), frameState(key.shader))) {
             ++m_partnersReidentified;
-            return Found{*nearest, *found, true};
+            return Found{.earlier = *nearest, .partner = found, .byValues = true};
         }
     }
     m_reidentifyAgainAt.insert_or_assign(hash, m_framesPlanned + kSearchRetryInterval);
     return std::nullopt;
+}
+
+bool ObjectPlanner::waiting(const std::unordered_map<uint64_t, uint64_t>& againAt,
+                            uint64_t hash) const {
+    auto failed = againAt.find(hash);
+    return failed != againAt.end() && failed->second > m_framesPlanned;
 }
 
 ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
@@ -546,7 +547,7 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     if (earlier.has_value() && twoBack.values(*earlier).size() != after.size()) {
         earlier.reset();
     }
-    if (earlier.has_value() && equalValues(twoBack.values(*earlier), after)) {
+    if (earlier.has_value() && sameBits(twoBack.values(*earlier), after)) {
         m_buildingPlan.earlierAt[entry] = static_cast<uint32_t>(*earlier);
         // Standing still in its uniforms, it may yet move in the vertices the
         // title poses for it: its draw a frame before is named for that.
@@ -580,8 +581,8 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
         // The same at N-2 and N, whatever it was at N-1: not moving, or
         // flipping every frame as the title's double buffering does -- a
         // parity flag averaged is a value the title never wrote.
-        if (std::memcmp(&before[index], &b, sizeof(float)) == 0) {
-            if (std::memcmp(&a, &b, sizeof(float)) != 0) {
+        if (sameBits(before[index], b)) {
+            if (!sameBits(a, b)) {
                 ++alternating;
             }
             floats.push_back(b);
@@ -598,7 +599,7 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
         floats.push_back(b);
     }
     std::span<const float> blended(floats.data() + start, after.size());
-    if (!liesBetween(before, oneBack, blended, after)) {
+    if (!liesBetween({.before = before, .oneBack = oneBack, .blended = blended, .latest = after})) {
         floats.resize(start);
         return Outcome::Outside;
     }

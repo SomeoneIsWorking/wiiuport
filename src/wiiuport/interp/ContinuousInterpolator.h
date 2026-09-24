@@ -54,7 +54,7 @@ class ContinuousInterpolator final : public frame::FrameEndListener {
     // leads into.
     static constexpr float kBlendPoint = 0.5f;
 
-    enum class Skip : uint32_t {
+    enum class Skip : uint8_t {
         Disabled,
         // A one-shot replay or null diff owns the next frame boundary.
         OneShotInFlight,
@@ -143,7 +143,7 @@ class ContinuousInterpolator final : public frame::FrameEndListener {
     // Where an interpolated tick's time goes, summed over every interpolated
     // tick. The title's own frame waits on all of it, so a tick rate that
     // collapses is attributed to a phase here rather than guessed at.
-    enum class Phase : uint32_t {
+    enum class Phase : uint8_t {
         BlendedReplay,
         Present,
         Restore,

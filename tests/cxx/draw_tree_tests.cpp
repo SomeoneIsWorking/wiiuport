@@ -19,8 +19,6 @@ using wiiuport::interp::isNumber;
 
 namespace {
 
-// Fixed, so a failure is the same failure on every run.
-constexpr uint32_t kSeed = 0x5e7a11;
 constexpr uint32_t kGroups = 24;
 constexpr uint32_t kMostDraws = 400;
 constexpr uint32_t kQueriesPerGroup = 40;
@@ -174,11 +172,12 @@ bool agrees(const Frame& frame, const std::vector<uint32_t>& group, const DrawTr
            std::abs(nearest.squared - *expected) <= kSumRounding * *expected;
 }
 
-void theTreeFindsWhatComparingEveryDrawFinds() {
-    std::mt19937 random(kSeed);
+void theTreeFindsWhatComparingEveryDrawFinds(uint32_t seed) {
+    std::mt19937 random(seed);
     Frame frame = makeFrame(random);
     DrawTree tree;
     std::vector<uint32_t> handles;
+    handles.reserve(frame.groups.size());
     for (const std::vector<uint32_t>& group : frame.groups) {
         handles.push_back(tree.build(group, frame.values()));
     }
@@ -240,8 +239,8 @@ Frame spreadGroup(std::mt19937& random, uint32_t count, uint32_t copies) {
     return frame;
 }
 
-void aHundredCopiesOfOneDrawAreComparedOnce() {
-    std::mt19937 random(kSeed + 2);
+void aHundredCopiesOfOneDrawAreComparedOnce(uint32_t seed) {
+    std::mt19937 random(seed + 2);
     Frame frame = spreadGroup(random, 1, 100);
     DrawTree tree;
     uint32_t handle = tree.build(frame.groups[0], frame.values());
@@ -252,8 +251,8 @@ void aHundredCopiesOfOneDrawAreComparedOnce() {
     check::equal(nearest.compared, uint64_t{1}, "comparing one of them");
 }
 
-void aPointFarOutsideTheGroupComparesFewDraws() {
-    std::mt19937 random(kSeed + 3);
+void aPointFarOutsideTheGroupComparesFewDraws(uint32_t seed) {
+    std::mt19937 random(seed + 3);
     Frame frame = spreadGroup(random, kMostDraws, 0);
     DrawTree tree;
     uint32_t handle = tree.build(frame.groups[0], frame.values());
@@ -268,8 +267,8 @@ void aPointFarOutsideTheGroupComparesFewDraws() {
                   "comparing few: " + std::to_string(nearest.compared));
 }
 
-void aViewEveryDrawSharesDoesNotHideTheNearest() {
-    std::mt19937 random(kSeed + 5);
+void aViewEveryDrawSharesDoesNotHideTheNearest(uint32_t seed) {
+    std::mt19937 random(seed + 5);
     Frame frame = spreadGroup(random, kMostDraws, 0);
     // The latter half of each draw's values is the view the shader is handed,
     // the same for every draw of the frame.
@@ -294,8 +293,8 @@ void aViewEveryDrawSharesDoesNotHideTheNearest() {
                   "comparing few: " + std::to_string(nearest.compared));
 }
 
-void aPointShorterThanEveryDrawFindsNone() {
-    std::mt19937 random(kSeed + 4);
+void aPointShorterThanEveryDrawFindsNone(uint32_t seed) {
+    std::mt19937 random(seed + 4);
     Frame frame = spreadGroup(random, kLeafDraws * 4, 0);
     DrawTree tree;
     uint32_t handle = tree.build(frame.groups[0], frame.values());
@@ -305,8 +304,8 @@ void aPointShorterThanEveryDrawFindsNone() {
                   "no draw has as many values as the point");
 }
 
-void aRebuiltTreeForgetsTheFrameBefore() {
-    std::mt19937 random(kSeed + 1);
+void aRebuiltTreeForgetsTheFrameBefore(uint32_t seed) {
+    std::mt19937 random(seed + 1);
     Frame first = makeFrame(random);
     Frame second = makeFrame(random);
     DrawTree tree;
@@ -325,13 +324,13 @@ void aRebuiltTreeForgetsTheFrameBefore() {
 
 namespace wiiuport::tests {
 
-void runDrawTreeTests() {
-    theTreeFindsWhatComparingEveryDrawFinds();
-    aHundredCopiesOfOneDrawAreComparedOnce();
-    aPointFarOutsideTheGroupComparesFewDraws();
-    aViewEveryDrawSharesDoesNotHideTheNearest();
-    aPointShorterThanEveryDrawFindsNone();
-    aRebuiltTreeForgetsTheFrameBefore();
+void runDrawTreeTests(uint32_t seed) {
+    theTreeFindsWhatComparingEveryDrawFinds(seed);
+    aHundredCopiesOfOneDrawAreComparedOnce(seed);
+    aPointFarOutsideTheGroupComparesFewDraws(seed);
+    aViewEveryDrawSharesDoesNotHideTheNearest(seed);
+    aPointShorterThanEveryDrawFindsNone(seed);
+    aRebuiltTreeForgetsTheFrameBefore(seed);
 }
 
 } // namespace wiiuport::tests

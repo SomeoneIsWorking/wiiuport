@@ -38,7 +38,7 @@ bool recordPresent(const LatteFrameHooks::PresentArguments& present) {
 std::vector<size_t> g_armedSlots;
 size_t g_nextSlot = 0;
 
-bool recordArmedSlot(LatteFrameHooks::CaptureCallback) {
+bool recordArmedSlot(LatteFrameHooks::CaptureCallback&&) {
     g_armedSlots.push_back(g_nextSlot);
     return true;
 }
@@ -47,7 +47,7 @@ bool recordArmedSlot(LatteFrameHooks::CaptureCallback) {
 // two detached renderer threads can.
 std::vector<LatteFrameHooks::CaptureCallback> g_heldCallbacks;
 
-bool holdCallback(LatteFrameHooks::CaptureCallback callback) {
+bool holdCallback(LatteFrameHooks::CaptureCallback&& callback) {
     g_heldCallbacks.push_back(std::move(callback));
     return true;
 }
@@ -333,10 +333,11 @@ void anOutOfRangeSlotIsRefusedNotClamped() {
 }
 
 // The pacing tests' clock: moved by hand, so every interval is exact.
-PresentPacing::Clock::time_point g_displayedAt{};
+// A duration since the clock's epoch, whose construction cannot throw.
+PresentPacing::Clock::duration g_displayedSinceEpoch{};
 
 PresentPacing::Clock::time_point displayedAt() {
-    return g_displayedAt;
+    return PresentPacing::Clock::time_point(g_displayedSinceEpoch);
 }
 
 using std::chrono::microseconds;
@@ -345,9 +346,9 @@ using std::chrono::milliseconds;
 // One interpolated tick as it should reach the display: the runtime's frame
 // `first` after the title's last one, then the title's `second` after that.
 void displayTick(PresentPacing& pacing, milliseconds first, milliseconds second) {
-    g_displayedAt += first;
+    g_displayedSinceEpoch += first;
     pacing.onDisplayed(true);
-    g_displayedAt += second;
+    g_displayedSinceEpoch += second;
     pacing.onDisplayed(false);
 }
 

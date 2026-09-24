@@ -7,7 +7,7 @@
 namespace wiiuport::interp {
 
 ObjectBlend::ObjectBlend(float t)
-    : m_planner(t), m_thread([this](std::stop_token stop) {
+    : m_planner(t), m_thread([this](const std::stop_token& stop) {
           planHandedOver(stop);
       }) {
 }
@@ -76,7 +76,7 @@ void ObjectBlend::waitUntilPlanned() {
     });
 }
 
-void ObjectBlend::planHandedOver(std::stop_token stop) {
+void ObjectBlend::planHandedOver(const std::stop_token& stop) {
     std::unique_lock lock(m_mutex);
     while (m_handedOver.wait(lock, stop, [this] {
         return m_pendingCount > 0;

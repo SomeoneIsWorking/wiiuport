@@ -224,8 +224,14 @@ namespace {
 
 // Whether the mesh stepped from N-1 to N no further than from N-2 to N-1,
 // over the floats it moved in from N-2 to N.
-bool steppedNoFurther(const VertexLayout& layout, std::span<const std::byte> twoBack,
-                      std::span<const std::byte> before, std::span<const std::byte> after) {
+struct MeshFrames {
+    std::span<const std::byte> twoBack;
+    std::span<const std::byte> before;
+    std::span<const std::byte> after;
+};
+
+bool steppedNoFurther(const VertexLayout& layout, const MeshFrames& frames) {
+    auto [twoBack, before, after] = frames;
     double toBefore = 0.0;
     double toAfter = 0.0;
     forEachFloat(layout, [&](size_t word, Endian endian) {
@@ -273,7 +279,7 @@ VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::
         // leaps further was set back to the start of its run -- a band of
         // surf -- and half way is where it never was.
         if (identity != PartnerIdentity::ByBlocks ||
-            !steppedNoFurther(layout, twoBack, before, after)) {
+            !steppedNoFurther(layout, {.twoBack = twoBack, .before = before, .after = after})) {
             return VertexOutcome::Unverified;
         }
     }
@@ -285,7 +291,7 @@ VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::
         // Only what moved from N-2 to N: a value N-2 and N agree on is
         // flipping, not moving, whatever N-1 holds.
         if (outside || !Midpoint::movedIn(readFloat(twoBack, word, endian), b) || !isNumber(a) ||
-            std::bit_cast<uint32_t>(a) == std::bit_cast<uint32_t>(b)) {
+            sameBits(a, b)) {
             return;
         }
         float value = a + ((b - a) * t);
@@ -489,12 +495,13 @@ void VertexBlend::startBlending() {
     size_t bytes = 0;
     for (size_t index = 0; index < m_latest.draws().size(); ++index) {
         const Draw& drawn = m_latest.draws()[index];
-        if (!drawn.vertexEntry.has_value() || !m_meshJobs[drawn.mesh].has_value()) {
+        const std::optional<Job>& meshJob = m_meshJobs[drawn.mesh];
+        if (!drawn.vertexEntry.has_value() || !meshJob.has_value()) {
             continue;
         }
         std::optional<size_t>& slot = m_meshSlots[drawn.mesh];
         if (!slot.has_value()) {
-            const Job& job = *m_meshJobs[drawn.mesh];
+            const Job& job = *meshJob;
             slot = m_pairSlots.size();
             m_pairSlots.push_back(PairSlot{job, bytes});
             for (const VertexLayout::Buffer& buffer : job.layout->buffers) {
@@ -512,13 +519,17 @@ void VertexBlend::startBlending() {
 
 std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index) const {
     const Draw& drawn = m_latest.draws()[index];
+    if (!drawn.vertexEntry.has_value()) {
+        return VertexOutcome::NoPartner;
+    }
+    size_t entry = *drawn.vertexEntry;
     const ObjectPlanner& planner = m_objects.planner();
-    std::optional<size_t> partnerEntry = planner.partnerOf(*drawn.vertexEntry);
+    std::optional<size_t> partnerEntry = planner.partnerOf(entry);
     if (!partnerEntry.has_value()) {
         return VertexOutcome::NoPartner;
     }
     // A partner is planned only with the object's entry two frames back.
-    std::optional<size_t> earlierEntry = planner.earlierOf(*drawn.vertexEntry);
+    std::optional<size_t> earlierEntry = planner.earlierOf(entry);
     std::optional<size_t> partner = drawOf(m_previous, *partnerEntry, drawn);
     std::optional<size_t> earlier;
     if (earlierEntry.has_value()) {
@@ -528,9 +539,9 @@ std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index
         return VertexOutcome::ShapeDiffers;
     }
     PartnerIdentity identity = PartnerIdentity::ByBlocks;
-    if (planner.latest().sharesKey(*drawn.vertexEntry)) {
+    if (planner.latest().sharesKey(entry)) {
         identity = PartnerIdentity::ByPlace;
-    } else if (planner.partnerFoundByValues(*drawn.vertexEntry)) {
+    } else if (planner.partnerFoundByValues(entry)) {
         identity = PartnerIdentity::ByValues;
     }
     return Job{index, *partner, *earlier, identity, index, &drawn.layout};
