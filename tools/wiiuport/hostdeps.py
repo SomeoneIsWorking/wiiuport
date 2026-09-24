@@ -86,6 +86,16 @@ CEMU_REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement("C++ compiler (clang)", ("clang",), ("clang",), executables=("clang", "clang++")),
     Requirement("CMake", ("cmake",), ("cmake",), executables=("cmake",)),
     Requirement("Ninja", ("ninja-build",), ("ninja-build",), executables=("ninja",)),
+    # The fork builds Release and RelWithDebInfo with link-time optimisation,
+    # and clang's LTO objects are LLVM bitcode that only LLVM's archiver can
+    # index. Ubuntu's clang package leaves it out; without it CMake writes
+    # CMAKE_C_COMPILER_AR-NOTFOUND into every static-library rule.
+    Requirement(
+        "LLVM archiver (clang link-time optimisation)",
+        ("llvm",),
+        ("llvm",),
+        executables=("llvm-ar", "llvm-ranlib"),
+    ),
     Requirement("nasm", ("nasm",), ("nasm",), executables=("nasm",)),
     Requirement("perl", ("perl-core",), ("perl",), executables=("perl",)),
     Requirement(
