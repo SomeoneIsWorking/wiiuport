@@ -43,6 +43,20 @@ Midpoint measure(std::span<const float> before, std::span<const float> after,
     return midpoint;
 }
 
+// The squared length of an object's step from `from` to `to`, over the
+// values it moved in outside frame state.
+double squaredStep(std::span<const float> from, std::span<const float> to,
+                   const FrameState& state) {
+    double squared = 0.0;
+    for (size_t index = 0; index < to.size(); ++index) {
+        if (!state.at(index) && Midpoint::movedIn(from[index], to[index])) {
+            double step = static_cast<double>(to[index]) - from[index];
+            squared += step * step;
+        }
+    }
+    return squared;
+}
+
 // Whether `blended` lies strictly between the object's two neighbours:
 // nearer each of them than they are to each other, over the values it moved
 // in that are numbers in all three. This is what an in-between frame
@@ -115,6 +129,7 @@ void ObjectPlanner::Plan::clear() {
     blendedAt.clear();
     partnerAt.clear();
     earlierAt.clear();
+    stepAt.clear();
     floats.clear();
     outcomeOf.clear();
     leftAtN.clear();
@@ -129,6 +144,7 @@ void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
     m_buildingPlan.blendedAt.push_back(kNotBlended);
     m_buildingPlan.partnerAt.push_back(kNotBlended);
     m_buildingPlan.earlierAt.push_back(kNotBlended);
+    m_buildingPlan.stepAt.push_back(std::numeric_limits<double>::quiet_NaN());
     // Planned only against two whole frames; before that the frame is kept
     // as history, and its entries read as unmatched in a plan never ready.
     Outcome outcome = Outcome::Unmatched;
@@ -326,7 +342,7 @@ std::optional<size_t> ObjectPlanner::derivedPartner(const AssemblyKey& key,
     // it stood: the wind's sway resting at the end of its swing, or stepped
     // every other frame.
     if (midpoint.stoodAtStart()) {
-        if (!seenMoving(key, *derived, before, after) ||
+        if (!seenMoving(key, *entry, before, after) ||
             !nearestWhereItWent(key.shader, after, *entry)) {
             return std::nullopt;
         }
@@ -346,33 +362,52 @@ std::optional<size_t> ObjectPlanner::derivedPartner(const AssemblyKey& key,
     return std::nullopt;
 }
 
-bool ObjectPlanner::seenMoving(const AssemblyKey& key, const AssemblyKey& oneBack,
-                               std::span<const float> stood, std::span<const float> after) const {
+bool ObjectPlanner::seenMoving(const AssemblyKey& key, size_t oneBack, std::span<const float> stood,
+                               std::span<const float> after) const {
+    // Standing proves nothing of who stood: blocks the title passes from one
+    // object to another stand a still one where the other was. Moving, the
+    // object is its own: stepped every other frame, it passes at N-1 through
+    // where it stood, half way from N-3 to N; or it came to stand, easing or
+    // at the end of a sway, passing at N-3 half way from N-4; or, rested
+    // longer, it sets off by no more than a step it was seen to take -- the
+    // wind's sway setting off again, where another object's draw stands a
+    // whole object away.
+    FrameState state = frameState(key.shader);
+    // NaN, no step seen, is never at least the step it sets off by.
+    if (oneBack < m_plan.stepAt.size() &&
+        squaredStep(stood, after, state) <= m_plan.stepAt[oneBack]) {
+        return true;
+    }
     if (m_framesHeld < m_frames.size()) {
         return false;
     }
     // N-3 drew with N-1's blocks, N-4 with N's.
-    std::optional<size_t> threeBack = m_frames[2].find(oneBack);
+    std::optional<size_t> threeBack = m_frames[2].find(m_frames[0].key(oneBack));
     std::optional<size_t> fourBack = m_frames[3].find(key);
     if (!threeBack.has_value() || !fourBack.has_value()) {
         return false;
     }
-    FrameState state = frameState(key.shader);
     std::span<const float> threeBackValues = m_frames[2].values(*threeBack);
     std::span<const float> fourBackValues = m_frames[3].values(*fourBack);
     if (threeBackValues.size() != after.size() || fourBackValues.size() != after.size()) {
         return false;
     }
-    // Standing proves nothing of who stood: blocks the title passes from one
-    // object to another stand a still one where the other was. Moving, the
-    // object is its own: stepped every other frame, it passes at N-1 through
-    // where it stood, half way from N-3 to N; or it came to stand, easing or
-    // at the end of a sway, passing at N-3 half way from N-4. One seen only
-    // standing -- resting since N-3, or another object -- is drawn at N.
     Midpoint stepping = measure(threeBackValues, after, stood, state);
     Midpoint arriving = measure(fourBackValues, stood, threeBackValues, state);
     return (stepping.moved() > 0 && stepping.landsOn()) ||
            (arriving.moved() > 0 && arriving.landsOn());
+}
+
+double ObjectPlanner::carriedStep(const AssemblyKey& key) const {
+    std::optional<AssemblyKey> derived = derivedKey(key);
+    if (!derived.has_value()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    std::optional<size_t> oneBack = m_frames[0].find(*derived);
+    if (!oneBack.has_value() || *oneBack >= m_plan.stepAt.size()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return m_plan.stepAt[*oneBack];
 }
 
 void ObjectPlanner::placeOutsideFrameState(std::span<const float> values, const FrameState& state) {
@@ -409,7 +444,7 @@ std::optional<size_t> ObjectPlanner::standingAsBefore(const AssemblyKey& key,
     m_partnerCandidates += stood.compared;
     if (!stood.entry.has_value() ||
         !sameOutsideFrameState(between.values(*stood.entry), before, state) ||
-        !seenMoving(key, between.key(*stood.entry), before, after) ||
+        !seenMoving(key, *stood.entry, before, after) ||
         !nearestWhereItWent(key.shader, after, *stood.entry)) {
         return std::nullopt;
     }
@@ -487,6 +522,7 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     const AssemblyKey& key = latest.key(entry);
     std::span<const float> after = latest.values(entry);
     std::optional<size_t> earlier = twoBack.find(key);
+    m_buildingPlan.stepAt[entry] = carriedStep(key);
     if (earlier.has_value() && twoBack.values(*earlier).size() != after.size()) {
         earlier.reset();
     }
@@ -550,6 +586,7 @@ ObjectPlanner::Outcome ObjectPlanner::plan(size_t entry) {
     m_valuesAlternating += alternating;
     m_buildingPlan.blendedAt[entry] = static_cast<uint32_t>(start);
     m_buildingPlan.partnerAt[entry] = static_cast<uint32_t>(*found->partner);
+    m_buildingPlan.stepAt[entry] = squaredStep(oneBack, after, frameState(key.shader));
     return Outcome::Blended;
 }
 

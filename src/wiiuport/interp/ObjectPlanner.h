@@ -269,6 +269,11 @@ class ObjectPlanner {
         // The object's entry in N-2, by entry, blended, held or unverified;
         // kNotBlended where none is known.
         std::vector<uint32_t> earlierAt;
+        // The squared length of the last step the object was seen to take
+        // in a frame, outside frame state, by entry: from its partner when
+        // blended, else carried from its draw in N-1 named by its blocks;
+        // NaN where none was seen.
+        std::vector<double> stepAt;
         std::vector<float> floats;
         // What each entry came to, by entry.
         std::vector<Outcome> outcomeOf;
@@ -302,10 +307,14 @@ class ObjectPlanner {
     // The point at `values`, frame state left out.
     void placeOutsideFrameState(std::span<const float> values, const FrameState& state);
     // Whether the object keyed `key`, standing in N-2 and N-1 as `stood`
-    // (its draw in N-1 keyed `oneBack`) and drawn at N as `after`, was seen
-    // moving by N-4: its earlier draws pass through where they stood.
-    bool seenMoving(const AssemblyKey& key, const AssemblyKey& oneBack,
-                    std::span<const float> stood, std::span<const float> after) const;
+    // (its draw in N-1 the entry `oneBack`) and drawn at N as `after`, was
+    // seen moving: its draws back to N-4 pass through where they stood, or
+    // it sets off by no more than a step it was seen to take.
+    bool seenMoving(const AssemblyKey& key, size_t oneBack, std::span<const float> stood,
+                    std::span<const float> after) const;
+    // The last step `plan` saw the object keyed `key` take, carried from its
+    // draw in N-1; NaN where none was seen.
+    double carriedStep(const AssemblyKey& key) const;
 
     // An object's draws in N-2 and N-1: where it stood two frames back, and
     // its partner -- none when it stood exactly where it stands in N.

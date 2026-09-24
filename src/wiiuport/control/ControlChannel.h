@@ -153,13 +153,9 @@ class ControlChannel {
     // A non-negative count query parameter. Zero when present but not a
     // plain decimal number, so the caller's range check refuses it.
     static size_t requestedCount(const std::string& query, std::string_view name, size_t fallback);
-    // The hash a parameter names in 16 hex digits, none when it is absent;
-    // false when it names none.
     // Every `name` in the query; false when one is not a 16-digit hash.
     static bool requestedHashes(const std::string& query, std::string_view name,
                                 std::vector<uint64_t>& hashes);
-    static bool requestedHash(const std::string& query, std::string_view name,
-                              std::optional<uint64_t>& hash);
 
     // Applies one input request and returns the body describing what it did.
     // `accepted` is false when nothing in the query named a button or a

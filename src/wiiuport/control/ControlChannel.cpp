@@ -584,19 +584,6 @@ bool ControlChannel::requestedHashes(const std::string& query, std::string_view 
     return true;
 }
 
-bool ControlChannel::requestedHash(const std::string& query, std::string_view name,
-                                   std::optional<uint64_t>& hash) {
-    std::vector<uint64_t> hashes;
-    if (!requestedHashes(query, name, hashes)) {
-        return false;
-    }
-    hash.reset();
-    if (!hashes.empty()) {
-        hash = hashes.back();
-    }
-    return true;
-}
-
 size_t ControlChannel::requestedCount(const std::string& query, std::string_view name,
                                       size_t fallback) {
     std::string_view rest(query);
@@ -742,14 +729,14 @@ bool ControlChannel::start(uint16_t port) {
             // camera's always: objects=0 draws every object as the title did
             // (and so every vertex), vertices=0 only the vertices. A
             // maintainer's discriminator, not a setting.
-            // vertexShaderOff=<16 hex digits> draws the meshes one vertex
-            // shader reads as the title did, to name the draws a defect is.
-            // objectShaderOff=<16 hex digits>, repeated for several, does the
-            // same for the objects those shaders draw.
+            // vertexShaderOff=<16 hex digits>, repeated for several, draws
+            // the meshes those vertex shaders read as the title did, to name
+            // the draws a defect is; objectShaderOff does the same for the
+            // objects those shaders draw.
             if (request.method == "POST" && request.path() == "/blends") {
                 std::string query(request.query());
-                std::optional<uint64_t> excluded;
-                if (!requestedHash(query, "vertexShaderOff", excluded)) {
+                std::vector<uint64_t> excluded;
+                if (!requestedHashes(query, "vertexShaderOff", excluded)) {
                     return lucent::http::Response::text(
                         400, "Bad Request",
                         "vertexShaderOff must be a vertex shader's base hash, 16 hex digits.\n");
@@ -764,7 +751,7 @@ bool ControlChannel::start(uint16_t port) {
                 m_objects.setPlanning(m_continuous.enabled() &&
                                       requestedFlag(query, "objects", true));
                 m_vertices.setBlending(requestedFlag(query, "vertices", true));
-                m_vertices.exclude(excluded);
+                m_vertices.exclude(std::move(excluded));
                 return lucent::http::Response::json(200, "OK", interpolationJson());
             }
             // Frame pacing measured from here on, so a walk is not averaged
