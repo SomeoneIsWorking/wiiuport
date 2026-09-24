@@ -144,12 +144,13 @@ class ObjectPlanner {
         // N-1 and N: nearer each than they are to each other. An object that
         // moved less than a float can halve is one, and is drawn at N.
         Outside,
-        // A pixel stage's values, drawn at N: they shade rather than place.
-        // Among them is the look-up of the light's map, which holds the light
-        // multiplied into the camera, whose blend value by value is neither
-        // the light's nor the camera's. A draw into the map itself is planned
-        // as an object is, and holds the light at N (MapPassValues), so the
-        // map and its look-up hold one light.
+        // A pixel stage's values drawn at N: one shading a pass, or an
+        // object not blended (planPixelStage). Among them is the look-up of
+        // the light's map, which holds the light multiplied into the camera,
+        // whose blend value by value is neither the light's nor the camera's.
+        // A draw into the map itself is planned as an object is, and holds
+        // the light at N (MapPassValues), so the map and its look-up hold one
+        // light.
         Shading,
         Count
     };
@@ -318,6 +319,9 @@ class ObjectPlanner {
 
     // Plans the building frame's entry against N-1 and N-2.
     Outcome plan(size_t entry);
+    // A pixel stage's outcome: planned behind a blended vertex stage,
+    // Shading otherwise.
+    Outcome planPixelStage(size_t entry);
     // Held at N from its draw in N-2, with its partner in N-1 derived from
     // its blocks for the vertex blend.
     Outcome held(size_t entry, size_t earlier);

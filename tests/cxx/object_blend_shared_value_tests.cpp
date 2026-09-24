@@ -303,6 +303,28 @@ void aDrawIntoTheMapMovesWithItsObjectAndHoldsTheLight() {
     check::equal(blend.objects(Outcome::Held), uint64_t{1}, "as a still object is");
 }
 
+void aPixelStageShadingAMovingObjectMovesWithIt() {
+    // A walker whose colour fades as it walks, shaded by its own block; and
+    // a pass behind a vertex stage that moved nothing, whose pixel stage
+    // changed as the camera turned, drawn as the title drew it.
+    auto frame = [](float walker, float colour, float view) {
+        return std::vector<Draw>{
+            {kBlockA, {walker, 7.0f}},
+            {kOtherA, {colour, 0.5f}, kActorShader, 0, ObjectPlanner::kPixelStage},
+            {kTileA, {5.0f, 6.0f}, kPierShader},
+            {kTileB, {view, 0.25f}, kPierShader, 0, ObjectPlanner::kPixelStage}};
+    };
+    std::vector<Draw> latest = frame(2.0f, 0.4f, 12.0f);
+    ObjectBlend blend{kHalfway};
+    armAfter(blend, frame(0.0f, 0.2f, 10.0f), frame(1.0f, 0.3f, 11.0f), latest);
+    auto uploaded = replay(blend, latest);
+    check::equal(uploaded[0][0], 1.5f, "the walker is drawn half way");
+    check::equal(uploaded[1][0], std::lerp(0.3f, 0.4f, 0.5f),
+                 "and shaded half way through its fade");
+    check::isTrue(uploaded[3] == latest[3].values, "the pass's pixel stage as the title drew it");
+    check::equal(blend.objects(Outcome::Shading), uint64_t{1}, "which alone shades");
+}
+
 void withMapBlendingOffADrawIntoTheMapIsDrawnAsTheTitleDrewIt() {
     constexpr uint32_t kCascade = 0xf4003000;
     auto frame = [](float walker, float light) {
@@ -331,6 +353,7 @@ void runObjectBlendSharedValueTests() {
     aPassValueIsOneValueInEveryShaderThatReadsIt();
     aDrawIntoTheMapMovesWithItsObjectAndHoldsTheLight();
     withMapBlendingOffADrawIntoTheMapIsDrawnAsTheTitleDrewIt();
+    aPixelStageShadingAMovingObjectMovesWithIt();
     aMatrixEveryBlendedDrawChangedAlikeCarriesAnObjectDrawnAtN();
     aMatrixTheBlendedDrawsChangedEachTheirOwnWayIsNoCamera();
     aWindowSharedValuesAlreadyDrewIsLeftToThem();
