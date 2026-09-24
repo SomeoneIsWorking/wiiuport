@@ -166,7 +166,9 @@ void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
     // Planned only against two whole frames; before that the frame is kept
     // as history, and its entries read as unmatched in a plan never ready.
     Outcome outcome = Outcome::Unmatched;
-    if (assembly.stageIndex == kPixelStage || (!assembly.writesColour && !m_mapBlending)) {
+    if (assembly.stageIndex == kPixelStage) {
+        outcome = m_framesHeld >= 2 ? planPixelStage(entry) : Outcome::Shading;
+    } else if (!assembly.writesColour && !m_mapBlending) {
         outcome = Outcome::Shading;
     } else if (m_framesHeld >= 2 && !assembly.writesColour) {
         // Planned once the whole frame is in (planMaps): which of its values
@@ -178,6 +180,25 @@ void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
     }
     m_buildingPlan.outcomeOf.push_back(outcome);
     ++m_buildingPlan.outcomes[static_cast<size_t>(outcome)];
+}
+
+ObjectPlanner::Outcome ObjectPlanner::planPixelStage(size_t entry) {
+    // A pixel stage follows its draw's vertex stage. Behind a vertex stage
+    // that moved an object, it shades that object, and what it animates --
+    // a colour, where the camera stands for its lighting -- is the object's:
+    // it is planned as an object is, by its own blocks. Behind anything
+    // else it shades a pass, such as the look-up of the light's map, which
+    // holds the light multiplied into the camera and is drawn at N.
+    bool shadesABlendedObject = entry > 0 &&
+                                m_building.key(entry - 1).shader.stageIndex != kPixelStage &&
+                                m_buildingPlan.outcomeOf[entry - 1] == Outcome::Blended;
+    if (!shadesABlendedObject) {
+        return Outcome::Shading;
+    }
+    Outcome outcome = plan(entry);
+    // Not known as the object's own, it is drawn at N as it was: seeing it
+    // through the camera is for where an object stands, not how it shades.
+    return outcome == Outcome::Blended || outcome == Outcome::Held ? outcome : Outcome::Shading;
 }
 
 void ObjectPlanner::endFrame() {
