@@ -148,6 +148,9 @@ def main(argv: list[str] | None = None) -> int:
                 # renderer's detached threads delivered them cannot matter.
                 title_frame = read_capture(args.port, slot=0)
                 replay_frame = read_capture(args.port, slot=1)
+                # The same recording replayed again over the first: what the
+                # renderer does not draw the same way twice.
+                second_replay = read_capture(args.port, slot=2)
             except ControlUnavailable as unavailable:
                 print(f"refused: {unavailable}", file=sys.stderr)
                 return 1
@@ -222,6 +225,11 @@ def main(argv: list[str] | None = None) -> int:
         f"title frame vs replay of the same frame: {differing} bytes differ "
         f"({100.0 * differing / total:.3f}%), largest {largest}, mean {mean:.4f}"
     )
+    again, again_largest, _ = compare(replay_frame, second_replay)
+    print(
+        f"the replay vs the same recording replayed again: {again} bytes differ, "
+        f"largest {again_largest}"
+    )
     print(f"wrote {out / 'title.png'} and {out / 'replay.png'}")
     print(f"process exit {exit_code}")
 
@@ -231,7 +239,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "not identical. Both images are one frame -- the title's present and the replay's "
         "present of the same recording -- so this difference is the replay, not the scene "
-        "advancing. The two PNGs show where."
+        "advancing. The two PNGs show where. Where two replays of the recording differ as "
+        "much, the renderer does not draw the same commands the same way twice."
     )
     return 1
 

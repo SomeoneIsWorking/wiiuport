@@ -47,6 +47,18 @@ void ReplayScheduler::onFrameShown(const FrameRecording& recording) {
         m_capture.armOnce(kReplaySlot);
         ++m_nullDiffsCompleted;
         m_presenter.presentNow();
+        // The same frame replayed again over the first replay: a pass that
+        // reads what its targets held before it draws finds the first
+        // replay's image, not the title's previous frame, so the two
+        // replays agree where the title's frame and the first disagree for
+        // that reason alone.
+        if (m_redrawPending) {
+            m_replayer.armOnce();
+            if (m_replayer.replayIfArmed(recording) > 0) {
+                m_capture.armOnce(kSecondReplaySlot);
+                m_presenter.presentNow();
+            }
+        }
         return;
     }
 }

@@ -27,6 +27,8 @@ class ReplayScheduler final : public FrameShownListener {
     // is the only code that knows which present is which.
     static constexpr size_t kTitleSlot = 0;
     static constexpr size_t kReplaySlot = 1;
+    // The same frame replayed a second time, over the first replay.
+    static constexpr size_t kSecondReplaySlot = 2;
 
     ReplayScheduler(FrameReplayer& replayer, FramePresenter& presenter, FrameCapture& capture);
 
