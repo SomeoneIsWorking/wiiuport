@@ -144,6 +144,7 @@ std::filesystem::path ShellHost::resolveTitle(const Options& options) {
     SetupScreen::Options screenOptions;
     screenOptions.stagingRoot = ActiveSettings::GetCachePath("setup");
     screenOptions.hidden = options.window.hidden;
+    screenOptions.productName = options.window.title;
     // The screen blocks this thread until the player answers, so an agent
     // asks the channel what it is waiting for rather than watching a window.
     Runtime::instance().control().setSetupStatus(&screen);

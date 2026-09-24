@@ -44,9 +44,11 @@ int main(int argc, char** argv) {
     wiiuport::tests::runCaptureTests();
     wiiuport::tests::runPresentTests();
     wiiuport::tests::runSelectionTests();
+    wiiuport::tests::runProductTests();
     wiiuport::tests::runSubstitutionTests();
     wiiuport::tests::runContinuousTests();
     wiiuport::tests::runObjectBlendTests();
+    wiiuport::tests::runObjectBlendSharedValueTests();
     wiiuport::tests::runVertexBlendTests();
     wiiuport::tests::runSlotPoolTests();
     wiiuport::tests::runDrawTreeTests(seed);

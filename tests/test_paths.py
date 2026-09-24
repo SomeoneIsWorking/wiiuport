@@ -76,6 +76,12 @@ def test_a_consumers_title_is_named_as_the_product_takes_it(tmp_path: Path) -> N
     ]
 
 
+def test_a_packaged_product_is_launched_in_place_of_the_checkouts_binary(tmp_path: Path) -> None:
+    layout = Layout(root=tmp_path)
+    package = tmp_path / "setsail-x86_64.AppImage"
+    assert layout.shell_command(product=package) == [str(package)]
+
+
 def test_no_save_named_is_a_legitimate_answer_and_a_wrong_one_is_not(tmp_path) -> None:
     """Absent means "start a new game"; a typo must not read as absent."""
     import pytest

@@ -34,6 +34,8 @@ class SetupScreen final : public control::SetupStatusSource {
         // bookkeeping. Nothing is copied into it: a disc image is adopted
         // where the player keeps it.
         std::filesystem::path stagingRoot;
+        // The product's name, on the screen's heading and its window.
+        std::string productName;
         bool hidden{false};
     };
 

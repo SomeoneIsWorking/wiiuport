@@ -13,9 +13,9 @@ namespace {
 // What the player is asked for, in their words. A Wii U title is one file the
 // player already has; there is no second requirement to tell it apart from,
 // so the requirement is nameless and the validator decides.
-setup_ui::Config buildConfig() {
+setup_ui::Config buildConfig(const std::string& productName) {
     setup_ui::Config config;
-    config.title = "wiiuport";
+    config.title = productName;
     config.message = "Choose your own copy of the game. It is remembered for next time.";
     config.hint = "A Wii U disc image: .wux, .wud, .iso or .wua, or a title's .rpx.";
     config.footer = "The file stays where it is. Nothing is copied.";
@@ -105,7 +105,7 @@ std::filesystem::path SetupScreen::run(const Options& options) {
 
     setup_ui::SessionOptions sessionOptions;
     sessionOptions.staging_root = options.stagingRoot;
-    setup_ui::Session session(buildConfig(), sessionOptions,
+    setup_ui::Session session(buildConfig(options.productName), sessionOptions,
                               [this](const std::vector<setup_ui::StagedFile>& staged) {
                                   if (staged.empty()) {
                                       return std::string("no file was chosen");
@@ -118,7 +118,7 @@ std::filesystem::path SetupScreen::run(const Options& options) {
                               });
 
     setup_ui::ViewOptions viewOptions;
-    viewOptions.window_title = "wiiuport";
+    viewOptions.window_title = options.productName;
     setup_ui::View view(session, viewOptions);
     if (!view.open()) {
         m_error = "the setup screen would not open: " + view.last_error();

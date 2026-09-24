@@ -54,7 +54,12 @@ class Layout:
         """
         return self.cemu_source / "bin" / "wiiuport"
 
-    def shell_command(self, game: Path | None = None, title_id: str | None = None) -> list[str]:
+    def shell_command(
+        self,
+        game: Path | None = None,
+        title_id: str | None = None,
+        product: Path | None = None,
+    ) -> list[str]:
         """How a maintainer tool launches the product.
 
         One owner, because the product's command line changed when it stopped
@@ -65,9 +70,10 @@ class Layout:
 
         No argument at all is the packaged product's own path: the remembered
         title, or the setup screen. ``title_id`` is what a consuming product
-        passes to have any other title refused.
+        passes to have any other title refused. ``product`` launches a packaged
+        product (a consumer's AppImage) in place of this checkout's binary.
         """
-        command = [str(self.shell_binary)]
+        command = [str(self.shell_binary if product is None else product)]
         if title_id is not None:
             command += ["--title-id", title_id]
         if game is not None:
