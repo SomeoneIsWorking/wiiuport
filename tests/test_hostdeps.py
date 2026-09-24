@@ -7,12 +7,18 @@ from wiiuport.hostdeps import (
     CEMU_REQUIREMENTS,
     MissingHostPackages,
     Requirement,
+    apt_packages,
     check,
     report,
 )
 
-ABSENT = Requirement("imaginary library", ("imaginary-devel",), files=("/nonexistent/imaginary.h",))
-PRESENT = Requirement("python interpreter", ("python3",), executables=("python3",))
+ABSENT = Requirement(
+    "imaginary library",
+    ("imaginary-devel",),
+    ("libimaginary-dev",),
+    files=("/nonexistent/imaginary.h",),
+)
+PRESENT = Requirement("python interpreter", ("python3",), ("python3",), executables=("python3",))
 
 
 def test_refuses_and_names_the_package_and_the_command() -> None:
@@ -21,6 +27,7 @@ def test_refuses_and_names_the_package_and_the_command() -> None:
     message = str(raised.value)
     assert "imaginary library" in message
     assert "sudo dnf install imaginary-devel" in message
+    assert "sudo apt install libimaginary-dev" in message
     assert "1 of 2" in message, "the refusal must state how many were probed"
 
 
@@ -77,3 +84,11 @@ def test_libraries_are_found_in_any_standard_directory() -> None:
     assert "/usr/lib64" in LIBRARY_DIRECTORIES
     assert "/usr/lib/x86_64-linux-gnu" in LIBRARY_DIRECTORIES
     assert find_library("definitely-not-a-real-library.a") is None
+
+
+def test_every_requirement_names_what_provides_it_on_both_distributions() -> None:
+    """The Ubuntu release container installs from the apt names, so one left
+    out is a release build that fails hours in, or links without it."""
+    for requirement in CEMU_REQUIREMENTS:
+        assert requirement.dnf_packages and requirement.apt_packages, requirement.name
+    assert "libasound2-dev" in apt_packages()

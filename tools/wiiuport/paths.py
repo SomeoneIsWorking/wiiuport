@@ -39,6 +39,21 @@ class Layout:
         return self.build / "cemu"
 
     @property
+    def release(self) -> Path:
+        """The release build's own tree, mounted in its container at ``/build``."""
+        return self.build / "release"
+
+    @property
+    def release_checkout(self) -> Path:
+        """A clean copy of the committed checkout the release runtime is built from."""
+        return self.release / "wiiuport"
+
+    @property
+    def release_bundle(self) -> Path:
+        """The staged runtime bundle a title project packages."""
+        return self.release / "bundle"
+
+    @property
     def shell_binary(self) -> Path:
         """Where the product's executable actually lands.
 

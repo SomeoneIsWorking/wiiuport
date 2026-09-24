@@ -139,7 +139,9 @@ def check_formatting(sources: list[Path], cwd: Path) -> tuple[bool, str]:
     bare subprocess call raised FileNotFoundError, which is a crash, not a
     check telling you what to install.
     """
-    formatter = Requirement("clang-format", ("clang-tools-extra",), executables=("clang-format",))
+    formatter = Requirement(
+        "clang-format", ("clang-tools-extra",), ("clang-format",), executables=("clang-format",)
+    )
     try:
         check((formatter,))
     except MissingHostPackages as missing:

@@ -181,7 +181,7 @@ def _resource_directory() -> str:
     compile database keeps one answer rather than a guessed path per clang
     release.
     """
-    compiler = Requirement("C++ compiler (clang)", ("clang",), executables=("clang++",))
+    compiler = Requirement("C++ compiler (clang)", ("clang",), ("clang",), executables=("clang++",))
     try:
         check((compiler,))
     except MissingHostPackages as missing:
