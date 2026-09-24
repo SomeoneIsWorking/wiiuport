@@ -7,6 +7,8 @@
 #include <lucent/config.h>
 #include <lucent/log.h>
 
+#include <thread>
+
 namespace wiiuport {
 namespace {
 
@@ -26,6 +28,10 @@ interp::ContinuousInterpolator::Clock::time_point steadyNow() {
     return interp::ContinuousInterpolator::Clock::now();
 }
 
+void waitFor(interp::ShadowCheck::Clock::duration duration) {
+    std::this_thread::sleep_for(duration);
+}
+
 bool submitToCommandProcessor(const void* data, uint32_t sizeInBytes) {
     return LatteFrameHooks::SubmitDisplayList(data, sizeInBytes);
 }
@@ -37,7 +43,15 @@ Runtime::Runtime()
       m_capture(&requestFrameCapture),
       m_guard(&LatteFrameHooks::GuardGuestState, &LatteFrameHooks::RestoreGuestState),
       m_continuous(m_viewTracker, m_substitution, m_objectBlend, m_replayer, m_presenter, m_guard,
-                   m_scheduler, m_tickProbes, &steadyNow) {
+                   m_scheduler, m_tickProbes, &steadyNow),
+      m_shadowCheck(
+          &LatteFrameHooks::MappedGuestMemory,
+          [this](const frame::FrameRecording& held) {
+              uint64_t before = m_continuous.framesInterpolated();
+              m_continuous.onFrameRecorded(held);
+              return m_continuous.framesInterpolated() > before;
+          },
+          &interp::ShadowCheck::Clock::now, &waitFor) {
     // Frame complete, before the guest's swap: everything that reads the
     // frame first, and the continuous interpolator last, because it needs the
     // view tracker and the object blend to have taken this frame in.

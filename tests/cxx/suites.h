@@ -27,5 +27,6 @@ void runDrawTreeTests(uint32_t seed);
 void runVertexBlendTests();
 void runSlotPoolTests();
 void runGateTests();
+void runShadowTests();
 
 } // namespace wiiuport::tests

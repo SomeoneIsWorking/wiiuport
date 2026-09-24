@@ -11,6 +11,7 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 using wiiuport::control::ControlChannel;
 using wiiuport::frame::FrameReplayer;
@@ -69,6 +70,18 @@ struct Fixture {
     wiiuport::frame::PresentPacing pacing{&neverNow};
     wiiuport::frame::PresentPacing scanOut{&neverNow};
     wiiuport::frame::FrameGate gate;
+    wiiuport::interp::ShadowCheck shadowCheck{
+        [] {
+            return std::vector<wiiuport::frame::GuestMemorySnapshot::Region>{};
+        },
+        [](const wiiuport::frame::FrameRecording&) {
+            return false;
+        },
+        [] {
+            return wiiuport::interp::ShadowCheck::Clock::time_point{};
+        },
+        [](wiiuport::interp::ShadowCheck::Clock::duration) {
+        }};
     ControlChannel channel{ControlChannel::Sources{
         .recorder = recorder,
         .replayer = replayer,
@@ -90,6 +103,7 @@ struct Fixture {
         .scanOut = scanOut,
         .vertexChanges = recorder.vertexChanges(),
         .gate = gate,
+        .shadowCheck = shadowCheck,
     }};
 };
 

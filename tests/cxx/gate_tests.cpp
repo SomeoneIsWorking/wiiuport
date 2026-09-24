@@ -88,6 +88,28 @@ void aReleasedGateNeverHoldsAgain() {
     check::isTrue(!gate.awaitHeld(std::chrono::milliseconds(20)), "and waiting for it fails");
 }
 
+void aHeldJobRunsOnTheHeldThreadAndOnlyThere() {
+    FrameGate gate;
+    FrameGate::HeldJob job = [](const FrameRecording&) {
+    };
+    check::isTrue(!gate.runWhileHeld(job), "a running gate refuses a held job");
+
+    gate.pause();
+    FrameThread frames(gate);
+    check::isTrue(gate.awaitHeld(std::chrono::seconds(5)), "the paused gate holds");
+    uint64_t heldAt = frames.ended();
+    std::thread::id ranOn;
+    bool ran = gate.runWhileHeld([&ranOn](const FrameRecording&) {
+        ranOn = std::this_thread::get_id();
+    });
+    check::isTrue(ran, "a held gate runs the job");
+    check::isTrue(ranOn != std::thread::id{} && ranOn != std::this_thread::get_id(),
+                  "on the thread it holds, not the caller's");
+    check::equal(frames.ended(), heldAt, "and no frame ends for it");
+    check::isTrue(gate.status().holding, "the gate still holds after the job");
+    gate.resume();
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -96,6 +118,7 @@ void runGateTests() {
     aRunningGateLetsEveryFrameThrough();
     aPausedGateHoldsAndStepsExactlyAsAsked();
     aReleasedGateNeverHoldsAgain();
+    aHeldJobRunsOnTheHeldThreadAndOnlyThere();
 }
 
 } // namespace wiiuport::tests

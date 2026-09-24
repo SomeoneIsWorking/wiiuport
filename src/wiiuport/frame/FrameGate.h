@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 
 namespace wiiuport::frame {
@@ -46,12 +47,23 @@ class FrameGate final : public FrameShownListener {
 
     Status status() const;
 
+    // Runs `job` on the rendering thread while it holds, given the frame it
+    // holds, and returns once the job has. Nothing else draws meanwhile. The
+    // guest's own threads are not stopped -- the title's CPU waits on its
+    // swap, but its audio and timers run on -- so a job measuring guest state
+    // must allow for what they change. False, without running it, when the
+    // gate is not holding.
+    using HeldJob = std::function<void(const FrameRecording&)>;
+    bool runWhileHeld(const HeldJob& job);
+
     void onFrameShown(const FrameRecording& recording) override;
 
   private:
     mutable std::mutex m_mutex;
     std::condition_variable m_changed;
     bool m_released{false};
+    // Set by runWhileHeld and cleared by the rendering thread once it ran.
+    const HeldJob* m_job{nullptr};
     Status m_status;
 };
 

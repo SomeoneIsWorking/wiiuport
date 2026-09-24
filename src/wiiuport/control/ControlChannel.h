@@ -18,6 +18,7 @@
 #include "wiiuport/interp/NeighbourCheck.h"
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/RestoreCheck.h"
+#include "wiiuport/interp/ShadowCheck.h"
 #include "wiiuport/interp/TransformSearch.h"
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
@@ -80,6 +81,7 @@ class ControlChannel {
         frame::PresentPacing& scanOut;
         frame::VertexChanges& vertexChanges;
         frame::FrameGate& gate;
+        interp::ShadowCheck& shadowCheck;
     };
 
     explicit ControlChannel(const Sources& sources);
@@ -191,6 +193,7 @@ class ControlChannel {
     frame::PresentPacing& m_scanOut;
     frame::VertexChanges& m_vertexChanges;
     frame::FrameGate& m_gate;
+    interp::ShadowCheck& m_shadowCheck;
     std::unique_ptr<lucent::http::Server> m_server;
 };
 

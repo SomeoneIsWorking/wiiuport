@@ -20,6 +20,7 @@
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/ReplayBlend.h"
 #include "wiiuport/interp/RestoreCheck.h"
+#include "wiiuport/interp/ShadowCheck.h"
 #include "wiiuport/interp/TransformSearch.h"
 #include "wiiuport/interp/TransformSubstitution.h"
 #include "wiiuport/interp/VertexBlend.h"
@@ -132,6 +133,7 @@ class Runtime {
     frame::PresentPacing m_scanOut{&frame::PresentPacing::Clock::now};
     input::InputDriver m_input;
     frame::FrameGate m_gate;
+    interp::ShadowCheck m_shadowCheck;
     control::ControlChannel m_control{control::ControlChannel::Sources{
         .recorder = m_recorder,
         .replayer = m_replayer,
@@ -153,6 +155,7 @@ class Runtime {
         .scanOut = m_scanOut,
         .vertexChanges = m_recorder.vertexChanges(),
         .gate = m_gate,
+        .shadowCheck = m_shadowCheck,
     }};
     bool m_hooksInstalled{false};
 };
