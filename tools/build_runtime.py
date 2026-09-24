@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from wiiuport.build import BuildConfig, BuildError, compile_all, configure
+from wiiuport.build import BuildConfig, BuildError, build_product, configure
 from wiiuport.paths import ProjectLayoutError, find_layout
 
 from wiiuport import hostdeps
@@ -52,12 +52,11 @@ def main(argv: list[str] | None = None) -> int:
     config = BuildConfig(layout=layout, build_type=args.build_type)
     logs = layout.activity_dir("build")
     try:
-        print(f"configuring {config.build_dir} (log: {logs / 'configure.log'})")
-        configure(config, log=logs / "configure.log")
         if args.configure_only:
+            print(f"configuring {config.build_dir} (log: {logs / 'configure.log'})")
+            configure(config, log=logs / "configure.log")
             return 0
-        print(f"compiling (log: {logs / 'compile.log'})")
-        binary = compile_all(config, log=logs / "compile.log")
+        binary = build_product(config, logs, lambda line: print(line, flush=True))
     except BuildError as error:
         print(f"\nrefused: {error}", file=sys.stderr)
         return 1

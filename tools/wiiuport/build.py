@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -224,6 +225,18 @@ def compile_all(config: BuildConfig, log: Path | None = None) -> Path:
             f"bin/ holds: {produced or '(nothing)'}"
         )
     return binary
+
+
+def build_product(config: BuildConfig, logs: Path, announce: Callable[[str], None] = print) -> Path:
+    """Configure and compile, naming each step's log first; the built executable.
+
+    The one sequence the maintainer's build tool and the launcher both run, so
+    launching never starts a build that differs from the one maintainers check.
+    """
+    announce(f"configuring {config.build_dir} (log: {logs / 'configure.log'})")
+    configure(config, log=logs / "configure.log")
+    announce(f"compiling (log: {logs / 'compile.log'})")
+    return compile_all(config, log=logs / "compile.log")
 
 
 def _run(command: list[str], *, log: Path | None, what: str) -> None:
