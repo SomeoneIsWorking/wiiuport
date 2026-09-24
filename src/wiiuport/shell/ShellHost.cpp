@@ -28,24 +28,11 @@ namespace {
 // the core alone between them.
 constexpr std::chrono::milliseconds kEventPollInterval{4};
 
-// What makes a file a title this system can mount. One owner, because the
-// setup screen and the launch path must agree: a file the screen accepted and
-// the launcher then refused would be a dead end the player cannot escape.
-std::string describeTitleProblem(const std::filesystem::path& path) {
-    if (!std::filesystem::is_regular_file(path)) {
-        return path.string() + " is not a file";
-    }
-    TitleInfo title(path);
-    if (!title.IsValid()) {
-        return path.string() + " is not a title this system can mount";
-    }
-    return {};
-}
-
 } // namespace
 
 int ShellHost::run(const Options& options) {
     m_executable = options.executable;
+    m_expectedTitle = options.expectedTitle;
     if (!bringUpSystem()) {
         lucent::error("shell", "{}", m_failure);
         return 1;
@@ -117,8 +104,28 @@ bool ShellHost::bringUpSystem() {
     return true;
 }
 
+// What makes a file a title to run. One owner, because the setup screen and
+// the launch path must agree: a file the screen accepted and the launcher then
+// refused would be a dead end the player cannot escape.
+std::string ShellHost::titleProblem(const std::filesystem::path& path) const {
+    if (!std::filesystem::is_regular_file(path)) {
+        return path.string() + " is not a file";
+    }
+    TitleInfo title(path);
+    if (!title.IsValid()) {
+        return path.string() + " is not a title this system can mount";
+    }
+    if (m_expectedTitle.has_value()) {
+        return m_expectedTitle->refusal(title.GetAppTitleId(), title.GetMetaTitleName());
+    }
+    return {};
+}
+
 std::filesystem::path ShellHost::resolveTitle(const Options& options) {
-    TitleSelection selection(ActiveSettings::GetConfigPath(), describeTitleProblem);
+    TitleSelection selection(ActiveSettings::GetConfigPath(),
+                             [this](const std::filesystem::path& path) {
+                                 return titleProblem(path);
+                             });
     if (!options.title.empty()) {
         // An explicitly given title is still the player's answer, so it is
         // remembered; a refusal to keep it is reported but does not stop this
@@ -178,7 +185,7 @@ bool ShellHost::bringUpRenderer() {
 }
 
 bool ShellHost::launchTitle(const std::filesystem::path& path) {
-    std::string problem = describeTitleProblem(path);
+    std::string problem = titleProblem(path);
     if (!problem.empty()) {
         m_failure = problem;
         return false;

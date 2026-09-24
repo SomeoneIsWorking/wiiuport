@@ -3,9 +3,11 @@
 #include "wiiuport/shell/ControllerAutoMap.h"
 #include "wiiuport/shell/HostPaths.h"
 #include "wiiuport/shell/ShellWindow.h"
+#include "wiiuport/shell/TitleIdentity.h"
 #include "wiiuport/shell/TitleSelection.h"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 
 namespace wiiuport::shell {
@@ -25,6 +27,8 @@ class ShellHost final : public HostEventObserver {
         // Which title to run. Empty asks the remembered one, and then the
         // player: a packaged product has no command line.
         std::filesystem::path title;
+        // The one title the launching product runs; none accepts any.
+        std::optional<TitleIdentity> expectedTitle;
         ShellWindow::Options window;
     };
 
@@ -44,11 +48,15 @@ class ShellHost final : public HostEventObserver {
     std::filesystem::path resolveTitle(const Options& options);
     bool bringUpRenderer();
     bool launchTitle(const std::filesystem::path& path);
+    // Why `path` cannot be run, or empty: not a mountable title, or not the
+    // one expected.
+    std::string titleProblem(const std::filesystem::path& path) const;
     void shutdown();
 
     HostPaths m_paths;
     ControllerAutoMap m_controllers;
     std::filesystem::path m_executable;
+    std::optional<TitleIdentity> m_expectedTitle;
     ShellWindow m_window;
     bool m_titleRunning{false};
     std::string m_failure;
