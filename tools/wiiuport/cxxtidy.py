@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -94,6 +95,48 @@ def tidy_units(root: Path, databases: Sequence[Path]) -> list[Unit]:
     return sorted(units.values(), key=lambda unit: unit.source)
 
 
+_PCH_LOAD = ("-Xclang", "-include-pch", "-Xclang")
+
+
+def without_precompiled_header(arguments: Sequence[str]) -> list[str]:
+    """A compile command that includes its precompiled header's source as text.
+
+    A PCH is readable only by the exact compiler build that wrote it, and the
+    pinned clang-tidy is never that build: it refused the host clang's PCH as
+    'built from a different branch' with the same version number. CMake passes
+    the load of the binary (``-Xclang -include-pch -Xclang <pch>``) and then
+    the textual include of the header it was made from; dropping the first
+    leaves a unit that sees exactly the same declarations.
+    """
+    kept: list[str] = []
+    index = 0
+    while index < len(arguments):
+        if tuple(arguments[index : index + 3]) == _PCH_LOAD and index + 3 < len(arguments):
+            index += 4
+            continue
+        kept.append(arguments[index])
+        index += 1
+    return kept
+
+
+def tidy_database(database: Path, into: Path) -> Path:
+    """A copy of ``database``'s compile commands with no precompiled header loaded."""
+    entries = json.loads((database / "compile_commands.json").read_text())
+    rewritten = []
+    for entry in entries:
+        arguments = entry.get("arguments") or shlex.split(entry["command"])
+        rewritten.append(
+            {
+                "directory": entry["directory"],
+                "file": entry["file"],
+                "arguments": without_precompiled_header(arguments),
+            }
+        )
+    into.mkdir(parents=True, exist_ok=True)
+    (into / "compile_commands.json").write_text(json.dumps(rewritten))
+    return into
+
+
 def parse_diagnostics(output: str) -> list[str]:
     """Each distinct diagnostic line; a header's finding repeats once per unit including it."""
     found = {line for line in output.splitlines() if _DIAGNOSTIC.match(line)}
@@ -158,4 +201,8 @@ def check_tidy(layout: Layout) -> TidyReport:
     units = tidy_units(layout.root, (layout.wiiuport_build, layout.cemu_build))
     if not units:
         raise TidyUnavailable("no database compiles a first-party unit, so nothing was analysed")
-    return run_tidy(layout.root, units)
+    rewritten = {
+        database: tidy_database(database, layout.build / "tidy" / database.name)
+        for database in dict.fromkeys(unit.database for unit in units)
+    }
+    return run_tidy(layout.root, [Unit(unit.source, rewritten[unit.database]) for unit in units])
