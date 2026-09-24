@@ -401,7 +401,7 @@ void VertexBlend::startBlending() {
     // reads its buffers, whatever it fetches of them, the first with a
     // partner deciding for all: readers drawn differently tear it, as a
     // shadow volume's did.
-    std::optional<uint64_t> excluded;
+    std::vector<uint64_t> excluded;
     {
         std::lock_guard lock(m_excludedMutex);
         excluded = m_excluded;
@@ -425,7 +425,7 @@ void VertexBlend::startBlending() {
             }
             mesh.refused = !m_mergedLayouts.back().absorb(drawn.layout);
         }
-        if (drawn.vertexShaderBaseHash == excluded) {
+        if (std::ranges::find(excluded, drawn.vertexShaderBaseHash) != excluded.end()) {
             m_meshExcluded[drawn.mesh] = 1;
         }
     }

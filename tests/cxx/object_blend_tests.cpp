@@ -915,9 +915,9 @@ void aSwayTurningBackThroughTheValueItPassedIsBlended() {
     check::equal(uploaded[0][0], 2.5f, "half way from where it turned");
 }
 
-void anObjectSeenOnlyStandingIsDrawnAtNSettingOff() {
-    // Standing from N-4 to N-1: nothing tells it from another object the
-    // title's blocks passed to it.
+void anObjectThatRestedLongerIsBlendedSettingOffByAStepItTook() {
+    // Standing from N-4 to N-1, no frame back to N-4 shows it moving; the
+    // step it set off by is one it was seen to take before it rested.
     ObjectBlend blend{kHalfway};
     blend.setPlanning(true);
     record(blend, {{kBlockA, {0.0f, 7.0f}}});
@@ -930,18 +930,38 @@ void anObjectSeenOnlyStandingIsDrawnAtNSettingOff() {
     record(blend, setOff);
     blend.armOnce();
     auto uploaded = replay(blend, setOff);
+    check::equal(blend.objects(Outcome::Blended), uint64_t{1}, "it is blended");
+    check::equal(uploaded[0][0], 2.5f, "half way from where it rested");
+}
+
+void anObjectThatRestedAndLeapsFurtherThanItSteppedIsDrawnAtN() {
+    // Standing from N-4 to N-1, it sets off by half again the step it was
+    // seen to take: nothing tells it from another object's draw.
+    ObjectBlend blend{kHalfway};
+    blend.setPlanning(true);
+    record(blend, {{kBlockA, {0.0f, 7.0f}}});
+    record(blend, {{kBlockB, {1.0f, 7.0f}}});
+    record(blend, {{kBlockA, {2.0f, 7.0f}}});
+    record(blend, {{kBlockB, {2.0f, 7.0f}}});
+    record(blend, {{kBlockA, {2.0f, 7.0f}}});
+    record(blend, {{kBlockB, {2.0f, 7.0f}}});
+    std::vector<Draw> setOff{{kBlockA, {3.5f, 7.0f}}};
+    record(blend, setOff);
+    blend.armOnce();
+    auto uploaded = replay(blend, setOff);
     check::equal(blend.objects(Outcome::Blended), uint64_t{0}, "it is not blended");
-    check::equal(uploaded[0][0], 3.0f, "drawn at N");
+    check::equal(uploaded[0][0], 3.5f, "drawn at N");
 }
 
 void aStillSpriteWhoseBlocksPassToAnotherIsNotBlendedToIt() {
     // Seen on the shore: a sprite's blocks name a large one standing still
-    // from N-3 to N-1 and a small one at N-4 and N. Neither frame on either
-    // side of the stand is half way to the other.
+    // and a small one now and then, never seen moving. Neither frame on
+    // either side of the stand is half way to the other, and the small one
+    // is a whole sprite away from where the large one stood.
     ObjectBlend blend{kHalfway};
     blend.setPlanning(true);
-    record(blend, {{kBlockA, {0.0f, 7.0f}}});
-    record(blend, {{kBlockB, {12.0f, 7.0f}}});
+    record(blend, {{kBlockA, {72.0f, 7.0f}}});
+    record(blend, {{kBlockB, {72.0f, 7.0f}}});
     record(blend, {{kBlockA, {24.0f, 7.0f}}});
     record(blend, {{kBlockB, {72.0f, 7.0f}}});
     record(blend, {{kBlockA, {72.0f, 7.0f}}});
@@ -1191,7 +1211,8 @@ void runObjectBlendTests() {
     aTileWhoseBlocksPassedToAnotherIsNotBlendedFromWhereTheOtherStood();
     aDrawWithNoNumberWhereTheObjectHeldDoesNotStandWhereItStood();
     aSwayTurningBackThroughTheValueItPassedIsBlended();
-    anObjectSeenOnlyStandingIsDrawnAtNSettingOff();
+    anObjectThatRestedLongerIsBlendedSettingOffByAStepItTook();
+    anObjectThatRestedAndLeapsFurtherThanItSteppedIsDrawnAtN();
     aStillSpriteWhoseBlocksPassToAnotherIsNotBlendedToIt();
     anObjectTheTitleMovesEveryOtherFrameIsBlended();
     anObjectKnownByItsBlocksThatTurnedBackIsBlended();

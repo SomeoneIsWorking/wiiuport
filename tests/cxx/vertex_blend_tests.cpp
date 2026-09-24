@@ -233,6 +233,7 @@ void aMeshThatStoodStillUntilNIsDrawnAsTheTitleDrewIt() {
 // --- VertexBlend, fed as the runtime feeds it ---
 
 constexpr uint64_t kActorShader = 0xdddd;
+constexpr uint64_t kOtherShader = 0xeeee;
 // The blocks two actors alternate between, as the title double-buffers them.
 constexpr uint32_t kBlockA = 0xf4001000;
 constexpr uint32_t kBlockB = 0xf4081000;
@@ -472,7 +473,7 @@ void aMeshTwoShadersFetchOtherwiseIsDrawnAlikeByBoth() {
 void aMeshAnExcludedShaderReadsIsDrawnAsTheTitleDrewIt() {
     Blends blends;
     blends.objects.setPlanning(true);
-    blends.vertices.exclude(kActorShader);
+    blends.vertices.exclude({kOtherShader, kActorShader});
     blends.record(GuestFrame({{kBlockA, {0.0f, 7.0f}, {10.0f}}}));
     blends.record(GuestFrame({{kBlockB, {1.0f, 7.0f}, {12.0f}}}));
     GuestFrame latest({{kBlockA, {2.0f, 7.0f}, {14.0f}}});
@@ -480,7 +481,7 @@ void aMeshAnExcludedShaderReadsIsDrawnAsTheTitleDrewIt() {
     std::vector<std::vector<float>> drawn = blends.replay(latest);
     check::equal(drawn[0][0], 14.0f, "the excluded shader's mesh is drawn as N");
     check::equal(blends.vertices.draws(VertexOutcome::Excluded), uint64_t{1}, "counted excluded");
-    blends.vertices.exclude(std::nullopt);
+    blends.vertices.exclude({});
     GuestFrame next({{kBlockB, {3.0f, 7.0f}, {16.0f}}});
     blends.record(next);
     drawn = blends.replay(next);

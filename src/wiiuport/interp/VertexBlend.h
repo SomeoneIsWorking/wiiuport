@@ -207,12 +207,12 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         return m_blendingEnabled.load();
     }
 
-    // Draws every mesh the vertex shader with this base hash reads as the
+    // Draws every mesh the vertex shaders with these base hashes read as the
     // title drew it, by all its readers; none excludes nothing. A
     // maintainer's discriminator, not a setting. Safe from any thread.
-    void exclude(std::optional<uint64_t> shaderBaseHash) {
+    void exclude(std::vector<uint64_t> shaderBaseHashes) {
         std::lock_guard lock(m_excludedMutex);
-        m_excluded = shaderBaseHash;
+        m_excluded = std::move(shaderBaseHashes);
     }
 
     void onAssemblyRecorded(const frame::RecordedUniformAssembly& assembly) override;
@@ -485,7 +485,7 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::atomic<uint64_t> m_partnersFoundByVertices{0};
     std::atomic<bool> m_blendingEnabled{true};
     std::mutex m_excludedMutex;
-    std::optional<uint64_t> m_excluded;
+    std::vector<uint64_t> m_excluded;
 
     // Last, so its threads start after and stop before everything they use.
     SlotPool m_pool;
