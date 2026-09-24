@@ -239,9 +239,11 @@ void aNullDiffCapturesTheSameFrameTwice() {
     g_nextSlot = ReplayScheduler::kReplaySlot;
     scheduler.onFrameShown(recording);
 
-    check::equal(g_armedSlots.size(), size_t{2}, "the replay's half is armed at the frame end");
-    check::equal(g_armedSlots.back(), ReplayScheduler::kReplaySlot, "into the other slot");
-    check::equal(g_submitted.size(), size_t{1}, "and the replay is presented so it can be seen");
+    check::equal(g_armedSlots.size(), size_t{3},
+                 "the replay's half is armed at the frame end, and the same frame replayed "
+                 "again, to tell the renderer's own variation from the replay's");
+    check::equal(g_armedSlots[1], ReplayScheduler::kReplaySlot, "into the other slot");
+    check::equal(g_submitted.size(), size_t{2}, "and each replay is presented so it can be seen");
     check::isTrue(!scheduler.nullDiffPending(), "the run is no longer pending");
     check::equal(scheduler.nullDiffsCompleted(), uint64_t{1}, "and is counted");
 }
