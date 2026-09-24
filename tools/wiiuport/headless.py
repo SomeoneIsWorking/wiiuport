@@ -13,6 +13,8 @@ Three isolations, all deliberate:
   DRI3, and the runtime then renders on llvmpipe: measured, every headless
   timing taken under it was software rasterisation. `rendered_on()` reads which
   device the runtime actually chose, so that cannot pass unnoticed again.
+  `Display.WAYLAND` runs the product as the session of a virtual KWin, so it
+  opens its window through SDL's Wayland backend rather than any X server.
 * **User data.** The runtime honours ``XDG_DATA_HOME``/``XDG_CONFIG_HOME``/
   ``XDG_CACHE_HOME`` on Linux, so a run gets its own directories and can never
   write to, or read stale state from, the operator's own installation.
@@ -28,6 +30,7 @@ command.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -47,6 +50,7 @@ class Display(Enum):
 
     GPU = "gpu"
     XVFB = "xvfb"
+    WAYLAND = "wayland"
 
 
 TITLE_OUTPUT_SIZE = (1920, 1080)
@@ -59,6 +63,25 @@ def gamescope_args(size: tuple[int, int]) -> tuple[str, ...]:
     nothing reaches the operator's compositor."""
     width, height = size
     return ("--backend", "headless", "-W", str(width), "-H", str(height), "--")
+
+
+def kwin_args(size: tuple[int, int], socket: str) -> tuple[str, ...]:
+    """A virtual KWin at `size` on its own socket. The command follows as one
+    `--exit-with-session` argument, which KWin splits as a shell would, runs
+    with WAYLAND_DISPLAY naming that socket, and exits with, passing its code
+    on."""
+    width, height = size
+    return (
+        "--virtual",
+        "--no-lockscreen",
+        "--socket",
+        socket,
+        "--width",
+        str(width),
+        "--height",
+        str(height),
+        "--exit-with-session",
+    )
 
 
 SOFTWARE_RENDERERS = ("llvmpipe", "lavapipe", "softpipe", "swiftshader")
@@ -183,6 +206,11 @@ class HeadlessSession:
         env.pop("WAYLAND_DISPLAY", None)
         if self.display_server is Display.XVFB:
             env["DISPLAY"] = f":{self.display}"
+        elif self.display_server is Display.WAYLAND:
+            # KWin names its socket to the session it starts; no X server is
+            # offered, and SDL is held to Wayland so it cannot fall back to X.
+            env.pop("DISPLAY", None)
+            env["SDL_VIDEO_DRIVER"] = "wayland"
         else:
             # gamescope sets its own Xwayland display for the product; an
             # inherited one would point it at the operator's desktop.
@@ -190,7 +218,7 @@ class HeadlessSession:
         env["XDG_CONFIG_HOME"] = str(self.config_home)
         env["XDG_DATA_HOME"] = str(self.data_home)
         env["XDG_CACHE_HOME"] = str(self.cache_home)
-        env["XDG_SESSION_TYPE"] = "x11"
+        env["XDG_SESSION_TYPE"] = "wayland" if self.display_server is Display.WAYLAND else "x11"
         return env
 
     def prepare(self, keys_source: Path | None = None, save_source: Path | None = None) -> None:
@@ -279,9 +307,19 @@ class HeadlessSession:
         """The command as launched: under gamescope for a GPU display."""
         if self.display_server is Display.XVFB:
             return command
+        if self.display_server is Display.WAYLAND:
+            socket = f"wiiuport-{self.display}"
+            return ["kwin_wayland", *kwin_args(self.output_size, socket), shlex.join(command)]
         return ["gamescope", *gamescope_args(self.output_size), *command]
 
     def start_display(self) -> None:
+        if self.display_server is Display.WAYLAND:
+            if shutil.which("kwin_wayland") is None:
+                raise HeadlessError(
+                    "kwin_wayland is not installed, so a run cannot open a Wayland window "
+                    "offscreen. Install it:\n  sudo dnf install kwin"
+                )
+            return
         if self.display_server is Display.GPU:
             if shutil.which("gamescope") is None:
                 raise HeadlessError(

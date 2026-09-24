@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 from pathlib import Path
 
 import pytest
@@ -187,6 +188,22 @@ def test_a_gpu_session_presents_at_the_titles_size_unless_told_otherwise(
     session.output_size = (3840, 2160)
     command = session.command_for(["product"])
     assert command[command.index("-W") + 1 : command.index("-W") + 4] == ["3840", "-H", "2160"]
+
+
+def test_a_wayland_session_is_the_session_of_a_virtual_kwin_and_offers_no_x(
+    session: HeadlessSession,
+) -> None:
+    session.display_server = Display.WAYLAND
+    game = "/games/Zelda, The (USA).wux"
+    command = session.command_for(["product", game])
+    assert command[0] == "kwin_wayland" and "--virtual" in command
+    # One argument, split back by KWin as a shell would: a path with spaces
+    # and commas must arrive whole.
+    assert command[command.index("--exit-with-session") + 1] == shlex.join(["product", game])
+    env = session.environment()
+    assert "DISPLAY" not in env and "WAYLAND_DISPLAY" not in env
+    assert env["SDL_VIDEO_DRIVER"] == "wayland"
+    assert env["XDG_SESSION_TYPE"] == "wayland"
 
 
 def test_an_xvfb_session_launches_the_command_as_given(session: HeadlessSession) -> None:

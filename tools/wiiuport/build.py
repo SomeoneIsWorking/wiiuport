@@ -112,6 +112,9 @@ def configure_command(config: BuildConfig, source: Path) -> list[str]:
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         f"-DCMAKE_PROJECT_INCLUDE={config.reproducible_paths}",
         f"-DWIIUPORT_SOURCE_DIR={config.first_party_source}",
+        # The product is the SDL shell; the fork's wx front end is never
+        # linked, and without it SDL can take its Wayland backend.
+        "-DENABLE_WXWIDGETS=OFF",
     ]
 
 

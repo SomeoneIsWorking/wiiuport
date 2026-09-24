@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 from wiiuport.drive import press, release
-from wiiuport.headless import HeadlessSession
+from wiiuport.headless import Display, HeadlessSession
 from wiiuport.paths import find_layout
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
@@ -39,6 +39,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--presses", type=int, default=12, help="how many times to press through")
     parser.add_argument("--interval", type=int, default=8, help="seconds between presses")
     parser.add_argument("--settle", type=int, default=60, help="seconds to watch afterwards")
+    parser.add_argument(
+        "--display",
+        choices=[display.value for display in Display],
+        default=Display.GPU.value,
+        help="where the run presents; wayland opens the window through SDL's Wayland backend",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -58,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         layout=layout,
         activity="reach-gameplay",
         runtime_env=runtime_env(args.port),
+        display_server=Display(args.display),
     )
     report = None
     counters = None
@@ -96,6 +103,17 @@ def main(argv: list[str] | None = None) -> int:
             except ControlUnavailable:
                 pass
             exit_code = running.poll()
+        window = next(
+            (
+                line
+                for line in (session.session_dir / "run.log")
+                .read_text(errors="replace")
+                .splitlines()
+                if "window open:" in line
+            ),
+            None,
+        )
+        device = session.rendered_on()
 
     if report is None or counters is None:
         print(
@@ -111,6 +129,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(report.render())
     print(f"process exit {exit_code}")
+    print(f"window: {window or 'never reported opening'}; rendered on {device}")
+    if window is None:
+        print("refused: the runtime never reported opening its window.", file=sys.stderr)
+        return 1
+    if Display(args.display) is Display.WAYLAND and not window.endswith(" on wayland"):
+        print("refused: asked for Wayland, the window opened elsewhere.", file=sys.stderr)
+        return 1
 
     if counters.inputPollsSeen == 0:
         print(
