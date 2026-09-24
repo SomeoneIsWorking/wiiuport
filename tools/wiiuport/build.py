@@ -61,6 +61,13 @@ class BuildConfig:
         return self.layout.root / "src" / "wiiuport"
 
     @property
+    def reproducible_paths(self) -> Path:
+        """Included after every ``project()``: compiled paths are recorded
+        relative to the checkout, so a package does not name the machine it
+        was built on."""
+        return self.layout.root / "cmake" / "ReproduciblePaths.cmake"
+
+    @property
     def binary(self) -> Path:
         return Layout(root=self.layout.root, build_type=self.build_type).shell_binary
 
@@ -89,6 +96,25 @@ def _vcpkg_environment() -> dict[str, str]:
     return env
 
 
+def configure_command(config: BuildConfig, source: Path) -> list[str]:
+    """The one configure invocation for the runtime's build tree."""
+    return [
+        "cmake",
+        "-S",
+        str(source),
+        "-B",
+        str(config.build_dir),
+        "-G",
+        GENERATOR,
+        f"-DCMAKE_BUILD_TYPE={config.build_type}",
+        f"-DCMAKE_C_COMPILER={config.toolchain.c_compiler}",
+        f"-DCMAKE_CXX_COMPILER={config.toolchain.cxx_compiler}",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        f"-DCMAKE_PROJECT_INCLUDE={config.reproducible_paths}",
+        f"-DWIIUPORT_SOURCE_DIR={config.first_party_source}",
+    ]
+
+
 def configure(config: BuildConfig, log: Path | None = None) -> None:
     """Configure the build tree, refusing a tree left by another generator.
 
@@ -107,20 +133,7 @@ def configure(config: BuildConfig, log: Path | None = None) -> None:
             f"directory and configure again: rm -rf {build_dir}"
         )
     build_dir.mkdir(parents=True, exist_ok=True)
-    command = [
-        "cmake",
-        "-S",
-        str(source),
-        "-B",
-        str(build_dir),
-        "-G",
-        GENERATOR,
-        f"-DCMAKE_BUILD_TYPE={config.build_type}",
-        f"-DCMAKE_C_COMPILER={config.toolchain.c_compiler}",
-        f"-DCMAKE_CXX_COMPILER={config.toolchain.cxx_compiler}",
-        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-        f"-DWIIUPORT_SOURCE_DIR={config.first_party_source}",
-    ]
+    command = configure_command(config, source)
     _run(command, log=log, what="configure")
     verify_toolchain(config)
 

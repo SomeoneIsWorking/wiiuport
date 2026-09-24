@@ -109,6 +109,9 @@ clean checkout of it do.
 - `src/wiiuport/` builds as a static library and is added by the fork's CMake only when
   `WIIUPORT_SOURCE_DIR` is passed, which `tools/wiiuport/build.py` supplies. Absent it, the
   variable is unset and no subdirectory is added.
+- `cmake/ReproduciblePaths.cmake` is passed as `CMAKE_PROJECT_INCLUDE` by the same builder, so
+  every project in the build records compiled paths relative to the checkout
+  (`-ffile-prefix-map`); a package does not name the directory it was built in.
 - Registration happens once at startup, through `extern "C" void wiiuport_install_hooks()`
   called from `main`. It is not a static initialiser: the library is static, and a linker
   drops an object file nothing references, taking the initialiser with it. That failure

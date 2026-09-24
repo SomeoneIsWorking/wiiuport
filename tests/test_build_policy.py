@@ -147,3 +147,12 @@ def test_the_vcpkg_environment_does_not_add_force_system_binaries(
 
     monkeypatch.setenv("VCPKG_FORCE_SYSTEM_BINARIES", "1")
     assert build._vcpkg_environment()["VCPKG_FORCE_SYSTEM_BINARIES"] == "1"
+
+
+def test_every_project_in_the_build_records_paths_relative_to_the_checkout() -> None:
+    config = BuildConfig(layout=Layout(root=Path(__file__).resolve().parent.parent))
+    command = build.configure_command(config, config.layout.cemu_source)
+    assert f"-DCMAKE_PROJECT_INCLUDE={config.reproducible_paths}" in command
+    included = config.reproducible_paths.read_text()
+    assert "-ffile-prefix-map=${WIIUPORT_CHECKOUT}/=wiiuport/" in included
+    assert "include_guard(GLOBAL)" in included
