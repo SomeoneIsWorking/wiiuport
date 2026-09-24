@@ -22,7 +22,7 @@ from pathlib import Path
 from types import FrameType
 
 from wiiuport.gameplay import INTERVAL_SECONDS, PRESSES, press_into_world
-from wiiuport.headless import HeadlessSession
+from wiiuport.headless import TITLE_OUTPUT_SIZE, HeadlessSession
 from wiiuport.paths import find_layout
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
@@ -39,6 +39,13 @@ def _stop(_signum: int, _frame: FrameType | None) -> None:
     raise Stopped
 
 
+def _size(text: str) -> tuple[int, int]:
+    width, separator, height = text.partition("x")
+    if not separator or not width.isdigit() or not height.isdigit():
+        raise argparse.ArgumentTypeError(f"{text!r} is not WIDTHxHEIGHT, such as 3840x2160")
+    return int(width), int(height)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--game", type=Path, help="disc image; defaults to $WIIUPORT_GAME")
@@ -48,6 +55,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--boot", type=int, default=90, help="seconds to wait for the channel")
     parser.add_argument("--presses", type=int, default=PRESSES)
     parser.add_argument("--interval", type=float, default=INTERVAL_SECONDS)
+    parser.add_argument(
+        "--size",
+        type=_size,
+        default=TITLE_OUTPUT_SIZE,
+        help="offscreen display size as WIDTHxHEIGHT; the title's own by default",
+    )
     parser.add_argument(
         "--front-end",
         action="store_true",
@@ -70,7 +83,10 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
     session = HeadlessSession(
-        layout=layout, activity=ACTIVITY, runtime_env=runtime_env(args.port, continuous=True)
+        layout=layout,
+        activity=ACTIVITY,
+        runtime_env=runtime_env(args.port, continuous=True),
+        output_size=args.size,
     )
     try:
         with session:

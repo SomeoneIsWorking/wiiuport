@@ -178,6 +178,17 @@ def test_a_gpu_session_runs_under_gamescope_and_inherits_no_display(
     assert "DISPLAY" not in session.environment()
 
 
+def test_a_gpu_session_presents_at_the_titles_size_unless_told_otherwise(
+    session: HeadlessSession,
+) -> None:
+    session.display_server = Display.GPU
+    command = session.command_for(["product"])
+    assert command[command.index("-W") + 1 : command.index("-W") + 4] == ["1920", "-H", "1080"]
+    session.output_size = (3840, 2160)
+    command = session.command_for(["product"])
+    assert command[command.index("-W") + 1 : command.index("-W") + 4] == ["3840", "-H", "2160"]
+
+
 def test_an_xvfb_session_launches_the_command_as_given(session: HeadlessSession) -> None:
     assert session.command_for(["product"]) == ["product"]
 

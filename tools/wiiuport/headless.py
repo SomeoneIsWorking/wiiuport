@@ -49,10 +49,17 @@ class Display(Enum):
     XVFB = "xvfb"
 
 
-GAMESCOPE_ARGS = ("--backend", "headless", "-W", "1920", "-H", "1080", "--")
-"""gamescope's headless backend at the title's output size. It parents the
-product and hands it its own Xwayland display, so no display is started
-separately and nothing reaches the operator's compositor."""
+TITLE_OUTPUT_SIZE = (1920, 1080)
+"""The title's own output size, which an offscreen display defaults to."""
+
+
+def gamescope_args(size: tuple[int, int]) -> tuple[str, ...]:
+    """gamescope's headless backend at `size`. It parents the product and
+    hands it its own Xwayland display, so no display is started separately and
+    nothing reaches the operator's compositor."""
+    width, height = size
+    return ("--backend", "headless", "-W", str(width), "-H", str(height), "--")
+
 
 SOFTWARE_RENDERERS = ("llvmpipe", "lavapipe", "softpipe", "swiftshader")
 
@@ -142,6 +149,9 @@ class HeadlessSession:
     quiet; a capture run switches on exactly what it intends to read."""
 
     display_server: Display = Display.GPU
+    output_size: tuple[int, int] = TITLE_OUTPUT_SIZE
+    """The offscreen display's size: the title's by default, a player's
+    display's to measure what presenting at it costs."""
 
     runtime_env: dict[str, str] = field(default_factory=dict)
     """Runtime-specific overrides layered over the isolated environment. They
@@ -269,7 +279,7 @@ class HeadlessSession:
         """The command as launched: under gamescope for a GPU display."""
         if self.display_server is Display.XVFB:
             return command
-        return ["gamescope", *GAMESCOPE_ARGS, *command]
+        return ["gamescope", *gamescope_args(self.output_size), *command]
 
     def start_display(self) -> None:
         if self.display_server is Display.GPU:
@@ -286,7 +296,15 @@ class HeadlessSession:
                 "  sudo dnf install xorg-x11-server-Xvfb"
             )
         self._xvfb = subprocess.Popen(
-            ["Xvfb", f":{self.display}", "-screen", "0", "1920x1080x24", "-nolisten", "tcp"],
+            [
+                "Xvfb",
+                f":{self.display}",
+                "-screen",
+                "0",
+                f"{self.output_size[0]}x{self.output_size[1]}x24",
+                "-nolisten",
+                "tcp",
+            ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
