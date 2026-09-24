@@ -42,6 +42,8 @@ add_library(wiiuport STATIC
   frame/FrameGate.h
   frame/FramePresenter.cpp
   frame/FramePresenter.h
+  frame/GuestMemorySnapshot.cpp
+  frame/GuestMemorySnapshot.h
   frame/GuestStateGuard.cpp
   frame/GuestStateGuard.h
   frame/FrameRecording.cpp
@@ -65,6 +67,8 @@ add_library(wiiuport STATIC
     input/InputDriver.cpp
   input/InputDriver.h
   interp/ContinuousInterpolator.cpp
+  interp/ShadowCheck.cpp
+  interp/ShadowCheck.h
   interp/ContinuousInterpolator.h
   interp/AssemblyKey.cpp
   interp/AssemblyKey.h

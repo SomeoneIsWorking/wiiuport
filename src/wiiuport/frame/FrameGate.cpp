@@ -48,7 +48,20 @@ FrameGate::Status FrameGate::status() const {
     return m_status;
 }
 
-void FrameGate::onFrameShown(const FrameRecording& /*recording*/) {
+bool FrameGate::runWhileHeld(const HeldJob& job) {
+    std::unique_lock lock(m_mutex);
+    if (!m_status.holding || m_status.stepsLeft > 0 || m_job != nullptr) {
+        return false;
+    }
+    m_job = &job;
+    m_changed.notify_all();
+    m_changed.wait(lock, [this] {
+        return m_job == nullptr;
+    });
+    return true;
+}
+
+void FrameGate::onFrameShown(const FrameRecording& recording) {
     std::unique_lock lock(m_mutex);
     if (m_status.paused && m_status.stepsLeft > 0) {
         --m_status.stepsLeft;
@@ -66,9 +79,20 @@ void FrameGate::onFrameShown(const FrameRecording& /*recording*/) {
     ++m_status.framesHeld;
     m_status.holding = true;
     m_changed.notify_all();
-    m_changed.wait(lock, [this] {
-        return !m_status.paused || m_status.stepsLeft > 0;
-    });
+    while (true) {
+        m_changed.wait(lock, [this] {
+            return !m_status.paused || m_status.stepsLeft > 0 || m_job != nullptr;
+        });
+        if (m_job == nullptr) {
+            break;
+        }
+        const HeldJob& job = *m_job;
+        lock.unlock();
+        job(recording);
+        lock.lock();
+        m_job = nullptr;
+        m_changed.notify_all();
+    }
     m_status.holding = false;
     m_changed.notify_all();
 }

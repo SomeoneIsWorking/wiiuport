@@ -53,6 +53,7 @@ int main(int argc, char** argv) {
     wiiuport::tests::runSlotPoolTests();
     wiiuport::tests::runDrawTreeTests(seed);
     wiiuport::tests::runGateTests();
+    wiiuport::tests::runShadowTests();
     std::printf("draw tree seed %u\n", seed);
     std::printf("%d checks, %d failures\n", check::g_checks, check::g_failures);
     if (check::g_checks == 0) {

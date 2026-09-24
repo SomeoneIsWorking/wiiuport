@@ -24,6 +24,7 @@ lucent::http::Response notFound() {
         "GET /recordings, GET /objects, GET /draws, GET /vertices, POST /replay, POST /capture, "
         "POST /present, "
         "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, "
+        "POST /shadowcheck, "
         "POST /neighbourcheck, POST /blends, POST /pacing, "
         "POST /objects, POST /draws, POST /recordings and POST /input.\n");
 }
@@ -159,7 +160,8 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
       m_neighbourCheck(sources.neighbourCheck), m_objects(sources.objects),
       m_vertices(sources.vertices), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
-      m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
+      m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate),
+      m_shadowCheck(sources.shadowCheck) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -781,6 +783,22 @@ bool ControlChannel::start(uint16_t port) {
                                                         gateJson(m_gate.status()));
                 }
                 return lucent::http::Response::json(200, "OK", gateJson(m_gate.status()));
+            }
+            // Whether an in-between frame changes guest memory, measured on
+            // the frame the gate holds: rounds=N in-between and control
+            // windows, alternating.
+            if (request.method == "POST" && request.path() == "/shadowcheck") {
+                size_t rounds = requestedCount(std::string(request.query()), "rounds", 4);
+                interp::ShadowCheck::Result result;
+                bool ran = m_gate.runWhileHeld([&](const frame::FrameRecording& held) {
+                    result = m_shadowCheck.run(held, static_cast<uint32_t>(rounds));
+                });
+                if (!ran) {
+                    return lucent::http::Response::text(
+                        409, "Conflict",
+                        "the check runs on a held frame. POST /gate?pause=1 first.\n");
+                }
+                return lucent::http::Response::json(200, "OK", interp::ShadowCheck::toJson(result));
             }
             // Frame pacing measured from here on, so a walk is not averaged
             // with the boot and menus before it.
