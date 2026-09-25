@@ -14,7 +14,7 @@
 namespace wiiuport::guest {
 
 // The title's objects whose vertices its CPU writes each frame -- particles,
-// sea waves and 3D lines -- by the vertex buffer each last wrote.
+// sea waves, sky clouds and 3D lines -- by the vertex buffer each last wrote.
 //
 // A particle's quad carries nothing of its own -- four corners and the UVs
 // every quad of its kind has -- and the title hands a pool of particles
@@ -22,9 +22,10 @@ namespace wiiuport::guest {
 // draw is. The title's code can (recovered in setsail's
 // docs/render-state.md): its particle writers (JSystem's JPA draw executors
 // and `dPa_ripplePcallBack::draw`) each write one particle's quad into one
-// of the particle's own two vertex buffers and commit it, its sea-wave writer
-// does the same for each wave, and its 3D lines flush each line's buffers
-// through one helper. ParticleProbe, WaveProbe and LineProbe watch those calls
+// of the particle's own two vertex buffers and commit it, its sea-wave and
+// sky-cloud writers do the same for each wave and cloud card, and its 3D
+// lines flush each line's buffers through one helper. ParticleProbe,
+// EnvironmentProbe and LineProbe watch those calls
 // and record here, by the buffer, the object and the leading bytes it wrote
 // there; a draw from that buffer is that object's while it reads those bytes.
 class BufferWriters final : public interp::DrawObjects {

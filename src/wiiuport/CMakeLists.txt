@@ -71,8 +71,8 @@ add_library(wiiuport STATIC
   guest/ParticleProbe.h
   guest/LineProbe.cpp
   guest/LineProbe.h
-  guest/WaveProbe.cpp
-  guest/WaveProbe.h
+  guest/EnvironmentProbe.cpp
+  guest/EnvironmentProbe.h
     input/InputDriver.cpp
   input/InputDriver.h
   interp/ContinuousInterpolator.cpp
