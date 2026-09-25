@@ -834,6 +834,7 @@ void ObjectPlanner::findLightLookUps() {
             plan.light.addMapValues(twoBack.values(*earlier), m_building.values(entry));
         }
     }
+    plan.light.chooseAxes();
     if (plan.light.axisCount() == 0) {
         return;
     }

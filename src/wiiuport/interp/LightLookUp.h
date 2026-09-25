@@ -2,6 +2,7 @@
 
 #include "wiiuport/interp/Transform3x4.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -27,10 +28,14 @@ namespace wiiuport::interp {
 // axes -- a row along its depth axis, or one mixing an axis with the depth a
 // projection divides by -- and the draws into the map at N hold those axes as
 // a rotation with no translation. The light's rotation is told from others a
-// map draw holds, an object's identity among them, by having moved since N-2:
-// with the world's own axes taken for the light's, a scalar the stage keeps
-// in a row's first value lay in a plane of two of them for any camera that
-// does not roll, and was turned as a direction. A row the camera does not carry, or one that
+// map draw holds by having moved since N-2 and by being the one most of the
+// frame's map draws hold alike -- 378 of 600 on the island, where an object's
+// own is held by one draw a cascade. Taken for the light's, an object's
+// identity, or the rotation of one turning about the vertical, puts the
+// world's upright axis among the light's, and a scalar the stage keeps in a
+// row's first value, or a fog row every stage shares, then lay in a plane of
+// two of them for any camera that does not roll and was turned as a
+// direction. A row the camera does not carry, or one that
 // lies in such a plane by chance but does not move, is left as it is. A row
 // whose fourth value stood bit for bit still while the rest turned is a
 // direction, whose fourth value is not a translation: it is turned alone.
@@ -54,9 +59,12 @@ class LightLookUp {
     };
 
     void clearAxes();
-    // Takes the light's axes from a draw into the map, by its values at N-2
-    // and at N: every rotation among them that moved.
+    // Counts the rotations a draw into the map holds that moved from N-2 to
+    // N. Every draw is added before the axes are chosen.
     void addMapValues(std::span<const float> twoBack, std::span<const float> latest);
+    // The light's axes: the rotation that moved held by the most draws, two
+    // at least. None when two rotations are held by as many.
+    void chooseAxes();
 
     size_t axisCount() const {
         return m_axes.size();
@@ -77,6 +85,16 @@ class LightLookUp {
                        std::span<float> out) const;
 
   private:
+    static constexpr size_t kRotationFloats = 12;
+
+    struct HeldRotation {
+        std::array<float, kRotationFloats> rows{};
+        size_t draws{1};
+        size_t lastDraw{0};
+    };
+
+    std::vector<HeldRotation> m_rotations;
+    size_t m_drawsAdded{0};
     std::vector<Vec3> m_axes;
 };
 

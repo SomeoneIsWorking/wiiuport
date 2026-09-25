@@ -83,28 +83,46 @@ bool moved(std::span<const float> twoBack, std::span<const float> latest) {
 } // namespace
 
 void LightLookUp::clearAxes() {
+    m_rotations.clear();
+    m_drawsAdded = 0;
     m_axes.clear();
 }
 
 void LightLookUp::addMapValues(std::span<const float> twoBack, std::span<const float> latest) {
-    constexpr size_t kRotation = 3 * kRow;
     if (twoBack.size() != latest.size()) {
         return;
     }
-    for (size_t at = 0; at + kRotation <= latest.size(); at += kRow) {
-        std::span<const float> rows = latest.subspan(at, kRotation);
-        if (!isRotation(rows) || !moved(twoBack.subspan(at, kRotation), rows)) {
+    ++m_drawsAdded;
+    for (size_t at = 0; at + kRotationFloats <= latest.size(); at += kRow) {
+        std::span<const float> rows = latest.subspan(at, kRotationFloats);
+        if (!isRotation(rows) || !moved(twoBack.subspan(at, kRotationFloats), rows)) {
             continue;
         }
-        for (size_t row = 0; row < kRotation; row += kRow) {
-            Vec3 axis{rows[row], rows[row + 1], rows[row + 2]};
-            bool known = std::ranges::any_of(m_axes, [&axis](const Vec3& other) {
-                return std::abs(dot(axis, other)) >= 1.0 - kAxisTolerance;
-            });
-            if (!known) {
-                m_axes.push_back(axis);
-            }
+        auto held = std::ranges::find_if(m_rotations, [&rows](const HeldRotation& rotation) {
+            return sameBits(std::span<const float>(rotation.rows), rows);
+        });
+        if (held == m_rotations.end()) {
+            HeldRotation rotation;
+            std::ranges::copy(rows, rotation.rows.begin());
+            rotation.lastDraw = m_drawsAdded;
+            m_rotations.push_back(rotation);
+        } else if (held->lastDraw != m_drawsAdded) {
+            // Counted once a draw: a draw holding it twice is still one.
+            held->lastDraw = m_drawsAdded;
+            ++held->draws;
         }
+    }
+}
+
+void LightLookUp::chooseAxes() {
+    m_axes.clear();
+    auto most = std::ranges::max_element(m_rotations, {}, &HeldRotation::draws);
+    if (most == m_rotations.end() || most->draws < 2 ||
+        std::ranges::count(m_rotations, most->draws, &HeldRotation::draws) != 1) {
+        return;
+    }
+    for (size_t row = 0; row < kRotationFloats; row += kRow) {
+        m_axes.push_back(axisOf(std::span<const float>(most->rows).subspan(row)));
     }
 }
 
