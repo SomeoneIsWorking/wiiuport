@@ -51,6 +51,11 @@ class LightLookUp {
     // A row lies in a plane of two axes when its direction's part along the
     // third is at most this.
     static constexpr float kPlaneTolerance = 1e-4f;
+    // A look-up into the map carries at least the light's two map
+    // coordinates and its depth: a stage with fewer rows of the light holds
+    // a colour or a scalar that lay in a plane by chance -- one row a stage,
+    // 18 times in 2,500 frames walking -- and is left as it is.
+    static constexpr size_t kLookUpRows = 3;
 
     enum class RowForm : uint8_t {
         // Not the light seen through the camera: drawn as the title drew it.
@@ -83,7 +88,7 @@ class LightLookUp {
 
     // Rebases every row of four of a stage into `out`, which holds the
     // stage's values at N; returns how many rows it rebased. None unless the
-    // three frames hold as many values.
+    // three frames hold as many values and kLookUpRows rows are the light's.
     size_t rebaseStage(std::span<const float> twoBack, std::span<const float> oneBack,
                        std::span<const float> latest, const Transform3x4& viewAtN,
                        const Transform3x4& viewBetween, std::span<float> out) const;

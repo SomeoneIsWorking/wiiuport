@@ -468,6 +468,9 @@ class ObjectPlanner {
     // The key of `key`'s draw in N-1 under the learned block pairs, if every
     // block it sourced is either paired or shared by both frames.
     std::optional<AssemblyKey> derivedKey(const AssemblyKey& key) const;
+    // The draw in N-1 of the object keyed `key` in N, under the learned
+    // block pairs.
+    std::optional<size_t> drawnOneBack(const AssemblyKey& key) const;
     // The same shader's draw in N-2 nearest `after` over the values that are
     // numbers in both, starting from `start`, the draw the object's blocks
     // name, which the search then only has to beat.

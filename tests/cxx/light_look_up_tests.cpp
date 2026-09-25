@@ -1,8 +1,11 @@
 #include "check.h"
+#include "object_blend_fixture.h"
 #include "suites.h"
 #include "wiiuport/interp/LightLookUp.h"
+#include "wiiuport/interp/ObjectPlanner.h"
 #include "wiiuport/interp/Transform3x4.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -10,6 +13,8 @@
 #include <vector>
 
 using wiiuport::interp::LightLookUp;
+using wiiuport::interp::ObjectBlend;
+using wiiuport::interp::ObjectPlanner;
 using wiiuport::interp::Transform3x4;
 using wiiuport::interp::Vec3;
 
@@ -208,26 +213,62 @@ void aScalarIsNotTurnedThroughTheWorldsOwnAxes() {
     check::isTrue(out == latest, "the scalar is drawn as the title drew it");
 }
 
+// A stage of rows the light holds seen through each frame's view: its map's
+// coordinates along the first two axes and its depth along the third, whose
+// translations move with the camera.
+struct LookUpStage {
+    std::vector<float> twoBack;
+    std::vector<float> oneBack;
+    std::vector<float> latest;
+
+    LookUpStage(const Scene& scene, size_t rows) {
+        for (size_t row = 0; row < rows; ++row) {
+            auto add = [&](std::vector<float>& into, const Transform3x4& view) {
+                Row seen =
+                    seenThrough(scene.axis(row), 5.0f + static_cast<float>(row), view, false);
+                into.insert(into.end(), seen.begin(), seen.end());
+            };
+            add(twoBack, scene.viewTwoBack);
+            add(oneBack, scene.viewOneBack);
+            add(latest, scene.viewAtN);
+        }
+    }
+};
+
 void aMovedDepthRowIsRebasedToTheInBetweenView() {
     Scene scene;
     LightLookUp lookUp = scene.lookUp();
+    LookUpStage stage(scene, 3);
     Vec3 depth = scene.axis(2);
-    Row latest = seenThrough(depth, 5.0f, scene.viewAtN, false);
-    Row twoBack = seenThrough(depth, 5.0f, scene.viewTwoBack, false);
-    Row oneBack = seenThrough(depth, 5.0f, scene.viewOneBack, false);
-    check::isTrue(lookUp.classify(twoBack, oneBack, latest, scene.viewAtN) ==
-                      LightLookUp::RowForm::Affine,
+    std::span<const float> latest = std::span<const float>(stage.latest).subspan(8, 4);
+    check::isTrue(lookUp.classify(std::span<const float>(stage.twoBack).subspan(8, 4),
+                                  std::span<const float>(stage.oneBack).subspan(8, 4), latest,
+                                  scene.viewAtN) == LightLookUp::RowForm::Affine,
                   "a row along the depth axis whose translation moved is affine");
-    std::array<float, 4> out = latest;
-    check::equal(
-        lookUp.rebaseStage(twoBack, oneBack, latest, scene.viewAtN, scene.viewBetween, out),
-        size_t{1}, "the row is rebased");
+    std::vector<float> out = stage.latest;
+    check::equal(lookUp.rebaseStage(stage.twoBack, stage.oneBack, stage.latest, scene.viewAtN,
+                                    scene.viewBetween, out),
+                 size_t{3}, "the stage's three rows are rebased");
+    Row depthRow{};
+    std::copy_n(out.begin() + 8, 4, depthRow.begin());
     for (Vec3 p : {Vec3{1.0f, 2.0f, 3.0f}, Vec3{-20.0f, 4.0f, 60.0f}, Vec3{7.0f, -9.0f, -1.0f}}) {
         double world = (static_cast<double>(depth.x) * p.x) + (static_cast<double>(depth.y) * p.y) +
-                       (static_cast<double>(depth.z) * p.z) + 5.0;
-        check::isTrue(std::abs(onPoint(out, applied(scene.viewBetween, p), 1.0f) - world) < 1e-3,
+                       (static_cast<double>(depth.z) * p.z) + 7.0;
+        check::isTrue(std::abs(onPoint(depthRow, applied(scene.viewBetween, p), 1.0f) - world) <
+                          1e-3,
                       "seen through the in-between view it looks the map up where the point is");
     }
+}
+
+void aStageWithFewerLightRowsThanALookUpIsLeft() {
+    Scene scene;
+    LightLookUp lookUp = scene.lookUp();
+    LookUpStage stage(scene, 2);
+    std::vector<float> out = stage.latest;
+    check::equal(lookUp.rebaseStage(stage.twoBack, stage.oneBack, stage.latest, scene.viewAtN,
+                                    scene.viewBetween, out),
+                 size_t{0}, "two rows of the light are not a look-up into its map");
+    check::isTrue(out == stage.latest, "the stage is drawn as the title drew it");
 }
 
 void aMixedRowOfTwoAxesIsTheLights() {
@@ -256,7 +297,8 @@ void aDirectionKeepsItsFourthValue() {
                       LightLookUp::RowForm::Direction,
                   "a row whose fourth value stood still is a direction");
     std::array<float, 4> out = latest;
-    lookUp.rebaseStage(twoBack, oneBack, latest, scene.viewAtN, scene.viewBetween, out);
+    LightLookUp::rebase(LightLookUp::RowForm::Direction, latest, scene.viewAtN, scene.viewBetween,
+                        out);
     check::isTrue(out[3] == 0.25f, "a direction's fourth value is not moved");
     Vec3 d{0.3f, -0.5f, 0.8f};
     Transform3x4 turnOnly = scene.viewBetween;
@@ -308,6 +350,53 @@ void aStillRowAndARowOffTheLightsPlanesAreLeft() {
     check::isTrue(out == stage, "the stage is drawn as the title drew it");
 }
 
+void aLookUpDrawnFromDoubleBufferedBlocksIsFoundAFrameBefore() {
+    // The light's look-up sources the block a walker alternates between, A
+    // on even frames and B on odd, so its draw a frame before is keyed by
+    // the other: found through the pair the walker's blend learned, its
+    // three rows of the light are rebased.
+    namespace fixture = wiiuport::tests::object_blend;
+    constexpr uint32_t kCasterA = 0xf4004000;
+    constexpr uint32_t kCasterB = 0xf4084000;
+    Scene scene;
+    std::array<Transform3x4, 4> views = {turned(0.4f, true, {3.7f, -2.0f, 41.2f}),
+                                         scene.viewTwoBack, scene.viewOneBack, scene.viewAtN};
+    std::array<Transform3x4, 4> lights = {turned(0.25f, false, {}), scene.lightTwoBack,
+                                          turned(0.35f, false, {}), scene.light};
+    auto frame = [&](size_t index) {
+        bool odd = index % 2 == 1;
+        uint32_t block = odd ? fixture::kBlockB : fixture::kBlockA;
+        std::vector<float> lightRows =
+            rotationRows(axesOf(lights[index]), {0.0f, 0.0f, 0.0f}, 1.0f);
+        std::vector<float> lookUp;
+        for (size_t row = 0; row < 3; ++row) {
+            Row seen =
+                seenThrough(scene.axis(row), 5.0f + static_cast<float>(row), views[index], false);
+            lookUp.insert(lookUp.end(), seen.begin(), seen.end());
+        }
+        return std::vector<fixture::Draw>{
+            {block, {static_cast<float>(index), 7.0f}},
+            {.block = odd ? fixture::kOtherB : fixture::kOtherA,
+             .values = lightRows,
+             .writesColour = false},
+            {.block = odd ? kCasterB : kCasterA, .values = lightRows, .writesColour = false},
+            {.block = block,
+             .values = lookUp,
+             .stage = ObjectPlanner::kPixelStage,
+             .looksUpDepthMap = true}};
+    };
+    ObjectBlend blend{fixture::kHalfway};
+    blend.setPlanning(true);
+    for (size_t index = 0; index < views.size(); ++index) {
+        fixture::record(blend, frame(index));
+    }
+    check::isTrue(blend.armOnce(), "the blend arms");
+    blend.rebaseLightLookUps(scene.viewAtN, scene.viewBetween);
+    check::equal(blend.lookUpRowsRebased(), uint64_t{3},
+                 "the look-up's rows are rebased, its draw a frame before found by its pair");
+    blend.disarm();
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -316,6 +405,8 @@ void runLightLookUpTests() {
     theAxesAreTheRotationTheMapDrawsTurned();
     aScalarIsNotTurnedThroughTheWorldsOwnAxes();
     aMovedDepthRowIsRebasedToTheInBetweenView();
+    aStageWithFewerLightRowsThanALookUpIsLeft();
+    aLookUpDrawnFromDoubleBufferedBlocksIsFoundAFrameBefore();
     aMixedRowOfTwoAxesIsTheLights();
     aDirectionKeepsItsFourthValue();
     aPlaceThatStoodStillFromNMinusTwoToNByChanceIsStillAPlace();
