@@ -96,6 +96,7 @@ def report(ticks: int, interpolated: int, no_view: int) -> Interpolation:
         objectValuesAlternating=0,
         objectUnverifiedSharingValues=0,
         objectValuesShared=0,
+        objectLookUpRowsRebased=0,
         objectDrawsWritten=interpolated,
         objectReplaysDiverged=0,
         vertexDraws={"blended": interpolated, "noPartner": 2},

@@ -30,5 +30,6 @@ void runSlotPoolTests();
 void runGateTests();
 void runShadowTests();
 void runMapPassTests();
+void runLightLookUpTests();
 
 } // namespace wiiuport::tests

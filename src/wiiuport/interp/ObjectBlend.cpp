@@ -113,10 +113,43 @@ bool ObjectBlend::armOnce() {
         std::lock_guard lock(m_excludedMutex);
         m_armedExcluded = m_excluded;
     }
+    m_rebasedAt.clear();
+    m_rebased.clear();
     m_replayCursor = 0;
     ++m_armings;
     m_armed = true;
     return true;
+}
+
+void ObjectBlend::rebaseLightLookUps(const Transform3x4& viewAtN, const Transform3x4& viewBetween) {
+    if (!m_armed) {
+        return;
+    }
+    const KeyedFrame& latest = m_planner.latest();
+    m_rebasedAt.assign(latest.size(), kNotRebased);
+    for (const ObjectPlanner::LookUp& lookUp : m_planner.lookUps()) {
+        std::span<const float> values = latest.values(lookUp.entry);
+        size_t at = m_rebased.size();
+        m_rebased.insert(m_rebased.end(), values.begin(), values.end());
+        size_t rows =
+            m_planner.light().rebaseStage(m_planner.lookUpTwoBack(lookUp), values, viewAtN,
+                                          viewBetween, std::span(m_rebased).subspan(at));
+        if (rows == 0) {
+            m_rebased.resize(at);
+            continue;
+        }
+        m_rebasedAt[lookUp.entry] = static_cast<uint32_t>(at);
+        m_lookUpRowsRebased += rows;
+    }
+}
+
+std::span<const float> ObjectBlend::drawnWith(size_t entry) const {
+    std::span<const float> blend = m_planner.blendOf(entry);
+    if (!blend.empty() || entry >= m_rebasedAt.size() || m_rebasedAt[entry] == kNotRebased) {
+        return blend;
+    }
+    return std::span(m_rebased).subspan(m_rebasedAt[entry],
+                                        m_planner.latest().values(entry).size());
 }
 
 bool ObjectBlend::apply(const LatteFrameHooks::UniformAssembly& assembly) {
@@ -133,7 +166,7 @@ bool ObjectBlend::apply(const LatteFrameHooks::UniformAssembly& assembly) {
         return false;
     }
     size_t entry = m_replayCursor++;
-    std::span<const float> blend = m_planner.blendOf(entry);
+    std::span<const float> blend = drawnWith(entry);
     if (blend.empty() || std::binary_search(m_armedExcluded.begin(), m_armedExcluded.end(),
                                             assembly.shaderBaseHash)) {
         return false;

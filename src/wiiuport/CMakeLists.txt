@@ -98,6 +98,8 @@ add_library(wiiuport STATIC
   interp/SlotPool.h
   interp/RestoreCheck.h
   interp/Midpoint.h
+  interp/LightLookUp.cpp
+  interp/LightLookUp.h
   interp/ObjectPlanner.cpp
   interp/ObjectPlanner.h
   interp/PlanReplay.cpp

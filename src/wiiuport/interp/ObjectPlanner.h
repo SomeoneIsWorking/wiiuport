@@ -4,6 +4,7 @@
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/interp/AssemblyKey.h"
 #include "wiiuport/interp/KeyedFrame.h"
+#include "wiiuport/interp/LightLookUp.h"
 #include "wiiuport/interp/MapPassValues.h"
 #include "wiiuport/interp/SharedTransforms.h"
 #include "wiiuport/interp/SharedValues.h"
@@ -118,6 +119,28 @@ class ObjectPlanner {
     // The values N's entry is drawn with in the in-between frame; empty when
     // it is drawn as the title drew it.
     std::span<const float> blendOf(size_t entry) const;
+
+    // A stage comparing against the light's map, drawn at N, with its values
+    // two frames back: its rows carrying the light into the camera are
+    // rebased to the in-between view where it is drawn (LightLookUp).
+    struct LookUp {
+        uint32_t entry;
+        uint32_t twoBackAt;
+    };
+
+    std::span<const LookUp> lookUps() const {
+        return m_plan.lookUps;
+    }
+
+    std::span<const float> lookUpTwoBack(const LookUp& lookUp) const {
+        return {m_plan.lookUpTwoBack.data() + lookUp.twoBackAt,
+                m_frames[0].values(lookUp.entry).size()};
+    }
+
+    const LightLookUp& light() const {
+        return m_plan.light;
+    }
+
     // The entry of N-1 that is the same object as an entry of N: the one a
     // blended entry was blended from, or the one a held entry's learned
     // blocks name there. None where it is not known.
@@ -331,6 +354,14 @@ class ObjectPlanner {
         std::vector<float> floats;
         // Whether the entry draws into a map, writing depth alone, by entry.
         std::vector<uint8_t> drawsMap;
+        // Whether the entry is a stage comparing against a map, by entry.
+        std::vector<uint8_t> looksUpMap;
+        // The light's axes, from the frame's draws into maps.
+        LightLookUp light;
+        // Stages comparing against a map and drawn at N whose draw two
+        // frames back is known, with those values one after another.
+        std::vector<LookUp> lookUps;
+        std::vector<float> lookUpTwoBack;
         // What each entry came to, by entry.
         std::vector<Outcome> outcomeOf;
         // The entries left at N, in entry order.
@@ -358,6 +389,9 @@ class ObjectPlanner {
     // and hold the pass at N in their blend -- before anything learns what
     // they drew.
     void planMaps();
+    // Names the building frame's stages comparing against a map that are
+    // drawn at N, with their values two frames back, and the light's axes.
+    void findLightLookUps();
     // A draw into a map's draw in N-2 by its key, holding as many values.
     std::optional<size_t> earlierMapDraw(size_t entry) const;
     // The object a draw into a map draws: its own block, the one fewest of

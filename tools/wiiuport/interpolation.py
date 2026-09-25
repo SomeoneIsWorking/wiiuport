@@ -73,6 +73,9 @@ class Interpolation:
     # their shader -- the pass's view -- and how many values that was.
     objectUnverifiedSharingValues: int
     objectValuesShared: int
+    # Rows of stages comparing against the light's map rebased from the view
+    # at N to the in-between view.
+    objectLookUpRowsRebased: int
     objectDrawsWritten: int
     objectReplaysDiverged: int
     # Replayed draws whose vertices the title rewrote, by what blending them
