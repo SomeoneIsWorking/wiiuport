@@ -24,11 +24,21 @@ using namespace wiiuport::tests::vertex_blend;
 
 constexpr size_t kValuesPerCorner = 5;
 
-// A particle's quad about (x, z): each corner the centre plus one offset, and
-// the UVs every quad has.
-std::vector<float> quadAbout(float x, float z, float turned, float across) {
-    std::array<float, 4> dx{-turned, turned, turned, -turned};
-    std::array<float, 4> dz{-across, -across, across, across};
+// A quad on the water: its centre, and its half extents along x and z.
+struct QuadShape {
+    float x;
+    float z;
+    float halfX;
+    float halfZ;
+};
+
+// The quad's four corners, each the centre plus one offset, with the UVs
+// every quad has.
+std::vector<float> quadAbout(const QuadShape& shape) {
+    float x = shape.x;
+    float z = shape.z;
+    std::array<float, 4> dx{-shape.halfX, shape.halfX, shape.halfX, -shape.halfX};
+    std::array<float, 4> dz{-shape.halfZ, -shape.halfZ, shape.halfZ, shape.halfZ};
     std::vector<float> values;
     for (size_t corner = 0; corner < 4; ++corner) {
         std::array<float, kValuesPerCorner> vertex{x + dx[corner], 0.0f, z + dz[corner],
@@ -57,7 +67,8 @@ BufferWriters::Leading quadOf(std::span<const std::byte> bytes) {
 void aDrawIsTheParticleThatWroteItsBufferWhileItReadsWhatWasWritten() {
     BufferWriters writers;
     // A draw's buffer runs on past the quad, as the title's do.
-    std::vector<std::byte> bytes = bytesOfQuad(quadAbout(40.0f, 8.0f, 3.0f, 2.0f));
+    std::vector<std::byte> bytes =
+        bytesOfQuad(quadAbout({.x = 40.0f, .z = 8.0f, .halfX = 3.0f, .halfZ = 2.0f}));
     bytes.resize(bytes.size() + 12);
     const void* source = bytes.data();
     check::isTrue(!writers.objectDrawn(source, bytes).has_value(),
@@ -100,11 +111,13 @@ GuestFrame ripples(Blends& blends, KeptBuffers& kept, uint32_t block,
     std::vector<ActorDraw> draws;
     draws.reserve(drawn.size());
     for (const Ripple& ripple : drawn) {
-        draws.push_back({.block = block,
-                         .uniforms = {1.0f},
-                         .mesh = quadAbout(ripple.x, 0.0f, ripple.radius, ripple.radius),
-                         .valuesPerVertex = kValuesPerCorner,
-                         .keptIn = ripple.buffer});
+        draws.push_back(
+            {.block = block,
+             .uniforms = {1.0f},
+             .mesh = quadAbout(
+                 {.x = ripple.x, .z = 0.0f, .halfX = ripple.radius, .halfZ = ripple.radius}),
+             .valuesPerVertex = kValuesPerCorner,
+             .keptIn = ripple.buffer});
     }
     GuestFrame frame(std::move(draws), &kept);
     for (const Ripple& ripple : drawn) {
@@ -198,12 +211,12 @@ constexpr uint32_t kShadowBlock = 0xf4008000;
 GuestFrame lineAt(Blends& blends, KeptBuffers& kept, float x) {
     GuestFrame frame({{.block = kLineBlock,
                        .uniforms = {1.0f},
-                       .mesh = quadAbout(x, 0.0f, 2.0f, 2.0f),
+                       .mesh = quadAbout({.x = x, .z = 0.0f, .halfX = 2.0f, .halfZ = 2.0f}),
                        .valuesPerVertex = kValuesPerCorner,
                        .keptIn = 0},
                       {.block = kShadowBlock,
                        .uniforms = {1.0f},
-                       .mesh = quadAbout(x, 0.0f, 2.0f, 2.0f),
+                       .mesh = quadAbout({.x = x, .z = 0.0f, .halfX = 2.0f, .halfZ = 2.0f}),
                        .passOver = 0,
                        .valuesPerVertex = kValuesPerCorner,
                        .shader = kShadowShader}},
