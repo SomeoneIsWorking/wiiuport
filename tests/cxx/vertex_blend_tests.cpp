@@ -835,6 +835,36 @@ void aRingNewAtNInABufferOfItsOwnIsNotTakenForAnother() {
                  "and counted with no partner");
 }
 
+void aRingKeptInItsBuffersIsNotTakenForOneSharingAFlippedValue() {
+    // Two rings kept each in a pair of buffers of its own, their second value
+    // flipping with the title's double buffering. A frame before, each holds
+    // bit for bit the value the other holds at N; where it moved, each is
+    // nearest its own, and each is blended from it.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    KeptBuffers kept;
+    auto rings = [&kept](uint32_t block, float uniform, float step, bool odd) {
+        float flip = odd ? 7.0f : 5.0f;
+        float otherFlip = odd ? 5.0f : 7.0f;
+        std::vector<ActorDraw> draws{
+            {.block = block, .uniforms = {uniform}, .mesh = {step, flip}, .keptIn = odd ? 1 : 0},
+            {.block = block,
+             .uniforms = {uniform},
+             .mesh = {500.0f + step, otherFlip},
+             .keptIn = odd ? 3 : 2}};
+        return GuestFrame(std::move(draws), &kept);
+    };
+    blends.record(rings(kSkyBlock, 1.0f, -2.0f, false));
+    blends.record(rings(kSkyBlockB, 2.0f, -1.0f, true));
+    blends.record(rings(kSkyBlock, 3.0f, 0.0f, false));
+    blends.record(rings(kSkyBlockB, 3.0f, 1.0f, true));
+    GuestFrame latest = rings(kSkyBlock, 3.0f, 2.0f, false);
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 1.5f, "the first ring is blended from its own");
+    check::equal(drawn[1][0], 501.5f, "and so is the second");
+}
+
 void nothingIsReplacedBeforeThreeFramesArePlanned() {
     Blends blends;
     blends.objects.setPlanning(true);
@@ -916,6 +946,7 @@ void runVertexBlendTests() {
     aCloudThatHappensToStandHalfWayIsNotTakenForAnother();
     aCloudNoSiblingPassedIsDrawnAsTheTitleDrewIt();
     aRingNewAtNInABufferOfItsOwnIsNotTakenForAnother();
+    aRingKeptInItsBuffersIsNotTakenForOneSharingAFlippedValue();
     nothingIsReplacedBeforeThreeFramesArePlanned();
     aReplayOutOfStepStopsReplacing();
     verticesSwitchedOffAreDrawnAsTheTitleDrewThemAndBlendAgainOnceOn();
