@@ -456,6 +456,7 @@ void VertexBlend::recordReads(const LatteFrameHooks::DrawPrepared& draw,
 void VertexBlend::onFrameRecorded(const frame::FrameRecording& /*recording*/) {
     // The frames it blends are about to move.
     m_pool.waitAll();
+    learnPairedBuffers();
     publishCounts();
     m_building.frameIndex = m_objects.framesEnded();
     std::swap(m_twoBack, m_previous);
@@ -730,12 +731,16 @@ std::optional<size_t> VertexBlend::drawOf(const Frame& frame, size_t entry, cons
 void VertexBlend::blendSlot(size_t slot, Scratch& scratch) {
     PairSlot& pair = m_pairSlots[slot];
     Job job = pair.job;
-    if (job.identity == PartnerIdentity::ByPlace) {
-        placeByVertices(job, scratch);
+    if (job.identity == PartnerIdentity::ByPlace && !placeByVertices(job, scratch)) {
+        pair.outcome = VertexOutcome::NoPartner;
+        return;
     }
     pair.outcome =
         blendPair(m_twoBack.draws()[job.earlier], m_previous.draws()[job.partner],
                   m_latest.draws()[job.draw], *job.layout, job.identity, pair.start, scratch);
+    if (job.earlierByBuffers && pair.outcome == VertexOutcome::Blended) {
+        pair.partnerSource = m_previous.draws()[job.partner].bufferSources.front();
+    }
 }
 
 std::optional<VertexBlend::PairBlend> VertexBlend::blendOf(size_t index) {
@@ -874,46 +879,83 @@ void VertexBlend::gather(const Frame& frame, const Draw& draw, std::vector<std::
     }
 }
 
-size_t VertexBlend::mostResembling(const Draw& drawn, const VertexLayout& layout,
-                                   const Frame& frame, size_t planned,
-                                   std::span<const std::byte> twoBack, bool twoBackIsItsOwn,
-                                   Scratch& scratch) const {
-    gather(frame, frame.draws()[planned], scratch.candidate);
-    Resemblance closest = resemblance(layout, scratch.candidate, scratch.after, twoBack);
-    size_t found = planned;
+std::optional<size_t> VertexBlend::mostResembling(const Draw& drawn, const VertexLayout& layout,
+                                                  const Frame& frame, size_t planned,
+                                                  std::span<const std::byte> twoBack,
+                                                  const void* ownSource, Scratch& scratch) const {
+    std::optional<size_t> found;
+    std::optional<Resemblance> closest;
+    auto consider = [&](size_t index) {
+        if (pairedElsewhere(frame.draws()[index], ownSource)) {
+            return;
+        }
+        gather(frame, frame.draws()[index], scratch.candidate);
+        Resemblance candidate = resemblance(layout, scratch.candidate, scratch.after, twoBack);
+        if (!closest.has_value() || candidate.closerThan(*closest, ownSource != nullptr)) {
+            closest = candidate;
+            found = index;
+        }
+    };
+    consider(planned);
     auto shader = frame.byShader.find({drawn.vertexShaderBaseHash, drawn.vertexShaderAuxHash});
     if (shader == frame.byShader.end()) {
         return found;
     }
     for (size_t index : shader->second) {
-        if (index == planned || frame.draws()[index].layout.buffers != layout.buffers) {
-            continue;
-        }
-        gather(frame, frame.draws()[index], scratch.candidate);
-        Resemblance candidate = resemblance(layout, scratch.candidate, scratch.after, twoBack);
-        if (candidate.closerThan(closest, twoBackIsItsOwn)) {
-            closest = candidate;
-            found = index;
+        if (index != planned && frame.draws()[index].layout.buffers == layout.buffers) {
+            consider(index);
         }
     }
     return found;
 }
 
-void VertexBlend::placeByVertices(Job& job, Scratch& scratch) {
+bool VertexBlend::pairedElsewhere(const Draw& draw, const void* ownSource) const {
+    if (ownSource == nullptr || draw.bufferSources.empty()) {
+        return false;
+    }
+    const void* source = draw.bufferSources.front();
+    auto pairedOtherwise = [this, &draw](const void* from, const void* to) {
+        auto paired = m_pairedBuffers.find({draw.vertexShaderBaseHash, from});
+        return paired != m_pairedBuffers.end() && paired->second != to;
+    };
+    return pairedOtherwise(ownSource, source) || pairedOtherwise(source, ownSource);
+}
+
+void VertexBlend::learnPairedBuffers() {
+    for (const PairSlot& pair : m_pairSlots) {
+        if (pair.partnerSource == nullptr) {
+            continue;
+        }
+        const Draw& drawn = m_latest.draws()[pair.job.draw];
+        m_pairedBuffers[{drawn.vertexShaderBaseHash, drawn.bufferSources.front()}] =
+            pair.partnerSource;
+    }
+}
+
+bool VertexBlend::placeByVertices(Job& job, Scratch& scratch) {
     const Draw& drawn = m_latest.draws()[job.plannedBy];
     size_t plannedEarlier = job.earlier;
     size_t plannedPartner = job.partner;
     gather(m_latest, drawn, scratch.after);
+    const Draw& earlier = m_twoBack.draws()[job.earlier];
+    const void* ownSource = job.earlierByBuffers ? earlier.bufferSources.front() : nullptr;
     if (!job.earlierByBuffers) {
+        // With no buffers named, every draw of the shader may be it.
         job.earlier =
-            mostResembling(drawn, *job.layout, m_twoBack, job.earlier, {}, false, scratch);
+            mostResembling(drawn, *job.layout, m_twoBack, job.earlier, {}, nullptr, scratch)
+                .value_or(job.earlier);
     }
     gather(m_twoBack, m_twoBack.draws()[job.earlier], scratch.twoBack);
-    job.partner = mostResembling(drawn, *job.layout, m_previous, job.partner, scratch.twoBack,
-                                 job.earlierByBuffers, scratch);
+    std::optional<size_t> partner = mostResembling(drawn, *job.layout, m_previous, job.partner,
+                                                   scratch.twoBack, ownSource, scratch);
+    if (!partner.has_value()) {
+        return false;
+    }
+    job.partner = *partner;
     if (job.earlier != plannedEarlier || job.partner != plannedPartner) {
         ++m_partnersFoundByVertices;
     }
+    return true;
 }
 
 } // namespace wiiuport::interp

@@ -421,6 +421,9 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         Job job;
         size_t start;
         VertexOutcome outcome{VertexOutcome::Blended};
+        // Where blended from its own buffers two frames back, the first
+        // buffer of the partner it was blended from (m_pairedBuffers).
+        const void* partnerSource{nullptr};
     };
 
     // A blending thread's storage: a pair's buffers one after another, as
@@ -460,15 +463,25 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // planner's where none more. Done as its mesh is blended, not ahead of
     // every mesh, so the replay's first draws do not wait on the frame's
     // every search.
-    void placeByVertices(Job& job, Scratch& scratch);
+    // Learns the pairs of buffers the latest frame's draws blended from
+    // their own alternated through (m_pairedBuffers), once its blends are done.
+    void learnPairedBuffers();
+    // False when no draw a frame before can be its partner.
+    bool placeByVertices(Job& job, Scratch& scratch);
     // Of `planned` and the draws of `drawn`'s shader with its buffers in
     // `frame`, the one `drawn` -- gathered into scratch.after -- most
     // resembles under `layout`; given its vertices two frames back
-    // (`twoBack`), nearness counts only what moved from them, and where those
-    // are known to be its own (`twoBackIsItsOwn`), nearness alone decides.
-    size_t mostResembling(const Draw& drawn, const VertexLayout& layout, const Frame& frame,
-                          size_t planned, std::span<const std::byte> twoBack, bool twoBackIsItsOwn,
-                          Scratch& scratch) const;
+    // (`twoBack`), nearness counts only what moved from them. Where those
+    // are its own, drawn from `ownSource`, nearness alone decides, and a
+    // draw in a buffer not paired with it (m_pairedBuffers) is another
+    // object: none when every draw is.
+    std::optional<size_t> mostResembling(const Draw& drawn, const VertexLayout& layout,
+                                         const Frame& frame, size_t planned,
+                                         std::span<const std::byte> twoBack, const void* ownSource,
+                                         Scratch& scratch) const;
+    // Whether `ownSource` is known to pair with a buffer other than `draw`'s,
+    // or `draw`'s with one other than `ownSource`.
+    bool pairedElsewhere(const Draw& draw, const void* ownSource) const;
     // A draw's buffers one after another into `into`, as the blend reads them.
     void gather(const Frame& frame, const Draw& draw, std::vector<std::byte>& into) const;
     // The draw a frame holds for an object's entry and a draw's place among
@@ -541,6 +554,14 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::chrono::nanoseconds m_waiting{0};
     std::atomic<uint64_t> m_partnersFoundByVertices{0};
     std::unordered_set<std::pair<uint64_t, uint64_t>, PairHash> m_shadersKeepingBuffers;
+    // For a shader and the first buffer a draw that keeps its own drew from,
+    // the other buffer of the pair it alternates through, as a blend of it
+    // from its own two frames back found. A pool of ripple rings on a line
+    // puts another ring half way between an ended ring and the new one its
+    // buffer is given to; that ring is in another pair, and the new ring,
+    // whose pair holds no draw a frame before, is not blended from it. Written
+    // once a frame's blends are done, before the next begin.
+    std::unordered_map<std::pair<uint64_t, const void*>, const void*, PairHash> m_pairedBuffers;
     std::atomic<bool> m_blendingEnabled{true};
     std::mutex m_excludedMutex;
     std::vector<uint64_t> m_excluded;
