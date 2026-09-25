@@ -95,6 +95,7 @@ void Runtime::installHooks() {
     }
     LatteFrameHooks::SetObserver(&m_recorder);
     VPADInputHooks::SetSource(&m_input);
+    m_rippleProbe.install();
     m_hooksInstalled = true;
     // Off unless a port is configured. The channel is how an agent asks a
     // running product what it is doing; a player never needs it.

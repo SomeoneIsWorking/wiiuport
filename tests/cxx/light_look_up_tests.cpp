@@ -350,14 +350,16 @@ void aStillRowAndARowOffTheLightsPlanesAreLeft() {
     check::isTrue(out == stage, "the stage is drawn as the title drew it");
 }
 
+// The blocks the light's caster alternates between.
+constexpr uint32_t kCasterA = 0xf4004000;
+constexpr uint32_t kCasterB = 0xf4084000;
+
 void aLookUpDrawnFromDoubleBufferedBlocksIsFoundAFrameBefore() {
     // The light's look-up sources the block a walker alternates between, A
     // on even frames and B on odd, so its draw a frame before is keyed by
     // the other: found through the pair the walker's blend learned, its
     // three rows of the light are rebased.
     namespace fixture = wiiuport::tests::object_blend;
-    constexpr uint32_t kCasterA = 0xf4004000;
-    constexpr uint32_t kCasterB = 0xf4084000;
     Scene scene;
     std::array<Transform3x4, 4> views = {turned(0.4f, true, {3.7f, -2.0f, 41.2f}),
                                          scene.viewTwoBack, scene.viewOneBack, scene.viewAtN};

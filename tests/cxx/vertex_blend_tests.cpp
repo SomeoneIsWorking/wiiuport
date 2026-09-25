@@ -1,6 +1,8 @@
 #include "check.h"
 #include "suites.h"
+#include "vertex_blend_fixture.h"
 #include "wiiuport/frame/FrameRecording.h"
+#include "wiiuport/guest/RippleParticles.h"
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/VertexBlend.h"
 
@@ -17,6 +19,7 @@
 
 using wiiuport::frame::FrameRecording;
 using wiiuport::frame::RecordedUniformAssembly;
+using wiiuport::guest::RippleParticles;
 using wiiuport::interp::blendVertexBytes;
 using wiiuport::interp::ObjectBlend;
 using wiiuport::interp::PartnerIdentity;
@@ -26,14 +29,13 @@ using wiiuport::interp::VertexOutcome;
 
 namespace {
 
-constexpr float kHalfway = 0.5f;
+using namespace wiiuport::tests::vertex_blend;
+
 constexpr PartnerIdentity kByBlocks = PartnerIdentity::ByBlocks;
 constexpr uint8_t kFloat3 = 0x30;
-constexpr uint8_t kFloat1 = 0x0E;
 // 8_8_8_8 UNORM: a colour, not floats.
 constexpr uint8_t kColour = 0x1A;
 constexpr uint8_t kLittleEndian = 0;
-constexpr uint8_t kBigEndian = 2;
 // SWAP_U16: halves swapped, which no float lerp reads.
 constexpr uint8_t kSwapU16 = 1;
 // A vertex: a position of three floats, then a colour.
@@ -43,23 +45,6 @@ struct Vertex {
     std::array<float, 3> position;
     uint32_t colour;
 };
-
-// A word as the guest keeps it: most significant byte first for big endian.
-void putWord(uint8_t endian, std::byte* at, uint32_t word) {
-    for (uint32_t index = 0; index < 4; ++index) {
-        uint32_t shift = endian == kBigEndian ? 24 - (index * 8) : index * 8;
-        at[index] = static_cast<std::byte>((word >> shift) & 0xffu);
-    }
-}
-
-uint32_t getWord(const std::byte* at, uint8_t endian) {
-    uint32_t word = 0;
-    for (uint32_t index = 0; index < 4; ++index) {
-        uint32_t shift = endian == kBigEndian ? 24 - (index * 8) : index * 8;
-        word |= static_cast<uint32_t>(at[index]) << shift;
-    }
-    return word;
-}
 
 // Vertices as the guest keeps them, each word in the given order.
 std::vector<std::byte> bytesOf(const std::vector<Vertex>& vertices, uint8_t endian) {
@@ -287,104 +272,6 @@ void aMeshThatStoodStillUntilNIsDrawnAsTheTitleDrewIt() {
 }
 
 // --- VertexBlend, fed as the runtime feeds it ---
-
-constexpr uint64_t kActorShader = 0xdddd;
-constexpr uint64_t kOtherShader = 0xeeee;
-// The blocks two actors alternate between, as the title double-buffers them.
-constexpr uint32_t kBlockA = 0xf4001000;
-constexpr uint32_t kBlockB = 0xf4081000;
-constexpr uint32_t kOtherA = 0xf4002000;
-constexpr uint32_t kOtherB = 0xf4082000;
-
-// One of the guest's draws: its uniforms, then its vertices, one float each.
-struct ActorDraw {
-    uint32_t block;
-    std::vector<float> uniforms;
-    std::vector<float> mesh;
-    // The earlier draw of the frame whose buffer it reads, as a second pass
-    // over one mesh does; its own `mesh` is then that draw's.
-    std::optional<size_t> passOver{};
-    // Its mesh's values a vertex, and the one its shader fetches.
-    uint32_t valuesPerVertex{1};
-    uint32_t valueFetched{0};
-    // Drawn with the uniforms the draw before it assembled, as a title draws
-    // several meshes of one object: no assembly of its own.
-    bool sharesUniforms{false};
-    // Where in the buffer it reads its vertices start, in values: a draw
-    // over part of another's mesh, as a toon outline reads the hair's.
-    uint32_t fromValue{0};
-    // The buffer the title keeps its vertices in from frame to frame, by
-    // KeptBuffers' index; none, and each frame's are in a buffer of their own.
-    std::optional<size_t> keptIn{};
-};
-
-// Buffers the title keeps an object's vertices in across frames, at
-// addresses that do not move.
-struct KeptBuffers {
-    std::array<std::vector<std::byte>, 8> buffers;
-};
-
-// Where a guest's draw keeps its mesh: each frame's vertices in their own
-// buffer, as the title rewrites them, or in one it keeps.
-struct GuestFrame {
-    std::vector<ActorDraw> draws;
-    std::vector<std::vector<std::byte>> meshes;
-    KeptBuffers* kept;
-
-    explicit GuestFrame(std::vector<ActorDraw> drawn, KeptBuffers* keptBuffers = nullptr)
-        : draws(std::move(drawn)), kept(keptBuffers) {
-        for (const ActorDraw& draw : draws) {
-            std::vector<std::byte> bytes(draw.mesh.size() * sizeof(float));
-            for (size_t index = 0; index < draw.mesh.size(); ++index) {
-                putWord(kBigEndian, bytes.data() + (index * sizeof(float)),
-                        std::bit_cast<uint32_t>(draw.mesh[index]));
-            }
-            if (std::optional<size_t> slot = draw.keptIn; slot.has_value()) {
-                std::vector<std::byte>& buffer = kept->buffers.at(*slot);
-                buffer.resize(bytes.size());
-                std::ranges::copy(bytes, buffer.begin());
-                bytes.clear();
-            }
-            meshes.push_back(std::move(bytes));
-        }
-    }
-
-    // The bytes the draw at `index` reads.
-    std::span<const std::byte> meshOf(size_t index) const {
-        size_t reads = draws[index].passOver.value_or(index);
-        std::optional<size_t> slot = draws[reads].keptIn;
-        std::span<const std::byte> buffer =
-            slot.has_value() ? std::span<const std::byte>(kept->buffers.at(*slot))
-                             : std::span<const std::byte>(meshes[reads]);
-        return buffer.subspan(draws[index].fromValue * sizeof(float));
-    }
-};
-
-RecordedUniformAssembly assemblyOf(const ActorDraw& draw) {
-    RecordedUniformAssembly assembly;
-    assembly.shaderBaseHash = kActorShader;
-    assembly.blockSources = {1, draw.block};
-    assembly.data = draw.uniforms;
-    return assembly;
-}
-
-LatteFrameHooks::DrawPrepared preparedOf(std::span<const std::byte> mesh, bool fromRuntime,
-                                         const ActorDraw& draw) {
-    LatteFrameHooks::DrawPrepared prepared{};
-    prepared.vertexShaderBaseHash = kActorShader;
-    prepared.vertexUniforms = true;
-    prepared.fromRuntime = fromRuntime;
-    prepared.vertexReplaceable = fromRuntime;
-    prepared.vertexBuffers[0] = {mesh.data(), static_cast<uint32_t>(mesh.size()),
-                                 static_cast<uint32_t>(draw.valuesPerVertex * sizeof(float)), 0};
-    prepared.vertexBufferCount = 1;
-    prepared.vertexAttributes[0] = {
-        0,    static_cast<uint32_t>(draw.valueFetched * sizeof(float)), 4, kFloat1, kBigEndian, 0,
-        false};
-    prepared.vertexAttributeCount = 1;
-    return prepared;
-}
-
 void aLayoutDescribesOnlyTheDrawItWasTakenFrom() {
     std::vector<std::byte> mesh(16);
     ActorDraw pair{kBlockA, {}, {}, std::nullopt, 2, 0};
@@ -403,71 +290,6 @@ void aLayoutDescribesOnlyTheDrawItWasTakenFrom() {
     moreAttributes.vertexAttributeCount = 2;
     check::isTrue(!layout.describes(moreAttributes), "nor one fetching more");
 }
-
-struct Blends {
-    ObjectBlend objects{kHalfway};
-    VertexBlend vertices{objects, kHalfway};
-    // Every frame recorded, alive to the end: a frame's own buffers are
-    // then at addresses no later frame's are, as the title's rewritten ones
-    // are not at a kept buffer's two frames on. A test's temporary frame,
-    // freed, would hand its address to a later one.
-    std::deque<GuestFrame> recorded;
-
-    // One guest frame as the recorder hands it over.
-    void record(const GuestFrame& guest) {
-        const GuestFrame& frame = recorded.emplace_back(guest);
-        FrameRecording recording;
-        for (size_t index = 0; index < frame.draws.size(); ++index) {
-            if (!frame.draws[index].sharesUniforms) {
-                RecordedUniformAssembly assembly = assemblyOf(frame.draws[index]);
-                objects.onAssemblyRecorded(assembly);
-                vertices.onAssemblyRecorded(assembly);
-                recording.addUniformAssembly(assembly);
-            }
-            vertices.onDrawRecorded(preparedOf(frame.meshOf(index), false, frame.draws[index]));
-        }
-        objects.onFrameRecorded(recording);
-        vertices.onFrameRecorded(recording);
-    }
-
-    // Replays the latest frame -- `latest`, as recorded -- as the product
-    // does, returning each draw's mesh as drawn: the replacement where one
-    // was handed over.
-    std::vector<std::vector<float>> replay(const GuestFrame& latest) {
-        const GuestFrame& frame = recorded.back();
-        check::equal(frame.draws.size(), latest.draws.size(), "the frame replayed is the latest");
-        objects.armOnce();
-        std::vector<std::vector<float>> drawn;
-        for (size_t index = 0; index < frame.draws.size(); ++index) {
-            const ActorDraw& draw = frame.draws[index];
-            std::vector<uint32_t> sources{1, draw.block};
-            std::vector<float> uniforms = draw.uniforms;
-            LatteFrameHooks::UniformAssembly assembly{};
-            assembly.shaderBaseHash = kActorShader;
-            assembly.data = uniforms.data();
-            assembly.sizeInBytes = static_cast<uint32_t>(uniforms.size() * sizeof(float));
-            assembly.blockAddresses = sources.data();
-            assembly.blockAddressCount = 1;
-            assembly.fromRuntime = true;
-            if (!draw.sharesUniforms) {
-                objects.apply(assembly);
-            }
-            LatteFrameHooks::VertexReplacements replacements;
-            vertices.onRuntimeDraw(preparedOf(frame.meshOf(index), true, draw), replacements);
-            const auto* bytes = static_cast<const std::byte*>(replacements.data[0] != nullptr
-                                                                  ? replacements.data[0]
-                                                                  : frame.meshOf(index).data());
-            std::vector<float> mesh(draw.mesh.size());
-            for (size_t value = 0; value < mesh.size(); ++value) {
-                mesh[value] =
-                    std::bit_cast<float>(getWord(bytes + (value * sizeof(float)), kBigEndian));
-            }
-            drawn.push_back(std::move(mesh));
-        }
-        objects.disarm();
-        return drawn;
-    }
-};
 
 void aWalkingActorsMeshIsDrawnBetweenItsPartnersAndItsOwn() {
     Blends blends;

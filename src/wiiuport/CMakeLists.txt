@@ -64,6 +64,11 @@ add_library(wiiuport STATIC
   frame/SearchFeed.h
   frame/VertexChanges.cpp
   frame/VertexChanges.h
+  guest/GuestWords.h
+  guest/RippleParticles.cpp
+  guest/RippleParticles.h
+  guest/RippleProbe.cpp
+  guest/RippleProbe.h
     input/InputDriver.cpp
   input/InputDriver.h
   interp/ContinuousInterpolator.cpp
@@ -83,6 +88,7 @@ add_library(wiiuport STATIC
   interp/ObjectBlend.h
   interp/VertexBlend.cpp
   interp/VertexBlend.h
+  interp/DrawObjects.h
   interp/ObjectCensus.cpp
   interp/ObjectCensus.h
   interp/NeighbourCheck.cpp

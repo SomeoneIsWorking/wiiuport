@@ -5,6 +5,7 @@
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/frame/RecordingObserver.h"
+#include "wiiuport/interp/DrawObjects.h"
 #include "wiiuport/interp/Midpoint.h"
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/SlotPool.h"
@@ -129,7 +130,10 @@ enum class PartnerIdentity : uint8_t {
     // Its object was found by the uniforms it drew with, which vouch for
     // them alone: another object standing where its uniforms passed brings
     // other vertices, so they must show it too.
-    ByValues
+    ByValues,
+    // The title's code was seen drawing it as one of its own objects, younger
+    // a frame before (DrawObjects): the same object, whatever its vertices.
+    ByGuestObject
 };
 
 // Blends a draw's vertex bytes at `t` from `before`, its partner's in N-1, to
@@ -201,8 +205,9 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     static constexpr size_t kBlendWorkers = 4;
 
     // Reads the plan and the replay's place from `objects`, which must be
-    // notified of a frame's end before this is.
-    VertexBlend(const ObjectBlend& objects, float t);
+    // notified of a frame's end before this is, and the title's own objects
+    // its draws drew from `drawObjects`.
+    VertexBlend(const ObjectBlend& objects, const DrawObjects& drawObjects, float t);
     ~VertexBlend() override;
 
     VertexBlend(const VertexBlend&) = delete;
@@ -237,6 +242,12 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // whose vertex shader reads uniforms.
     uint64_t draws(VertexOutcome outcome) const {
         return m_outcomes[static_cast<size_t>(outcome)];
+    }
+
+    // The same, of the draws the title's code was seen drawing as its own
+    // objects (DrawObjects).
+    uint64_t objectDraws(VertexOutcome outcome) const {
+        return m_objectOutcomes[static_cast<size_t>(outcome)];
     }
 
     // The same, vertex shader by vertex shader: which meshes step at the
@@ -304,6 +315,8 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         uint32_t mesh{0};
         // The next kept draw with its vertex entry, if any.
         uint32_t nextOfEntry{0};
+        // The title's object it drew, where its code was seen drawing it.
+        std::optional<GuestObject> object;
     };
 
     // The kept draws of one vertex entry: the first, the last, and how many,
@@ -356,14 +369,18 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         // object's vertices in buffers of its own, double-buffered as its
         // blocks are, draws it from the same one two frames apart.
         std::unordered_map<std::pair<uint64_t, const void*>, uint32_t, PairHash> bySource;
+        // The kept draw of each of the title's objects, by its address.
+        std::unordered_map<uint32_t, uint32_t> byObject;
         // Of the draws blended from their own buffers two frames back, keyed
         // as bySource: the first buffer of the draw a frame before each went
-        // on from, and, keyed by that buffer, the draw's own. A pool of ripple
-        // rings on a line puts another ring half way between an ended ring
-        // and the new one its buffer is given to; the ring that went on from
-        // another buffer is another ring, as is any but the one that went on
-        // from the new ring's. The buffers a ring alternates through are not
-        // a fixed pair: a pool gives a ring another as rings come and go.
+        // on from, and, keyed by that buffer, the draw's own: how a pool of
+        // particles is told apart where the title's code was not seen
+        // drawing them (DrawObjects). Particles on a line put another half
+        // way between an ended one and the new one its buffer is given to;
+        // the one that went on from another buffer is another particle, as
+        // is any but the one that went on from the new one's. The buffers a
+        // particle alternates through are not a fixed pair: a pool gives it
+        // another as particles come and go.
         std::unordered_map<std::pair<uint64_t, const void*>, const void*, PairHash> continuedFrom;
         std::unordered_map<std::pair<uint64_t, const void*>, const void*, PairHash> continuedBy;
         // What every draw of the frame reads vertices from, a kept mesh's
@@ -498,6 +515,15 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // The draw a frame holds for an object's entry and a draw's place among
     // it, if it was kept and is laid out as `drawn` is.
     static std::optional<size_t> drawOf(const Frame& frame, size_t entry, const Draw& drawn);
+    // A draw of the title's object tied to the same object's draws a frame
+    // before and two frames back, each younger than the next; none when the
+    // object is new since, or reborn at its address.
+    std::variant<Job, VertexOutcome> planByObject(size_t index, const GuestObject& object) const;
+    // The draw of `frame` of the object `olderThan` names, younger than it
+    // and laid out and shaded as `drawn`, with the object as it drew it, if
+    // any.
+    static std::optional<std::pair<size_t, GuestObject>>
+    drawOfObject(const Frame& frame, const Draw& drawn, const GuestObject& olderThan);
     // The draw of `frame` from the same guest buffers as `drawn`, by the same
     // shader, if any.
     static std::optional<size_t> drawnFrom(const Frame& frame, const Draw& drawn);
@@ -508,10 +534,11 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // draw at `index` does not and another latest draw reads: its object
     // goes on in that draw.
     bool continuesElsewhere(const Draw& earlier, size_t index) const;
-    void count(uint64_t shaderBaseHash, VertexOutcome outcome);
+    void count(const Draw& drawn, VertexOutcome outcome);
     void publishCounts();
 
     const ObjectBlend& m_objects;
+    const DrawObjects& m_drawObjects;
     float m_t;
     Frame m_building;
     Frame m_latest;
@@ -552,6 +579,7 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     std::vector<PairSlot> m_pairSlots;
     std::vector<Scratch> m_scratch{kBlendWorkers};
     std::array<uint64_t, kVertexOutcomeCount> m_outcomes{};
+    std::array<uint64_t, kVertexOutcomeCount> m_objectOutcomes{};
     // Counted on the rendering thread without a lock, and published under
     // one once a frame: a lock and a map search per replayed draw was a
     // fifth of the replay's own vertex work.

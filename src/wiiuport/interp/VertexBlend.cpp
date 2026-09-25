@@ -289,11 +289,12 @@ VertexOutcome blendVertexBytes(const VertexLayout& layout, std::span<const std::
         return VertexOutcome::Started;
     }
     if (!midpoint.landsOn()) {
-        // Known by its blocks, its own animation may have turned back at
-        // N-1, stepping to N no further than it stepped there; one that
-        // leaps further was set back to the start of its run -- a band of
-        // surf -- and half way is where it never was.
-        if (identity != PartnerIdentity::ByBlocks ||
+        // Known by its blocks or as the title's own object, its own
+        // animation may have turned back at N-1, stepping to N no further
+        // than it stepped there; one that leaps further was set back to the
+        // start of its run -- a band of surf -- and half way is where it
+        // never was.
+        if ((identity != PartnerIdentity::ByBlocks && identity != PartnerIdentity::ByGuestObject) ||
             !steppedNoFurther(layout, {.twoBack = twoBack, .before = before, .after = after})) {
             return VertexOutcome::Unverified;
         }
@@ -336,8 +337,9 @@ Midpoint vertexMidpoint(const VertexLayout& layout, std::span<const std::byte> t
     return midpoint;
 }
 
-VertexBlend::VertexBlend(const ObjectBlend& objects, float t)
-    : m_objects(objects), m_t(t), m_pool(kBlendWorkers, [this](size_t slot, size_t worker) {
+VertexBlend::VertexBlend(const ObjectBlend& objects, const DrawObjects& drawObjects, float t)
+    : m_objects(objects), m_drawObjects(drawObjects), m_t(t),
+      m_pool(kBlendWorkers, [this](size_t slot, size_t worker) {
           blendSlot(slot, m_scratch[worker]);
       }) {
 }
@@ -357,6 +359,7 @@ VertexBlend::Draw& VertexBlend::Frame::appendDraw() {
     draw.bufferSources.clear();
     draw.mesh = 0;
     draw.nextOfEntry = 0;
+    draw.object.reset();
     return draw;
 }
 
@@ -368,6 +371,7 @@ void VertexBlend::Frame::clear() {
     byShader.clear();
     meshes.clear();
     bySource.clear();
+    byObject.clear();
     continuedFrom.clear();
     continuedBy.clear();
     reads.clear();
@@ -418,6 +422,13 @@ void VertexBlend::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) {
             m_building.bySource.try_emplace(
                 std::pair{draw.vertexShaderBaseHash, recorded.bufferSources.front()},
                 static_cast<uint32_t>(index));
+            const LatteFrameHooks::DrawPrepared::VertexBuffer& first = draw.vertexBuffers[0];
+            recorded.object = m_drawObjects.objectDrawn(
+                first.data, {static_cast<const std::byte*>(first.data), first.sizeInBytes});
+            if (recorded.object.has_value()) {
+                m_building.byObject.try_emplace(recorded.object->address,
+                                                static_cast<uint32_t>(index));
+            }
         }
         // Draws sharing one vertex-stage assembly take their place among it.
         uint32_t entry = *recorded.vertexEntry;
@@ -638,6 +649,9 @@ bool VertexBlend::groupTorn(uint32_t group) {
 
 std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index) const {
     const Draw& drawn = m_latest.draws()[index];
+    if (drawn.object.has_value()) {
+        return planByObject(index, *drawn.object);
+    }
     if (!drawn.vertexEntry.has_value()) {
         return VertexOutcome::NoPartner;
     }
@@ -667,14 +681,14 @@ std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index
     if (identity != PartnerIdentity::ByPlace && keepsBuffers(drawn) &&
         continuesElsewhere(m_twoBack.draws()[*earlier], index)) {
         // Its blocks name an object whose buffers another draw reads at N:
-        // that object goes on there, and this draw -- a ring new at N given
+        // that object goes on there, and this draw -- a particle new at N given
         // the blocks of one that moved to others -- has no frame before.
         return VertexOutcome::NoPartner;
     }
     if (identity == PartnerIdentity::ByPlace && keepsBuffers(drawn)) {
         // Told apart by nothing else, an object the title keeps buffers for
         // is its draw two frames back from the same buffers; with none, it
-        // is new at N, and any other it resembled -- a ring of the same age
+        // is new at N, and any other it resembled -- a particle of the same age
         // left further back -- is another object.
         std::optional<size_t> own = drawnFrom(m_twoBack, drawn);
         if (!own.has_value()) {
@@ -684,6 +698,38 @@ std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index
         job.earlierByBuffers = true;
     }
     return job;
+}
+
+std::variant<VertexBlend::Job, VertexOutcome>
+VertexBlend::planByObject(size_t index, const GuestObject& object) const {
+    const Draw& drawn = m_latest.draws()[index];
+    std::optional<std::pair<size_t, GuestObject>> partner = drawOfObject(m_previous, drawn, object);
+    if (!partner.has_value()) {
+        return VertexOutcome::NoPartner;
+    }
+    std::optional<std::pair<size_t, GuestObject>> earlier =
+        drawOfObject(m_twoBack, drawn, partner->second);
+    if (!earlier.has_value()) {
+        return VertexOutcome::NoPartner;
+    }
+    return Job{index, partner->first, earlier->first, PartnerIdentity::ByGuestObject,
+               index, &drawn.layout};
+}
+
+std::optional<std::pair<size_t, GuestObject>>
+VertexBlend::drawOfObject(const Frame& frame, const Draw& drawn, const GuestObject& olderThan) {
+    auto found = frame.byObject.find(olderThan.address);
+    if (found == frame.byObject.end()) {
+        return std::nullopt;
+    }
+    const Draw& candidate = frame.draws()[found->second];
+    if (!candidate.object.has_value() || !(candidate.object->age < olderThan.age) ||
+        candidate.vertexShaderBaseHash != drawn.vertexShaderBaseHash ||
+        candidate.vertexShaderAuxHash != drawn.vertexShaderAuxHash ||
+        candidate.layout != drawn.layout) {
+        return std::nullopt;
+    }
+    return std::pair{static_cast<size_t>(found->second), *candidate.object};
 }
 
 std::optional<size_t> VertexBlend::drawnFrom(const Frame& frame, const Draw& drawn) {
@@ -763,9 +809,12 @@ std::optional<VertexBlend::PairBlend> VertexBlend::blendOf(size_t index) {
     return PairBlend{pair.outcome, pair.start};
 }
 
-void VertexBlend::count(uint64_t shaderBaseHash, VertexOutcome outcome) {
+void VertexBlend::count(const Draw& drawn, VertexOutcome outcome) {
     ++m_outcomes[static_cast<size_t>(outcome)];
-    ++m_byShaderPending[shaderBaseHash][static_cast<size_t>(outcome)];
+    ++m_byShaderPending[drawn.vertexShaderBaseHash][static_cast<size_t>(outcome)];
+    if (drawn.object.has_value()) {
+        ++m_objectOutcomes[static_cast<size_t>(outcome)];
+    }
 }
 
 void VertexBlend::publishCounts() {
@@ -834,14 +883,14 @@ bool VertexBlend::onRuntimeDraw(const LatteFrameHooks::DrawPrepared& draw,
         return false;
     }
     if (!drawn.layout.describes(draw)) {
-        count(drawn.vertexShaderBaseHash, VertexOutcome::ShapeDiffers);
+        count(drawn, VertexOutcome::ShapeDiffers);
         return false;
     }
     std::optional<PairBlend> blended = blendOf(index);
     if (!blended.has_value()) {
         return false;
     }
-    count(drawn.vertexShaderBaseHash, blended->outcome);
+    count(drawn, blended->outcome);
     if (blended->outcome != VertexOutcome::Blended) {
         return false;
     }
