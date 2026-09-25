@@ -163,20 +163,24 @@ void LightLookUp::rebase(RowForm form, std::span<const float> latest, const Tran
 size_t LightLookUp::rebaseStage(std::span<const float> twoBack, std::span<const float> oneBack,
                                 std::span<const float> latest, const Transform3x4& viewAtN,
                                 const Transform3x4& viewBetween, std::span<float> out) const {
-    size_t rebased = 0;
     if (twoBack.size() != latest.size() || oneBack.size() != latest.size()) {
         return 0;
     }
+    auto formAt = [&](size_t at) {
+        return classify(twoBack.subspan(at, kRow), oneBack.subspan(at, kRow),
+                        latest.subspan(at, kRow), viewAtN);
+    };
+    size_t lightRows = 0;
     for (size_t at = 0; at + kRow <= latest.size(); at += kRow) {
-        RowForm form = classify(twoBack.subspan(at, kRow), oneBack.subspan(at, kRow),
-                                latest.subspan(at, kRow), viewAtN);
-        if (form == RowForm::Unrelated) {
-            continue;
-        }
-        rebase(form, latest.subspan(at, kRow), viewAtN, viewBetween, out.subspan(at, kRow));
-        ++rebased;
+        lightRows += formAt(at) == RowForm::Unrelated ? 0 : 1;
     }
-    return rebased;
+    if (lightRows < kLookUpRows) {
+        return 0;
+    }
+    for (size_t at = 0; at + kRow <= latest.size(); at += kRow) {
+        rebase(formAt(at), latest.subspan(at, kRow), viewAtN, viewBetween, out.subspan(at, kRow));
+    }
+    return lightRows;
 }
 
 } // namespace wiiuport::interp

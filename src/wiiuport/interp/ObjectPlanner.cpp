@@ -822,6 +822,11 @@ void ObjectPlanner::planMaps() {
     }
 }
 
+std::optional<size_t> ObjectPlanner::drawnOneBack(const AssemblyKey& key) const {
+    std::optional<AssemblyKey> derived = derivedKey(key);
+    return derived.has_value() ? m_frames[0].find(*derived) : std::nullopt;
+}
+
 void ObjectPlanner::findLightLookUps() {
     Plan& plan = m_buildingPlan;
     const KeyedFrame& oneBack = m_frames[0];
@@ -844,7 +849,7 @@ void ObjectPlanner::findLightLookUps() {
             continue;
         }
         std::optional<size_t> earlier = twoBack.find(m_building.key(entry));
-        std::optional<size_t> previous = oneBack.find(m_building.key(entry));
+        std::optional<size_t> previous = drawnOneBack(m_building.key(entry));
         std::span<const float> latest = m_building.values(entry);
         if (!earlier.has_value() || !previous.has_value() ||
             twoBack.values(*earlier).size() != latest.size() ||
