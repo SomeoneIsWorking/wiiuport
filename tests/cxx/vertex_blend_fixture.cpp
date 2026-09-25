@@ -27,7 +27,7 @@ uint32_t getWord(const std::byte* at, uint8_t endian) {
 
 RecordedUniformAssembly assemblyOf(const ActorDraw& draw) {
     RecordedUniformAssembly assembly;
-    assembly.shaderBaseHash = kActorShader;
+    assembly.shaderBaseHash = draw.shader;
     assembly.blockSources = {1, draw.block};
     assembly.data = draw.uniforms;
     return assembly;
@@ -36,7 +36,7 @@ RecordedUniformAssembly assemblyOf(const ActorDraw& draw) {
 LatteFrameHooks::DrawPrepared preparedOf(std::span<const std::byte> mesh, bool fromRuntime,
                                          const ActorDraw& draw) {
     LatteFrameHooks::DrawPrepared prepared{};
-    prepared.vertexShaderBaseHash = kActorShader;
+    prepared.vertexShaderBaseHash = draw.shader;
     prepared.vertexUniforms = true;
     prepared.fromRuntime = fromRuntime;
     prepared.vertexReplaceable = fromRuntime;
@@ -76,7 +76,7 @@ std::vector<std::vector<float>> Blends::replay(const GuestFrame& latest) {
         std::vector<uint32_t> sources{1, draw.block};
         std::vector<float> uniforms = draw.uniforms;
         LatteFrameHooks::UniformAssembly assembly{};
-        assembly.shaderBaseHash = kActorShader;
+        assembly.shaderBaseHash = draw.shader;
         assembly.data = uniforms.data();
         assembly.sizeInBytes = static_cast<uint32_t>(uniforms.size() * sizeof(float));
         assembly.blockAddresses = sources.data();

@@ -13,8 +13,9 @@
 #include "wiiuport/frame/RecordingSnapshot.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/frame/SearchFeed.h"
+#include "wiiuport/guest/BufferWriters.h"
+#include "wiiuport/guest/LineProbe.h"
 #include "wiiuport/guest/ParticleProbe.h"
-#include "wiiuport/guest/Particles.h"
 #include "wiiuport/guest/WaveProbe.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/interp/ContinuousInterpolator.h"
@@ -124,10 +125,11 @@ class Runtime {
     interp::TransformSubstitution m_substitution;
     interp::ObjectBlend m_objectBlend{interp::ContinuousInterpolator::kBlendPoint};
     interp::ReplayBlend m_replayBlend{m_objectBlend, m_substitution};
-    guest::Particles m_particles;
-    guest::ParticleProbe m_particleProbe{m_particles};
-    guest::WaveProbe m_waveProbe{m_particles};
-    interp::VertexBlend m_vertexBlend{m_objectBlend, m_particles,
+    guest::BufferWriters m_writers;
+    guest::ParticleProbe m_particleProbe{m_writers};
+    guest::WaveProbe m_waveProbe{m_writers};
+    guest::LineProbe m_lineProbe{m_writers};
+    interp::VertexBlend m_vertexBlend{m_objectBlend, m_writers,
                                       interp::ContinuousInterpolator::kBlendPoint};
     interp::FrameInterpolator m_interpolator{m_search, m_substitution, m_scheduler};
     interp::ViewTracker m_viewTracker{m_search};
@@ -157,7 +159,7 @@ class Runtime {
         .neighbourCheck = m_neighbourCheck,
         .objects = m_objectBlend,
         .vertices = m_vertexBlend,
-        .particles = m_particles,
+        .writers = m_writers,
         .snapshot = m_snapshot,
         .pacing = m_pacing,
         .scanOut = m_scanOut,

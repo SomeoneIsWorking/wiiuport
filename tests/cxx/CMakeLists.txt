@@ -24,7 +24,7 @@ add_executable(wiiuport_tests
   map_pass_tests.cpp
   shadow_tests.cpp
   light_look_up_tests.cpp
-  particles_tests.cpp
+  buffer_writers_tests.cpp
   # The shipping implementation, compiled into the tests rather than
   # reimplemented beside them. It is free of the emulated system on purpose,
   # so what the player's remembered title does can be checked without one.

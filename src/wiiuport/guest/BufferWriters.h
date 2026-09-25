@@ -13,39 +13,41 @@
 
 namespace wiiuport::guest {
 
-// The title's particles and sea waves, by the vertex buffer each last wrote
-// its quad to.
+// The title's objects whose vertices its CPU writes each frame -- particles,
+// sea waves and 3D lines -- by the vertex buffer each last wrote.
 //
 // A particle's quad carries nothing of its own -- four corners and the UVs
 // every quad of its kind has -- and the title hands a pool of particles
 // buffers as they come and go, so its vertices cannot say which particle a
-// draw is. The title's code can: Wind Waker HD's particle writers
-// (JSystem's JPA draw executors and `dPa_ripplePcallBack::draw`, recovered in
-// setsail's docs/render-state.md) each write one particle's quad into one of
-// the particle's own two vertex buffers and then commit it, and its sea
-// waves' writer does the same for each wave. ParticleProbe and WaveProbe
-// watch those calls and record here, by the buffer, the object's address
-// and age and the quad's bytes as written; a draw from that buffer is that
-// object's when it reads those bytes.
-class Particles final : public interp::DrawObjects {
+// draw is. The title's code can (recovered in setsail's
+// docs/render-state.md): its particle writers (JSystem's JPA draw executors
+// and `dPa_ripplePcallBack::draw`) each write one particle's quad into one
+// of the particle's own two vertex buffers and commit it, its sea-wave writer
+// does the same for each wave, and its 3D lines flush each line's buffers
+// through one helper. ParticleProbe, WaveProbe and LineProbe watch those calls
+// and record here, by the buffer, the object and the leading bytes it wrote
+// there; a draw from that buffer is that object's while it reads those bytes.
+class BufferWriters final : public interp::DrawObjects {
   public:
-    // A quad as the writers leave it: four corners of 20 bytes each.
-    static constexpr size_t kQuadBytes = 80;
-    using Quad = std::array<std::byte, kQuadBytes>;
+    // The bytes a draw is checked by: a quad as the writers leave it, four
+    // corners of 20 bytes each, and the start of a line's longer mesh.
+    static constexpr size_t kLeadingBytes = 80;
+    using Leading = std::array<std::byte, kLeadingBytes>;
 
     // A probe installed in the title's code, once it is linked.
     void noteInstalled() {
         m_installed.fetch_add(1);
     }
 
-    // A commit whose particle or vertex store could not be read.
+    // A write whose object or vertex buffer could not be read.
     void noteUnreadable() {
         m_calls.fetch_add(1);
         m_unreadable.fetch_add(1);
     }
 
-    // Keeps that `object` wrote `quad` to `source`. Safe from any thread.
-    void record(const void* source, const interp::GuestObject& object, const Quad& quad);
+    // Keeps that `object` wrote `leading` at the start of `source`. Safe
+    // from any thread.
+    void record(const void* source, const interp::GuestObject& object, const Leading& leading);
 
     std::optional<interp::GuestObject> objectDrawn(const void* source,
                                                    std::span<const std::byte> bytes) const override;
@@ -55,7 +57,7 @@ class Particles final : public interp::DrawObjects {
         return m_installed.load();
     }
 
-    // Commits observed, and those that recorded nothing.
+    // Writes observed, and those that recorded nothing.
     uint64_t calls() const {
         return m_calls.load();
     }
@@ -78,7 +80,7 @@ class Particles final : public interp::DrawObjects {
   private:
     struct Written {
         interp::GuestObject object;
-        Quad quad;
+        Leading leading;
     };
 
     std::atomic<uint32_t> m_installed{0};

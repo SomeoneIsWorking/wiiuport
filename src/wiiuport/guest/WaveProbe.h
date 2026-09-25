@@ -1,6 +1,6 @@
 #pragma once
 
-#include "wiiuport/guest/Particles.h"
+#include "wiiuport/guest/BufferWriters.h"
 
 #include "Cafe/HW/Espresso/GuestCallProbes.h"
 
@@ -13,7 +13,7 @@ namespace wiiuport::guest {
 // Watches Wind Waker HD's sea waves -- the white crests of the environment's
 // wave packet (`drawWave` of JSystem-era `d_kankyo_rain`, recovered in
 // setsail's docs/render-state.md) -- and records each wave and its quad into
-// Particles. HD writes each wave's quad into the wave's own two vertex
+// BufferWriters. HD writes each wave's quad into the wave's own two vertex
 // buffers and flushes it through the title's vertex-buffer flush; this
 // probes that flush and keeps only the calls from the wave writer's one call
 // site, where the writer's registers hold the packet and the wave's index.
@@ -39,7 +39,7 @@ class WaveProbe final : public GuestCallProbes::Probe {
     static constexpr uint32_t kWaveStride = 0x38;
     static constexpr uint32_t kCounter = 0x24;
 
-    explicit WaveProbe(Particles& particles) : m_particles(particles) {
+    explicit WaveProbe(BufferWriters& writers) : m_writers(writers) {
     }
 
     // Registers with the fork, to be installed when the title is linked.
@@ -49,7 +49,7 @@ class WaveProbe final : public GuestCallProbes::Probe {
     void OnCall(std::span<const uint32_t, 32> gpr, uint32_t returnAddress) override;
 
   private:
-    Particles& m_particles;
+    BufferWriters& m_writers;
 };
 
 } // namespace wiiuport::guest

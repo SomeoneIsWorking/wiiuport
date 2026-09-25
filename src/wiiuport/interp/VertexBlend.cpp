@@ -717,13 +717,13 @@ VertexBlend::planByObject(size_t index, const GuestObject& object) const {
 }
 
 std::optional<std::pair<size_t, GuestObject>>
-VertexBlend::drawOfObject(const Frame& frame, const Draw& drawn, const GuestObject& olderThan) {
-    auto found = frame.byObject.find(olderThan.address);
+VertexBlend::drawOfObject(const Frame& frame, const Draw& drawn, const GuestObject& later) {
+    auto found = frame.byObject.find(later.address);
     if (found == frame.byObject.end()) {
         return std::nullopt;
     }
     const Draw& candidate = frame.draws()[found->second];
-    if (!candidate.object.has_value() || !(candidate.object->age < olderThan.age) ||
+    if (!candidate.object.has_value() || !candidate.object->continuesAs(later) ||
         candidate.vertexShaderBaseHash != drawn.vertexShaderBaseHash ||
         candidate.vertexShaderAuxHash != drawn.vertexShaderAuxHash ||
         candidate.layout != drawn.layout) {

@@ -1,7 +1,7 @@
 #include "check.h"
 #include "suites.h"
 #include "vertex_blend_fixture.h"
-#include "wiiuport/guest/Particles.h"
+#include "wiiuport/guest/BufferWriters.h"
 #include "wiiuport/interp/DrawObjects.h"
 #include "wiiuport/interp/VertexBlend.h"
 
@@ -14,7 +14,7 @@
 #include <span>
 #include <vector>
 
-using wiiuport::guest::Particles;
+using wiiuport::guest::BufferWriters;
 using wiiuport::interp::GuestObject;
 using wiiuport::interp::VertexOutcome;
 
@@ -48,38 +48,39 @@ std::vector<std::byte> bytesOfQuad(const std::vector<float>& values) {
     return bytes;
 }
 
-Particles::Quad quadOf(std::span<const std::byte> bytes) {
-    Particles::Quad quad{};
+BufferWriters::Leading quadOf(std::span<const std::byte> bytes) {
+    BufferWriters::Leading quad{};
     std::ranges::copy(bytes.first(quad.size()), quad.begin());
     return quad;
 }
 
 void aDrawIsTheParticleThatWroteItsBufferWhileItReadsWhatWasWritten() {
-    Particles particles;
+    BufferWriters writers;
     // A draw's buffer runs on past the quad, as the title's do.
     std::vector<std::byte> bytes = bytesOfQuad(quadAbout(40.0f, 8.0f, 3.0f, 2.0f));
     bytes.resize(bytes.size() + 12);
     const void* source = bytes.data();
-    check::isTrue(!particles.objectDrawn(source, bytes).has_value(),
+    check::isTrue(!writers.objectDrawn(source, bytes).has_value(),
                   "a buffer no particle was seen writing names none");
 
-    particles.record(source, {.address = 0x4000'1000, .age = 7.0f}, quadOf(bytes));
-    std::optional<GuestObject> object = particles.objectDrawn(source, bytes);
+    writers.record(source, {.address = 0x4000'1000, .age = 7.0f}, quadOf(bytes));
+    std::optional<GuestObject> object = writers.objectDrawn(source, bytes);
     check::isTrue(object.has_value(), "the particle that wrote it names it");
     check::equal(object.value_or(GuestObject{}).address, uint32_t{0x4000'1000}, "by its address");
-    check::equal(object.value_or(GuestObject{}).age, 7.0f, "and its age");
+    check::equal(object.value_or(GuestObject{}).age.value_or(0.0f), 7.0f, "and its age");
 
     // Another draw since wrote the buffer: one bit of the quad differs.
     std::vector<std::byte> since = bytes;
-    since[Particles::kQuadBytes - 1] ^= std::byte{1};
-    check::isTrue(!particles.objectDrawn(source, since).has_value(),
+    since[BufferWriters::kLeadingBytes - 1] ^= std::byte{1};
+    check::isTrue(!writers.objectDrawn(source, since).has_value(),
                   "bytes the particle did not write name nothing");
-    check::isTrue(!particles.objectDrawn(source, std::span(bytes).first(Particles::kQuadBytes - 1))
-                       .has_value(),
-                  "nor do bytes short of a quad");
-    check::equal(particles.calls(), uint64_t{1}, "one commit was recorded");
-    check::equal(particles.identified(), uint64_t{1}, "one draw was identified");
-    check::equal(particles.rewritten(), uint64_t{2}, "and two refused, counted");
+    check::isTrue(
+        !writers.objectDrawn(source, std::span(bytes).first(BufferWriters::kLeadingBytes - 1))
+             .has_value(),
+        "nor do bytes short of a quad");
+    check::equal(writers.calls(), uint64_t{1}, "one commit was recorded");
+    check::equal(writers.identified(), uint64_t{1}, "one draw was identified");
+    check::equal(writers.rewritten(), uint64_t{2}, "and two refused, counted");
 }
 
 // A ripple particle drawn in a frame: its address, age and place, and the
@@ -108,8 +109,8 @@ GuestFrame ripples(Blends& blends, KeptBuffers& kept, uint32_t block,
     GuestFrame frame(std::move(draws), &kept);
     for (const Ripple& ripple : drawn) {
         const std::vector<std::byte>& buffer = kept.buffers.at(ripple.buffer);
-        blends.particles.record(buffer.data(), {.address = ripple.address, .age = ripple.age},
-                                quadOf(buffer));
+        blends.writers.record(buffer.data(), {.address = ripple.address, .age = ripple.age},
+                              quadOf(buffer));
     }
     return frame;
 }
@@ -174,15 +175,70 @@ void aRingWhoseParticleWasNotDrawnAFrameBeforeIsDrawnAsTheTitleDrewIt() {
                  "counted with no partner");
 }
 
+void anObjectContinuesAsItselfOnlyIfItsAgeSaysSo() {
+    GuestObject aged{.address = kFirst, .age = 3.0f};
+    GuestObject line{.address = kFirst, .age = std::nullopt};
+    check::isTrue(aged.continuesAs({.address = kFirst, .age = 4.0f}),
+                  "an object older by N continues");
+    check::isTrue(!aged.continuesAs({.address = kFirst, .age = 3.0f}),
+                  "one no older is reborn at its address");
+    check::isTrue(!aged.continuesAs({.address = kSecond, .age = 4.0f}),
+                  "one at another address is another object");
+    check::isTrue(line.continuesAs(line), "an object without an age continues while drawn");
+    check::isTrue(!line.continuesAs(aged) && !aged.continuesAs(line),
+                  "an aged and an unaged object are not one");
+}
+
+constexpr uint64_t kShadowShader = 0xeeee;
+constexpr uint32_t kLineBlock = 0xf4007000;
+constexpr uint32_t kShadowBlock = 0xf4008000;
+
+// A 3D line at `x`, its mesh in the buffer it owns and recorded as its own,
+// drawn by its shader and then read again by a shadow volume's.
+GuestFrame lineAt(Blends& blends, KeptBuffers& kept, float x) {
+    GuestFrame frame({{.block = kLineBlock,
+                       .uniforms = {1.0f},
+                       .mesh = quadAbout(x, 0.0f, 2.0f, 2.0f),
+                       .valuesPerVertex = kValuesPerCorner,
+                       .keptIn = 0},
+                      {.block = kShadowBlock,
+                       .uniforms = {1.0f},
+                       .mesh = quadAbout(x, 0.0f, 2.0f, 2.0f),
+                       .passOver = 0,
+                       .valuesPerVertex = kValuesPerCorner,
+                       .shader = kShadowShader}},
+                     &kept);
+    const std::vector<std::byte>& buffer = kept.buffers.at(0);
+    blends.writers.record(buffer.data(), {.address = kFirst, .age = std::nullopt}, quadOf(buffer));
+    return frame;
+}
+
+void aLineWithoutAnAgeIsBlendedFromItsOwnDrawAndItsShadowWithIt() {
+    Blends blends;
+    blends.objects.setPlanning(true);
+    KeptBuffers kept;
+    blends.record(lineAt(blends, kept, 100.0f));
+    blends.record(lineAt(blends, kept, 102.0f));
+    GuestFrame latest = lineAt(blends, kept, 104.0f);
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 101.0f, "the line is half way from its draw a frame before");
+    check::equal(drawn[1][0], 101.0f, "and its shadow, reading the same buffer, with it");
+    check::equal(blends.vertices.objectDraws(VertexOutcome::Blended), uint64_t{2},
+                 "counted as the title's line");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
 
-void runParticlesTests() {
+void runBufferWritersTests() {
     aDrawIsTheParticleThatWroteItsBufferWhileItReadsWhatWasWritten();
     aRingIsBlendedFromItsOwnParticleWhateverBuffersItIsGiven();
     aRingRebornInItsParticleIsDrawnAsTheTitleDrewIt();
     aRingWhoseParticleWasNotDrawnAFrameBeforeIsDrawnAsTheTitleDrewIt();
+    anObjectContinuesAsItselfOnlyIfItsAgeSaysSo();
+    aLineWithoutAnAgeIsBlendedFromItsOwnDrawAndItsShadowWithIt();
 }
 
 } // namespace wiiuport::tests
