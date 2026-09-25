@@ -469,8 +469,7 @@ std::string ControlChannel::verticesJson() const {
     body += ",\"vertexCopyingNanoseconds\":" + std::to_string(m_vertices.copying().count());
     body += ",\"vertexBlendingNanoseconds\":" + std::to_string(m_vertices.blending().count());
     body += ",\"vertexWaitingNanoseconds\":" + std::to_string(m_vertices.waiting().count());
-    body += std::string(",\"particles\":{\"installed\":") +
-            (m_particles.installed() ? "true" : "false");
+    body += ",\"particles\":{\"installed\":" + std::to_string(m_particles.installed());
     body += ",\"calls\":" + std::to_string(m_particles.calls());
     body += ",\"unreadable\":" + std::to_string(m_particles.unreadable());
     body += ",\"identified\":" + std::to_string(m_particles.identified());
