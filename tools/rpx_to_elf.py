@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from wiiuport.rpx import NotAnRpx, to_elf
+from wiiuport.rpx_link import LinkRefused
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,12 +22,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("elf", type=Path)
     args = parser.parse_args(argv)
     try:
-        elf = to_elf(args.rpx.read_bytes())
-    except (OSError, NotAnRpx) as failure:
+        elf, report = to_elf(args.rpx.read_bytes())
+    except (OSError, NotAnRpx, LinkRefused) as failure:
         print(f"{args.rpx}: {failure}", file=sys.stderr)
         return 1
     args.elf.write_bytes(elf)
-    print(f"{args.rpx} -> {args.elf} ({len(elf)} bytes)")
+    print(
+        f"{args.rpx} -> {args.elf} ({len(elf)} bytes): imports placed at "
+        f"{report.imports_placed_at:#x}, {report.import_relocations} relocations linked to them, "
+        f"{report.prelinked_relocations} found prelinked, "
+        f"{report.undefined_relocations} against an undefined symbol left"
+    )
     return 0
 
 
