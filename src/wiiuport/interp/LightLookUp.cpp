@@ -127,6 +127,7 @@ void LightLookUp::chooseAxes() {
 }
 
 LightLookUp::RowForm LightLookUp::classify(std::span<const float> twoBack,
+                                           std::span<const float> oneBack,
                                            std::span<const float> latest,
                                            const Transform3x4& viewAtN) const {
     if (!moved(twoBack.first(3), latest.first(3)) || m_axes.empty()) {
@@ -145,7 +146,8 @@ LightLookUp::RowForm LightLookUp::classify(std::span<const float> twoBack,
     if (!inAPlane) {
         return RowForm::Unrelated;
     }
-    return sameBits(twoBack[3], latest[3]) ? RowForm::Direction : RowForm::Affine;
+    bool stoodStill = sameBits(twoBack[3], latest[3]) && sameBits(oneBack[3], latest[3]);
+    return stoodStill ? RowForm::Direction : RowForm::Affine;
 }
 
 void LightLookUp::rebase(RowForm form, std::span<const float> latest, const Transform3x4& viewAtN,
@@ -158,12 +160,16 @@ void LightLookUp::rebase(RowForm form, std::span<const float> latest, const Tran
     intoView(throughView(latest, viewAtN, direction), viewBetween, direction, out);
 }
 
-size_t LightLookUp::rebaseStage(std::span<const float> twoBack, std::span<const float> latest,
-                                const Transform3x4& viewAtN, const Transform3x4& viewBetween,
-                                std::span<float> out) const {
+size_t LightLookUp::rebaseStage(std::span<const float> twoBack, std::span<const float> oneBack,
+                                std::span<const float> latest, const Transform3x4& viewAtN,
+                                const Transform3x4& viewBetween, std::span<float> out) const {
     size_t rebased = 0;
-    for (size_t at = 0; at + kRow <= latest.size() && at + kRow <= twoBack.size(); at += kRow) {
-        RowForm form = classify(twoBack.subspan(at, kRow), latest.subspan(at, kRow), viewAtN);
+    if (twoBack.size() != latest.size() || oneBack.size() != latest.size()) {
+        return 0;
+    }
+    for (size_t at = 0; at + kRow <= latest.size(); at += kRow) {
+        RowForm form = classify(twoBack.subspan(at, kRow), oneBack.subspan(at, kRow),
+                                latest.subspan(at, kRow), viewAtN);
         if (form == RowForm::Unrelated) {
             continue;
         }

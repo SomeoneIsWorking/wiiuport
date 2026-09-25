@@ -37,8 +37,11 @@ namespace wiiuport::interp {
 // two of them for any camera that does not roll and was turned as a
 // direction. A row the camera does not carry, or one that
 // lies in such a plane by chance but does not move, is left as it is. A row
-// whose fourth value stood bit for bit still while the rest turned is a
-// direction, whose fourth value is not a translation: it is turned alone.
+// whose fourth value stood bit for bit still over N-2, N-1 and N while the rest
+// turned is a direction, whose fourth value is not a translation: it is turned
+// alone. Two frames are not enough: a cascade's row, whose fourth value
+// carries the camera's place, stood still from N-2 to N by chance about once
+// in a hundred frames, and turned alone it kept N's place at t.
 // Pure, so the shipping arithmetic is what a test checks.
 class LightLookUp {
   public:
@@ -70,19 +73,20 @@ class LightLookUp {
         return m_axes.size();
     }
 
-    // What a row of four the stage held at N-2 and holds at N is.
-    RowForm classify(std::span<const float> twoBack, std::span<const float> latest,
-                     const Transform3x4& viewAtN) const;
+    // What a row of four the stage held at N-2 and N-1 and holds at N is.
+    RowForm classify(std::span<const float> twoBack, std::span<const float> oneBack,
+                     std::span<const float> latest, const Transform3x4& viewAtN) const;
 
     // The row at N as the in-between view sees it.
     static void rebase(RowForm form, std::span<const float> latest, const Transform3x4& viewAtN,
                        const Transform3x4& viewBetween, std::span<float> out);
 
     // Rebases every row of four of a stage into `out`, which holds the
-    // stage's values at N; returns how many rows it rebased.
-    size_t rebaseStage(std::span<const float> twoBack, std::span<const float> latest,
-                       const Transform3x4& viewAtN, const Transform3x4& viewBetween,
-                       std::span<float> out) const;
+    // stage's values at N; returns how many rows it rebased. None unless the
+    // three frames hold as many values.
+    size_t rebaseStage(std::span<const float> twoBack, std::span<const float> oneBack,
+                       std::span<const float> latest, const Transform3x4& viewAtN,
+                       const Transform3x4& viewBetween, std::span<float> out) const;
 
   private:
     static constexpr size_t kRotationFloats = 12;

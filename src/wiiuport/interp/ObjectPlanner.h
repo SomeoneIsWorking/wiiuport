@@ -126,6 +126,7 @@ class ObjectPlanner {
     struct LookUp {
         uint32_t entry;
         uint32_t twoBackAt;
+        uint32_t oneBackAt;
     };
 
     std::span<const LookUp> lookUps() const {
@@ -133,7 +134,12 @@ class ObjectPlanner {
     }
 
     std::span<const float> lookUpTwoBack(const LookUp& lookUp) const {
-        return {m_plan.lookUpTwoBack.data() + lookUp.twoBackAt,
+        return {m_plan.lookUpEarlier.data() + lookUp.twoBackAt,
+                m_frames[0].values(lookUp.entry).size()};
+    }
+
+    std::span<const float> lookUpOneBack(const LookUp& lookUp) const {
+        return {m_plan.lookUpEarlier.data() + lookUp.oneBackAt,
                 m_frames[0].values(lookUp.entry).size()};
     }
 
@@ -358,10 +364,10 @@ class ObjectPlanner {
         std::vector<uint8_t> looksUpMap;
         // The light's axes, from the frame's draws into maps.
         LightLookUp light;
-        // Stages comparing against a map and drawn at N whose draw two
-        // frames back is known, with those values one after another.
+        // Stages comparing against a map and drawn at N whose draws one and
+        // two frames back are known, with those values one after another.
         std::vector<LookUp> lookUps;
-        std::vector<float> lookUpTwoBack;
+        std::vector<float> lookUpEarlier;
         // What each entry came to, by entry.
         std::vector<Outcome> outcomeOf;
         // The entries left at N, in entry order.
