@@ -67,6 +67,7 @@ struct Scene {
     Transform3x4 lightTwoBack = turned(0.3f, false, {0.0f, 0.0f, 0.0f});
     Transform3x4 viewAtN = turned(0.6f, true, {3.0f, -2.0f, 40.0f});
     Transform3x4 viewTwoBack = turned(0.45f, true, {3.5f, -2.0f, 41.0f});
+    Transform3x4 viewOneBack = turned(0.5f, true, {3.3f, -2.0f, 40.7f});
     Transform3x4 viewBetween = turned(0.52f, true, {3.2f, -2.0f, 40.5f});
 
     // The frame's draws into the map. Three hold the light's rotation, each
@@ -190,7 +191,7 @@ void theAxesAreTheRotationTheMapDrawsTurned() {
     }
     Row row{1.0f, 0.0f, 0.0f, 0.0f};
     Row moved{0.0f, 1.0f, 0.0f, 0.0f};
-    check::isTrue(still.classify(row, moved, scene.viewAtN) == LightLookUp::RowForm::Unrelated,
+    check::isTrue(still.classify(row, row, moved, scene.viewAtN) == LightLookUp::RowForm::Unrelated,
                   "without the light's axes, no row is the light's");
 }
 
@@ -199,9 +200,11 @@ void aScalarIsNotTurnedThroughTheWorldsOwnAxes() {
     LightLookUp lookUp = scene.lookUp();
     Row twoBack{2570.792f, 0.0f, 0.0f, 0.0f};
     Row latest{755.9406f, 0.0f, 0.0f, 0.0f};
+    Row oneBack{1200.5f, 0.0f, 0.0f, 0.0f};
     std::array<float, 4> out = latest;
-    check::equal(lookUp.rebaseStage(twoBack, latest, scene.viewAtN, scene.viewBetween, out),
-                 size_t{0}, "a moved scalar seen through a level camera is not the light's");
+    check::equal(
+        lookUp.rebaseStage(twoBack, oneBack, latest, scene.viewAtN, scene.viewBetween, out),
+        size_t{0}, "a moved scalar seen through a level camera is not the light's");
     check::isTrue(out == latest, "the scalar is drawn as the title drew it");
 }
 
@@ -211,11 +214,14 @@ void aMovedDepthRowIsRebasedToTheInBetweenView() {
     Vec3 depth = scene.axis(2);
     Row latest = seenThrough(depth, 5.0f, scene.viewAtN, false);
     Row twoBack = seenThrough(depth, 5.0f, scene.viewTwoBack, false);
-    check::isTrue(lookUp.classify(twoBack, latest, scene.viewAtN) == LightLookUp::RowForm::Affine,
+    Row oneBack = seenThrough(depth, 5.0f, scene.viewOneBack, false);
+    check::isTrue(lookUp.classify(twoBack, oneBack, latest, scene.viewAtN) ==
+                      LightLookUp::RowForm::Affine,
                   "a row along the depth axis whose translation moved is affine");
     std::array<float, 4> out = latest;
-    check::equal(lookUp.rebaseStage(twoBack, latest, scene.viewAtN, scene.viewBetween, out),
-                 size_t{1}, "the row is rebased");
+    check::equal(
+        lookUp.rebaseStage(twoBack, oneBack, latest, scene.viewAtN, scene.viewBetween, out),
+        size_t{1}, "the row is rebased");
     for (Vec3 p : {Vec3{1.0f, 2.0f, 3.0f}, Vec3{-20.0f, 4.0f, 60.0f}, Vec3{7.0f, -9.0f, -1.0f}}) {
         double world = (static_cast<double>(depth.x) * p.x) + (static_cast<double>(depth.y) * p.y) +
                        (static_cast<double>(depth.z) * p.z) + 5.0;
@@ -233,7 +239,9 @@ void aMixedRowOfTwoAxesIsTheLights() {
                (0.6f * a.z) + (0.8f * c.z)};
     Row latest = seenThrough(mixed, 2.0f, scene.viewAtN, false);
     Row twoBack = seenThrough(mixed, 2.0f, scene.viewTwoBack, false);
-    check::isTrue(lookUp.classify(twoBack, latest, scene.viewAtN) == LightLookUp::RowForm::Affine,
+    Row oneBack = seenThrough(mixed, 2.0f, scene.viewOneBack, false);
+    check::isTrue(lookUp.classify(twoBack, oneBack, latest, scene.viewAtN) ==
+                      LightLookUp::RowForm::Affine,
                   "a row in the plane of two axes is the light's");
 }
 
@@ -243,11 +251,12 @@ void aDirectionKeepsItsFourthValue() {
     Vec3 axis = scene.axis(1);
     Row latest = seenThrough(axis, 0.25f, scene.viewAtN, true);
     Row twoBack = seenThrough(axis, 0.25f, scene.viewTwoBack, true);
-    check::isTrue(lookUp.classify(twoBack, latest, scene.viewAtN) ==
+    Row oneBack = seenThrough(axis, 0.25f, scene.viewOneBack, true);
+    check::isTrue(lookUp.classify(twoBack, oneBack, latest, scene.viewAtN) ==
                       LightLookUp::RowForm::Direction,
                   "a row whose fourth value stood still is a direction");
     std::array<float, 4> out = latest;
-    lookUp.rebaseStage(twoBack, latest, scene.viewAtN, scene.viewBetween, out);
+    lookUp.rebaseStage(twoBack, oneBack, latest, scene.viewAtN, scene.viewBetween, out);
     check::isTrue(out[3] == 0.25f, "a direction's fourth value is not moved");
     Vec3 d{0.3f, -0.5f, 0.8f};
     Transform3x4 turnOnly = scene.viewBetween;
@@ -260,11 +269,24 @@ void aDirectionKeepsItsFourthValue() {
                   "a direction is turned to the in-between view");
 }
 
+void aPlaceThatStoodStillFromNMinusTwoToNByChanceIsStillAPlace() {
+    Scene scene;
+    LightLookUp lookUp = scene.lookUp();
+    Row latest = seenThrough(scene.axis(2), 5.0f, scene.viewAtN, false);
+    Row twoBack = seenThrough(scene.axis(2), 5.0f, scene.viewTwoBack, false);
+    twoBack[3] = latest[3];
+    Row oneBack = seenThrough(scene.axis(2), 5.0f, scene.viewOneBack, false);
+    check::isTrue(lookUp.classify(twoBack, oneBack, latest, scene.viewAtN) ==
+                      LightLookUp::RowForm::Affine,
+                  "a row whose fourth value moved at N-1 is a place, though N-2's equals N's");
+}
+
 void aStillRowAndARowOffTheLightsPlanesAreLeft() {
     Scene scene;
     LightLookUp lookUp = scene.lookUp();
     Row still = seenThrough(scene.axis(2), 5.0f, scene.viewAtN, false);
-    check::isTrue(lookUp.classify(still, still, scene.viewAtN) == LightLookUp::RowForm::Unrelated,
+    check::isTrue(lookUp.classify(still, still, still, scene.viewAtN) ==
+                      LightLookUp::RowForm::Unrelated,
                   "a row that did not move is left: it lies in a plane by chance");
     Vec3 a = scene.axis(0);
     Vec3 b = scene.axis(1);
@@ -280,7 +302,8 @@ void aStillRowAndARowOffTheLightsPlanesAreLeft() {
     std::copy(still.begin(), still.end(), stage.begin() + 4);
     std::copy(still.begin(), still.end(), stageTwoBack.begin() + 4);
     std::array<float, 8> out = stage;
-    check::equal(lookUp.rebaseStage(stageTwoBack, stage, scene.viewAtN, scene.viewBetween, out),
+    check::equal(lookUp.rebaseStage(stageTwoBack, stageTwoBack, stage, scene.viewAtN,
+                                    scene.viewBetween, out),
                  size_t{0}, "a row across every axis is not the light's");
     check::isTrue(out == stage, "the stage is drawn as the title drew it");
 }
@@ -295,6 +318,7 @@ void runLightLookUpTests() {
     aMovedDepthRowIsRebasedToTheInBetweenView();
     aMixedRowOfTwoAxesIsTheLights();
     aDirectionKeepsItsFourthValue();
+    aPlaceThatStoodStillFromNMinusTwoToNByChanceIsStillAPlace();
     aStillRowAndARowOffTheLightsPlanesAreLeft();
 }
 

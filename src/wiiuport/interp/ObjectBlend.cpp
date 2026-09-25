@@ -131,9 +131,9 @@ void ObjectBlend::rebaseLightLookUps(const Transform3x4& viewAtN, const Transfor
         std::span<const float> values = latest.values(lookUp.entry);
         size_t at = m_rebased.size();
         m_rebased.insert(m_rebased.end(), values.begin(), values.end());
-        size_t rows =
-            m_planner.light().rebaseStage(m_planner.lookUpTwoBack(lookUp), values, viewAtN,
-                                          viewBetween, std::span(m_rebased).subspan(at));
+        size_t rows = m_planner.light().rebaseStage(
+            m_planner.lookUpTwoBack(lookUp), m_planner.lookUpOneBack(lookUp), values, viewAtN,
+            viewBetween, std::span(m_rebased).subspan(at));
         if (rows == 0) {
             m_rebased.resize(at);
             continue;

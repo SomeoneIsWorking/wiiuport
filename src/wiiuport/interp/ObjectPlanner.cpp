@@ -197,7 +197,7 @@ void ObjectPlanner::Plan::clear() {
     looksUpMap.clear();
     light.clearAxes();
     lookUps.clear();
-    lookUpTwoBack.clear();
+    lookUpEarlier.clear();
     floats.clear();
     outcomeOf.clear();
     leftAtN.clear();
@@ -824,6 +824,7 @@ void ObjectPlanner::planMaps() {
 
 void ObjectPlanner::findLightLookUps() {
     Plan& plan = m_buildingPlan;
+    const KeyedFrame& oneBack = m_frames[0];
     const KeyedFrame& twoBack = m_frames[1];
     for (size_t entry = 0; entry < m_building.size(); ++entry) {
         if (plan.drawsMap[entry] == 0) {
@@ -843,14 +844,20 @@ void ObjectPlanner::findLightLookUps() {
             continue;
         }
         std::optional<size_t> earlier = twoBack.find(m_building.key(entry));
+        std::optional<size_t> previous = oneBack.find(m_building.key(entry));
         std::span<const float> latest = m_building.values(entry);
-        if (!earlier.has_value() || twoBack.values(*earlier).size() != latest.size()) {
+        if (!earlier.has_value() || !previous.has_value() ||
+            twoBack.values(*earlier).size() != latest.size() ||
+            oneBack.values(*previous).size() != latest.size()) {
             continue;
         }
-        std::span<const float> before = twoBack.values(*earlier);
+        auto at = static_cast<uint32_t>(plan.lookUpEarlier.size());
         plan.lookUps.push_back(
-            {static_cast<uint32_t>(entry), static_cast<uint32_t>(plan.lookUpTwoBack.size())});
-        plan.lookUpTwoBack.insert(plan.lookUpTwoBack.end(), before.begin(), before.end());
+            {static_cast<uint32_t>(entry), at, at + static_cast<uint32_t>(latest.size())});
+        for (std::span<const float> values :
+             {twoBack.values(*earlier), oneBack.values(*previous)}) {
+            plan.lookUpEarlier.insert(plan.lookUpEarlier.end(), values.begin(), values.end());
+        }
     }
 }
 
