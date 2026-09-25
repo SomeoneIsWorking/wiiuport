@@ -116,7 +116,11 @@ void ContinuousInterpolator::onFrameRecorded(const frame::FrameRecording& record
     m_probe.beforeInBetween(m_ticks);
     Clock::time_point started = m_now();
     // Planned while the guest drew; a frame planning missed draws as drawn.
-    m_objects.armOnce();
+    if (m_objects.armOnce()) {
+        m_objects.rebaseLightLookUps(
+            pair->front().after,
+            Transform3x4::blendView(pair->front().before, pair->front().after, kBlendPoint));
+    }
     m_substitution.armOnce(*pair, kBlendPoint);
     m_guard.open();
     m_replayer.armOnce();

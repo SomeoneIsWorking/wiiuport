@@ -60,6 +60,16 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
     // frames have been planned in a row.
     bool armOnce();
 
+    // Rebases the armed frame's rows carrying the light into the camera
+    // (ObjectPlanner::lookUps) from the view at N to the in-between view.
+    // Drawn as the title drew them until called for the arming.
+    void rebaseLightLookUps(const Transform3x4& viewAtN, const Transform3x4& viewBetween);
+
+    // Rows of four rebased, over every arming.
+    uint64_t lookUpRowsRebased() const {
+        return m_lookUpRowsRebased;
+    }
+
     void disarm() {
         m_armed = false;
     }
@@ -162,6 +172,9 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
     void waitUntilPlanned();
     // Adds the frame just planned to a requested census.
     void tallyCensus();
+    // What the armed frame's entry is drawn with: its blend, else its
+    // rebased look-up; empty when drawn as the title drew it.
+    std::span<const float> drawnWith(size_t entry) const;
 
     ObjectPlanner m_planner;
     std::atomic<bool> m_planning{false};
@@ -182,6 +195,13 @@ class ObjectBlend final : public frame::AssemblyRecordedListener, public frame::
     std::vector<uint64_t> m_excluded;
     // m_excluded as it was at the arming, read by the replay without a lock.
     std::vector<uint64_t> m_armedExcluded;
+
+    // The armed frame's stages with rebased rows, by entry: where their
+    // values start in m_rebased, or kNotRebased.
+    static constexpr uint32_t kNotRebased = UINT32_MAX;
+    std::vector<uint32_t> m_rebasedAt;
+    std::vector<float> m_rebased;
+    uint64_t m_lookUpRowsRebased{0};
 
     size_t m_replayCursor{0};
     uint64_t m_armings{0};

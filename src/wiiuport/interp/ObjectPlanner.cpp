@@ -194,6 +194,10 @@ void ObjectPlanner::Plan::clear() {
     stepAt.clear();
     foundByValues.clear();
     drawsMap.clear();
+    looksUpMap.clear();
+    light.clearAxes();
+    lookUps.clear();
+    lookUpTwoBack.clear();
     floats.clear();
     outcomeOf.clear();
     leftAtN.clear();
@@ -211,6 +215,8 @@ void ObjectPlanner::add(const frame::RecordedUniformAssembly& assembly) {
     m_buildingPlan.stepAt.push_back(std::numeric_limits<double>::quiet_NaN());
     m_buildingPlan.foundByValues.push_back(0);
     m_buildingPlan.drawsMap.push_back(assembly.writesColour ? 0 : 1);
+    m_buildingPlan.looksUpMap.push_back(
+        assembly.stageIndex == kPixelStage && assembly.looksUpDepthMap ? 1 : 0);
     // Planned only against two whole frames; before that the frame is kept
     // as history, and its entries read as unmatched in a plan never ready.
     Outcome outcome = Outcome::Unmatched;
@@ -268,6 +274,7 @@ void ObjectPlanner::endFrame() {
         planMaps();
         holdPixelPass();
         seeUnblendedThroughTheCamera();
+        findLightLookUps();
     }
     ++m_framesPlanned;
     // Swapping keeps every frame's storage, so a steady scene allocates
@@ -812,6 +819,33 @@ void ObjectPlanner::planMaps() {
         m_mapValuesHeld += m_mapPass.holdThePass(
             before, after,
             std::span<float>(plan.floats.data() + plan.blendedAt[entry], after.size()));
+    }
+}
+
+void ObjectPlanner::findLightLookUps() {
+    Plan& plan = m_buildingPlan;
+    const KeyedFrame& twoBack = m_frames[1];
+    for (size_t entry = 0; entry < m_building.size(); ++entry) {
+        if (plan.drawsMap[entry] != 0) {
+            plan.light.addMapValues(m_building.values(entry));
+        }
+    }
+    if (plan.light.axisCount() == 0) {
+        return;
+    }
+    for (size_t entry = 0; entry < m_building.size(); ++entry) {
+        if (plan.looksUpMap[entry] == 0 || plan.outcomeOf[entry] != Outcome::Shading) {
+            continue;
+        }
+        std::optional<size_t> earlier = twoBack.find(m_building.key(entry));
+        std::span<const float> latest = m_building.values(entry);
+        if (!earlier.has_value() || twoBack.values(*earlier).size() != latest.size()) {
+            continue;
+        }
+        std::span<const float> before = twoBack.values(*earlier);
+        plan.lookUps.push_back(
+            {static_cast<uint32_t>(entry), static_cast<uint32_t>(plan.lookUpTwoBack.size())});
+        plan.lookUpTwoBack.insert(plan.lookUpTwoBack.end(), before.begin(), before.end());
     }
 }
 
