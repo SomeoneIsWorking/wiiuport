@@ -3,9 +3,10 @@
 An RPX is a big-endian 32-bit PowerPC ELF with no program headers, whose
 section data may each be zlib-compressed (flag SHF_RPL_ZLIB: a big-endian
 uncompressed size, then the stream), and whose file type (0xFE01) and ABI
-(0xCA) no stock ELF loader knows. Decompressing every section and naming the
-file an ordinary executable leaves every section at the address the loader
-places it, so addresses read from a running title are addresses in the ELF.
+(0xCA) no stock ELF loader knows. Inflating every section, linking its imports
+(`wiiuport.rpx_link`) and naming the file an ordinary executable leaves every
+section but the imports at the address the loader places it, so addresses
+read from a running title are addresses in the ELF.
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ from __future__ import annotations
 import struct
 import zlib
 from dataclasses import dataclass
+
+from wiiuport.rpx_link import LinkReport, link
 
 ELF_MAGIC = b"\x7fELF"
 RPL_FILE_TYPE = 0xFE01
@@ -67,8 +70,8 @@ def _data(image: bytes, section: Section) -> bytes:
     return data
 
 
-def to_elf(image: bytes) -> bytes:
-    """The RPX `image` as an executable ELF with every section decompressed."""
+def to_elf(image: bytes) -> tuple[bytes, LinkReport]:
+    """The RPX `image` as an executable ELF, every section inflated and linked."""
     if image[:4] != ELF_MAGIC or len(image) < _HEADER.size:
         raise NotAnRpx("not an ELF file")
     header = list(_HEADER.unpack_from(image))
@@ -79,18 +82,20 @@ def to_elf(image: bytes) -> bytes:
         raise NotAnRpx(f"file type {file_type:#x} is not an RPX's {RPL_FILE_TYPE:#x}")
     section_offset, section_entry_size, section_count = header[6], header[11], header[12]
     sections = _sections(image, section_offset, section_count, section_entry_size)
-    body = bytearray(_HEADER.size)
-    for section in sections:
-        data = _data(image, section)
+    data = [bytearray(_data(image, section)) for section in sections]
+    for section, inflated in zip(sections, data, strict=True):
         section.flags &= ~SHF_RPL_ZLIB
+        if section.type != SHT_NOBITS:
+            section.size = len(inflated)
+    report = link(sections, data)
+    body = bytearray(_HEADER.size)
+    for section, inflated in zip(sections, data, strict=True):
         if section.type == SHT_NOBITS:
             section.offset = len(body)
             continue
-        alignment = max(section.addralign, 1)
-        body.extend(b"\0" * (-len(body) % alignment))
-        section.offset = len(body) if data else 0
-        section.size = len(data)
-        body.extend(data)
+        body.extend(b"\0" * (-len(body) % max(section.addralign, 1)))
+        section.offset = len(body) if inflated else 0
+        body.extend(inflated)
     body.extend(b"\0" * (-len(body) % 4))
     header[0] = ident[:7] + b"\0\0" + ident[9:]  # the System V ABI, version 0
     header[1] = EXECUTABLE_FILE_TYPE
@@ -111,4 +116,4 @@ def to_elf(image: bytes) -> bytes:
                 section.entsize,
             )
         )
-    return bytes(body)
+    return bytes(body), report
