@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <optional>
 #include <span>
 #include <vector>
@@ -406,9 +407,15 @@ void aLayoutDescribesOnlyTheDrawItWasTakenFrom() {
 struct Blends {
     ObjectBlend objects{kHalfway};
     VertexBlend vertices{objects, kHalfway};
+    // Every frame recorded, alive to the end: a frame's own buffers are
+    // then at addresses no later frame's are, as the title's rewritten ones
+    // are not at a kept buffer's two frames on. A test's temporary frame,
+    // freed, would hand its address to a later one.
+    std::deque<GuestFrame> recorded;
 
     // One guest frame as the recorder hands it over.
-    void record(const GuestFrame& frame) {
+    void record(const GuestFrame& guest) {
+        const GuestFrame& frame = recorded.emplace_back(guest);
         FrameRecording recording;
         for (size_t index = 0; index < frame.draws.size(); ++index) {
             if (!frame.draws[index].sharesUniforms) {
@@ -423,9 +430,12 @@ struct Blends {
         vertices.onFrameRecorded(recording);
     }
 
-    // Replays the latest frame as the product does, returning each draw's
-    // mesh as drawn: the replacement where one was handed over.
-    std::vector<std::vector<float>> replay(const GuestFrame& frame) {
+    // Replays the latest frame -- `latest`, as recorded -- as the product
+    // does, returning each draw's mesh as drawn: the replacement where one
+    // was handed over.
+    std::vector<std::vector<float>> replay(const GuestFrame& latest) {
+        const GuestFrame& frame = recorded.back();
+        check::equal(frame.draws.size(), latest.draws.size(), "the frame replayed is the latest");
         objects.armOnce();
         std::vector<std::vector<float>> drawn;
         for (size_t index = 0; index < frame.draws.size(); ++index) {
@@ -893,6 +903,76 @@ void aRingGivenTheBlocksOfOneThatGoesOnElsewhereIsNew() {
                   "and counted with no partner");
 }
 
+// Ripple rings told apart only by place, each kept in a pair of buffers of
+// its own: one grows from 50 in buffers 0 and 1, another from 28 in buffers
+// 2 and 3. At N the first has ended and a new ring stands at 10 in its
+// buffer 0, whose draw two frames back is the old ring at 52; the other
+// ring a frame before stands at 31, half way, as a trail of rings lies on a
+// line. Returns each draw of N as drawn.
+enum class OldRing : uint8_t {
+    // Drawn a frame before N.
+    EndedAtN,
+    // Not drawn a frame before N.
+    EndedAFrameEarly,
+    // Drawn a frame before N, and first drawn at N-3: buffer 0 was not
+    // yet blended from its own when N is.
+    BeganAtNMinusThree,
+};
+
+std::vector<std::vector<float>> ringsAfterOneEnds(Blends& blends, OldRing old) {
+    blends.objects.setPlanning(true);
+    KeptBuffers kept;
+    auto rings = [&kept](uint32_t block, float uniform,
+                         const std::vector<std::pair<float, size_t>>& drawn) {
+        std::vector<ActorDraw> draws;
+        draws.reserve(drawn.size());
+        for (auto [radius, buffer] : drawn) {
+            draws.push_back(
+                {.block = block, .uniforms = {uniform}, .mesh = {radius}, .keptIn = buffer});
+        }
+        return GuestFrame(std::move(draws), &kept);
+    };
+    if (old == OldRing::BeganAtNMinusThree) {
+        blends.record(rings(kSkyBlock, 1.0f, {{28.0f, 2}}));
+    } else {
+        blends.record(rings(kSkyBlock, 1.0f, {{50.0f, 0}, {28.0f, 2}}));
+    }
+    blends.record(rings(kSkyBlockB, 2.0f, {{51.0f, 1}, {29.0f, 3}}));
+    blends.record(rings(kSkyBlock, 3.0f, {{52.0f, 0}, {30.0f, 2}}));
+    if (old == OldRing::EndedAFrameEarly) {
+        blends.record(rings(kSkyBlockB, 4.0f, {{31.0f, 3}}));
+    } else {
+        blends.record(rings(kSkyBlockB, 4.0f, {{53.0f, 1}, {31.0f, 3}}));
+    }
+    GuestFrame latest = rings(kSkyBlock, 5.0f, {{10.0f, 0}, {32.0f, 2}});
+    blends.record(latest);
+    return blends.replay(latest);
+}
+
+void aRingNewInTheBuffersOfOneThatEndedIsNotBlendedFromAnotherOnItsPath() {
+    // The ring a frame before at 31 is in the pair of buffers 2 and 3, not
+    // the pair the new ring's buffer 0 is in: another ring, which the new
+    // one is not drawn flying from.
+    Blends blends;
+    std::vector<std::vector<float>> drawn = ringsAfterOneEnds(blends, OldRing::EndedAtN);
+    check::equal(drawn[0][0], 10.0f, "the new ring is drawn as the title drew it");
+    check::equal(drawn[1][0], 31.5f, "the other ring is blended from its own");
+
+    // Ended a frame earlier, nothing a frame before is in its pair at all.
+    Blends endedEarlier;
+    drawn = ringsAfterOneEnds(endedEarlier, OldRing::EndedAFrameEarly);
+    check::equal(drawn[0][0], 10.0f, "a new ring with no draw in its pair is drawn as drawn");
+    check::equal(endedEarlier.vertices.draws(VertexOutcome::NoPartner), uint64_t{1},
+                 "and counted with no partner");
+    check::equal(drawn[1][0], 31.5f, "while the other ring is blended from its own");
+
+    // Its buffer 0 not yet blended from its own, the other ring's buffer 3
+    // is still known to pair with buffer 2, not 0.
+    Blends beganLate;
+    drawn = ringsAfterOneEnds(beganLate, OldRing::BeganAtNMinusThree);
+    check::equal(drawn[0][0], 10.0f, "a new ring whose buffer's pair is unknown is drawn as drawn");
+}
+
 void nothingIsReplacedBeforeThreeFramesArePlanned() {
     Blends blends;
     blends.objects.setPlanning(true);
@@ -976,6 +1056,7 @@ void runVertexBlendTests() {
     aRingNewAtNInABufferOfItsOwnIsNotTakenForAnother();
     aRingKeptInItsBuffersIsNotTakenForOneSharingAFlippedValue();
     aRingGivenTheBlocksOfOneThatGoesOnElsewhereIsNew();
+    aRingNewInTheBuffersOfOneThatEndedIsNotBlendedFromAnotherOnItsPath();
     nothingIsReplacedBeforeThreeFramesArePlanned();
     aReplayOutOfStepStopsReplacing();
     verticesSwitchedOffAreDrawnAsTheTitleDrewThemAndBlendAgainOnceOn();
