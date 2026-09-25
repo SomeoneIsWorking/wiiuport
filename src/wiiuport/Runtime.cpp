@@ -99,15 +99,18 @@ void Runtime::installHooks() {
     m_environmentProbe.install();
     m_lineProbe.install();
     m_hooksInstalled = true;
-    // Off unless a port is configured. The channel is how an agent asks a
-    // running product what it is doing; a player never needs it.
+    // Always open, on loopback: the channel is how an agent asks a running
+    // product, the player's own session included, what it is doing.
     lucent::config::set_prefix("WIIUPORT_");
-    long long port = lucent::config::number("CONTROL_PORT", 0);
+    long long port = lucent::config::number("CONTROL_PORT", control::ControlChannel::kDefaultPort);
     // On unless switched off: the product is the 60 Hz one, and the switch is
     // there to compare against the title's own rate.
     m_continuous.setEnabled(lucent::config::number("INTERPOLATION", 1) != 0);
     if (port > 0 && port <= 65535) {
         m_control.start(static_cast<uint16_t>(port));
+    } else {
+        lucent::error("runtime", "WIIUPORT_CONTROL_PORT {} is not a port; no control channel",
+                      port);
     }
     lucent::info("runtime", "frame hooks installed; control channel {}; interpolation {}",
                  m_control.running() ? "up" : "off", m_continuous.enabled() ? "on" : "off");

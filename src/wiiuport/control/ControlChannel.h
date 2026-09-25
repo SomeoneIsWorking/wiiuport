@@ -51,6 +51,9 @@ class ControlChannel {
     // How many candidates GET /transforms lists. The totals beside them
     // are never capped, so a cut list still reports how many there were.
     static constexpr size_t kDefaultTransformLimit = 20;
+    // The product always listens, on loopback only, so a player's own session
+    // can be asked what it is doing; WIIUPORT_CONTROL_PORT only moves it.
+    static constexpr long long kDefaultPort = 21337;
     // How long POST /gate waits for the title to hold: a frame, or a step's
     // frames, end well inside it at any rate the title runs.
     static constexpr std::chrono::milliseconds kGateHoldTimeout{10000};
