@@ -661,6 +661,13 @@ std::variant<VertexBlend::Job, VertexOutcome> VertexBlend::planDraw(size_t index
         identity = PartnerIdentity::ByValues;
     }
     Job job{index, *partner, *earlier, identity, index, &drawn.layout};
+    if (identity != PartnerIdentity::ByPlace && keepsBuffers(drawn) &&
+        continuesElsewhere(m_twoBack.draws()[*earlier], index)) {
+        // Its blocks name an object whose buffers another draw reads at N:
+        // that object goes on there, and this draw -- a ring new at N given
+        // the blocks of one that moved to others -- has no frame before.
+        return VertexOutcome::NoPartner;
+    }
     if (identity == PartnerIdentity::ByPlace && keepsBuffers(drawn)) {
         // Told apart by nothing else, an object the title keeps buffers for
         // is its draw two frames back from the same buffers; with none, it
@@ -690,6 +697,15 @@ std::optional<size_t> VertexBlend::drawnFrom(const Frame& frame, const Draw& dra
         return std::nullopt;
     }
     return found->second;
+}
+
+bool VertexBlend::continuesElsewhere(const Draw& earlier, size_t index) const {
+    const Draw& drawn = m_latest.draws()[index];
+    if (earlier.bufferSources == drawn.bufferSources) {
+        return false;
+    }
+    std::optional<size_t> heir = drawnFrom(m_latest, earlier);
+    return heir.has_value() && *heir != index;
 }
 
 bool VertexBlend::keepsBuffers(const Draw& drawn) const {

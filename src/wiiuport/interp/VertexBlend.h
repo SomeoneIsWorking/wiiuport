@@ -480,6 +480,10 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // Whether `drawn`'s shader keeps its objects' vertices in buffers of
     // their own this frame (startBlending).
     bool keepsBuffers(const Draw& drawn) const;
+    // Whether `earlier`, a draw two frames back, reads buffers the latest
+    // draw at `index` does not and another latest draw reads: its object
+    // goes on in that draw.
+    bool continuesElsewhere(const Draw& earlier, size_t index) const;
     void count(uint64_t shaderBaseHash, VertexOutcome outcome);
     void publishCounts();
 
