@@ -6,7 +6,7 @@
 
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/FrameRecording.h"
-#include "wiiuport/guest/Particles.h"
+#include "wiiuport/guest/BufferWriters.h"
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/VertexBlend.h"
 
@@ -57,6 +57,9 @@ struct ActorDraw {
     // The buffer the title keeps its vertices in from frame to frame, by
     // KeptBuffers' index; none, and each frame's are in a buffer of their own.
     std::optional<size_t> keptIn{};
+    // Its vertex shader: another reads the same buffer as a shadow volume
+    // reads a line's.
+    uint64_t shader{kActorShader};
 };
 
 // Buffers the title keeps an object's vertices in across frames, at
@@ -107,8 +110,8 @@ LatteFrameHooks::DrawPrepared preparedOf(std::span<const std::byte> mesh, bool f
 
 struct Blends {
     interp::ObjectBlend objects{kHalfway};
-    guest::Particles particles;
-    interp::VertexBlend vertices{objects, particles, kHalfway};
+    guest::BufferWriters writers;
+    interp::VertexBlend vertices{objects, writers, kHalfway};
     // Every frame recorded, alive to the end: a frame's own buffers are
     // then at addresses no later frame's are, as the title's rewritten ones
     // are not at a kept buffer's two frames on. A test's temporary frame,

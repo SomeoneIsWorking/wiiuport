@@ -12,7 +12,7 @@ void WaveProbe::install() {
 
 void WaveProbe::OnInstall(GuestCallProbes::Installation installation) {
     if (installation == GuestCallProbes::Installation::Installed) {
-        m_particles.noteInstalled();
+        m_writers.noteInstalled();
     }
 }
 
@@ -27,14 +27,14 @@ void WaveProbe::OnCall(std::span<const uint32_t, 32> gpr, uint32_t returnAddress
         buffer == nullptr
             ? nullptr
             : GuestCallProbes::GuestBytes(guestWord(buffer, kBufferVertices) + gpr[kOffsetRegister],
-                                          Particles::kQuadBytes);
+                                          BufferWriters::kLeadingBytes);
     if (wave == nullptr || source == nullptr) {
-        m_particles.noteUnreadable();
+        m_writers.noteUnreadable();
         return;
     }
-    Particles::Quad quad{};
+    BufferWriters::Leading quad{};
     std::memcpy(quad.data(), source, quad.size());
-    m_particles.record(source, {.address = address, .age = guestFloat(wave, kCounter)}, quad);
+    m_writers.record(source, {.address = address, .age = guestFloat(wave, kCounter)}, quad);
 }
 
 } // namespace wiiuport::guest

@@ -65,10 +65,12 @@ add_library(wiiuport STATIC
   frame/VertexChanges.cpp
   frame/VertexChanges.h
   guest/GuestWords.h
-  guest/Particles.cpp
-  guest/Particles.h
+  guest/BufferWriters.cpp
+  guest/BufferWriters.h
   guest/ParticleProbe.cpp
   guest/ParticleProbe.h
+  guest/LineProbe.cpp
+  guest/LineProbe.h
   guest/WaveProbe.cpp
   guest/WaveProbe.h
     input/InputDriver.cpp

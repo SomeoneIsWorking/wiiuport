@@ -1,6 +1,6 @@
 #pragma once
 
-#include "wiiuport/guest/Particles.h"
+#include "wiiuport/guest/BufferWriters.h"
 
 #include "Cafe/HW/Espresso/GuestCallProbes.h"
 
@@ -13,7 +13,7 @@ namespace wiiuport::guest {
 // Watches Wind Waker HD's particle commit -- the call every particle writer
 // makes once it has written a particle's quad, which then flips the
 // particle's vertex store -- and records each particle and its quad into
-// Particles. Reads guest memory as the call begins; changes nothing.
+// BufferWriters. Reads guest memory as the call begins; changes nothing.
 class ParticleProbe final : public GuestCallProbes::Probe {
   public:
     // `commit(particle, store)` in the title's executable, and its first
@@ -35,7 +35,7 @@ class ParticleProbe final : public GuestCallProbes::Probe {
     static constexpr uint32_t kBufferStride = 0x254;
     static constexpr uint32_t kFlip = 0x950;
 
-    explicit ParticleProbe(Particles& particles) : m_particles(particles) {
+    explicit ParticleProbe(BufferWriters& writers) : m_writers(writers) {
     }
 
     // Registers with the fork, to be installed when the title is linked.
@@ -45,7 +45,7 @@ class ParticleProbe final : public GuestCallProbes::Probe {
     void OnCall(std::span<const uint32_t, 32> gpr, uint32_t returnAddress) override;
 
   private:
-    Particles& m_particles;
+    BufferWriters& m_writers;
 };
 
 } // namespace wiiuport::guest

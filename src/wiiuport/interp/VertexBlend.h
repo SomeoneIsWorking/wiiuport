@@ -375,7 +375,7 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
         // as bySource: the first buffer of the draw a frame before each went
         // on from, and, keyed by that buffer, the draw's own: how a pool of
         // particles is told apart where the title's code was not seen
-        // drawing them (DrawObjects). Particles on a line put another half
+        // drawing them (DrawObjects). BufferWriters on a line put another half
         // way between an ended one and the new one its buffer is given to;
         // the one that went on from another buffer is another particle, as
         // is any but the one that went on from the new one's. The buffers a
@@ -516,14 +516,14 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // it, if it was kept and is laid out as `drawn` is.
     static std::optional<size_t> drawOf(const Frame& frame, size_t entry, const Draw& drawn);
     // A draw of the title's object tied to the same object's draws a frame
-    // before and two frames back, each younger than the next; none when the
-    // object is new since, or reborn at its address.
+    // before and two frames back, each continuing as the next
+    // (GuestObject::continuesAs); none when the object is new since, or
+    // reborn at its address.
     std::variant<Job, VertexOutcome> planByObject(size_t index, const GuestObject& object) const;
-    // The draw of `frame` of the object `olderThan` names, younger than it
-    // and laid out and shaded as `drawn`, with the object as it drew it, if
-    // any.
+    // The draw of `frame` of the object `later` names, continuing as it and
+    // laid out and shaded as `drawn`, with the object as it drew it, if any.
     static std::optional<std::pair<size_t, GuestObject>>
-    drawOfObject(const Frame& frame, const Draw& drawn, const GuestObject& olderThan);
+    drawOfObject(const Frame& frame, const Draw& drawn, const GuestObject& later);
     // The draw of `frame` from the same guest buffers as `drawn`, by the same
     // shader, if any.
     static std::optional<size_t> drawnFrom(const Frame& frame, const Draw& drawn);

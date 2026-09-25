@@ -12,7 +12,7 @@ void ParticleProbe::install() {
 
 void ParticleProbe::OnInstall(GuestCallProbes::Installation installation) {
     if (installation == GuestCallProbes::Installation::Installed) {
-        m_particles.noteInstalled();
+        m_writers.noteInstalled();
     }
 }
 
@@ -35,14 +35,14 @@ void ParticleProbe::OnCall(std::span<const uint32_t, 32> gpr, uint32_t /*returnA
                              ? nullptr
                              : GuestCallProbes::GuestBytes(
                                    guestWord(store, static_cast<size_t>(flip) * kBufferStride),
-                                   Particles::kQuadBytes);
+                                   BufferWriters::kLeadingBytes);
     if (source == nullptr) {
-        m_particles.noteUnreadable();
+        m_writers.noteUnreadable();
         return;
     }
-    Particles::Quad quad{};
+    BufferWriters::Leading quad{};
     std::memcpy(quad.data(), source, quad.size());
-    m_particles.record(source, {.address = address, .age = guestFloat(particle, kAge)}, quad);
+    m_writers.record(source, {.address = address, .age = guestFloat(particle, kAge)}, quad);
 }
 
 } // namespace wiiuport::guest
