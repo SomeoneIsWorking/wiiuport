@@ -41,30 +41,67 @@ double onPoint(const Row& row, Vec3 p, float w) {
            (static_cast<double>(row[2]) * p.z) + (static_cast<double>(row[3]) * w);
 }
 
-// The light's axes, as the draws into its map hold them.
+// Rows of four, a rotation with the fourth values `w`, scaled by `scale`.
+std::vector<float> rotationRows(std::array<Vec3, 3> axes, std::array<float, 3> w, float scale) {
+    std::vector<float> rows;
+    for (size_t row = 0; row < 3; ++row) {
+        rows.insert(rows.end(),
+                    {axes[row].x * scale, axes[row].y * scale, axes[row].z * scale, w[row]});
+    }
+    return rows;
+}
+
+Vec3 axisOf(const Transform3x4& rotation, size_t index) {
+    const std::array<float, Transform3x4::kFloats>& l = rotation.values();
+    return {l[index * 4], l[(index * 4) + 1], l[(index * 4) + 2]};
+}
+
+std::array<Vec3, 3> axesOf(const Transform3x4& rotation) {
+    return {axisOf(rotation, 0), axisOf(rotation, 1), axisOf(rotation, 2)};
+}
+
+// A camera turning on a level, and the light turning with it.
 struct Scene {
     Transform3x4 light = turned(0.4f, false, {0.0f, 0.0f, 0.0f});
+    Transform3x4 lightTwoBack = turned(0.3f, false, {0.0f, 0.0f, 0.0f});
     Transform3x4 viewAtN = turned(0.6f, true, {3.0f, -2.0f, 40.0f});
     Transform3x4 viewTwoBack = turned(0.45f, true, {3.5f, -2.0f, 41.0f});
     Transform3x4 viewBetween = turned(0.52f, true, {3.2f, -2.0f, 40.5f});
 
+    // The map draws' values: the light's rotation, an object's that stood
+    // still -- the world's own axes -- and two that moved but are no
+    // rotation of the light's space, one translated and one scaled. Taken
+    // for axes, the last two would put a row across every light axis in a
+    // plane of two.
     LightLookUp lookUp() const {
+        Vec3 a = axis(0);
+        Vec3 b = axis(1);
+        Vec3 c = axis(2);
+        float half = 1.0f / std::sqrt(2.0f);
+        std::array<Vec3, 3> decoy = {
+            Vec3{(a.x - b.x) * half, (a.y - b.y) * half, (a.z - b.z) * half},
+            Vec3{(a.x + b.x) * half, (a.y + b.y) * half, (a.z + b.z) * half}, c};
+        std::array<Vec3, 3> world = {Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f},
+                                     Vec3{0.0f, 0.0f, 1.0f}};
+        std::vector<float> latest = rotationRows(axesOf(light), {0.0f, 0.0f, 0.0f}, 1.0f);
+        std::vector<float> twoBack = rotationRows(axesOf(lightTwoBack), {0.0f, 0.0f, 0.0f}, 1.0f);
+        for (const std::vector<float>& rows : {rotationRows(world, {0.0f, 0.0f, 0.0f}, 1.0f),
+                                               rotationRows(decoy, {7.0f, 0.0f, 0.0f}, 1.0f),
+                                               rotationRows(decoy, {0.0f, 0.0f, 0.0f}, 2.0f)}) {
+            latest.insert(latest.end(), rows.begin(), rows.end());
+        }
+        for (const std::vector<float>& rows : {rotationRows(world, {0.0f, 0.0f, 0.0f}, 1.0f),
+                                               rotationRows(decoy, {6.0f, 0.0f, 0.0f}, 1.0f),
+                                               rotationRows(decoy, {0.0f, 0.0f, 0.0f}, 3.0f)}) {
+            twoBack.insert(twoBack.end(), rows.begin(), rows.end());
+        }
         LightLookUp found;
-        const std::array<float, Transform3x4::kFloats>& l = light.values();
-        std::vector<float> map = {l[0], l[1], l[2], 0.0f, l[4], l[5], l[6], 0.0f, l[8], l[9], l[10],
-                                  0.0f,
-                                  // A unit row with a translation, and a scaled row: not
-                                  // axes. Taken for one, the first would put a row
-                                  // across every axis in a plane of the light's.
-                                  (l[0] - l[4]) / std::sqrt(2.0f), (l[1] - l[5]) / std::sqrt(2.0f),
-                                  (l[2] - l[6]) / std::sqrt(2.0f), 7.0f, 2.0f, 0.0f, 0.0f, 0.0f};
-        found.addMapValues(map);
+        found.addMapValues(twoBack, latest);
         return found;
     }
 
     Vec3 axis(size_t index) const {
-        const std::array<float, Transform3x4::kFloats>& l = light.values();
-        return {l[index * 4], l[(index * 4) + 1], l[(index * 4) + 2]};
+        return axisOf(light, index);
     }
 };
 
@@ -82,14 +119,28 @@ Row seenThrough(Vec3 world, float w, const Transform3x4& view, bool direction) {
     return row;
 }
 
-void theAxesAreTheMapsUnitRowsWithoutTranslation() {
+void theAxesAreTheRotationTheMapDrawsTurned() {
     Scene scene;
     check::equal(scene.lookUp().axisCount(), size_t{3}, "three axes, the rest refused");
-    LightLookUp none;
+    LightLookUp still;
+    std::vector<float> light = rotationRows(axesOf(scene.light), {0.0f, 0.0f, 0.0f}, 1.0f);
+    still.addMapValues(light, light);
+    check::equal(still.axisCount(), size_t{0}, "a rotation that stood still is not the light's");
     Row row{1.0f, 0.0f, 0.0f, 0.0f};
     Row moved{0.0f, 1.0f, 0.0f, 0.0f};
-    check::isTrue(none.classify(row, moved, scene.viewAtN) == LightLookUp::RowForm::Unrelated,
-                  "without a map drawn, no row is the light's");
+    check::isTrue(still.classify(row, moved, scene.viewAtN) == LightLookUp::RowForm::Unrelated,
+                  "without the light's axes, no row is the light's");
+}
+
+void aScalarIsNotTurnedThroughTheWorldsOwnAxes() {
+    Scene scene;
+    LightLookUp lookUp = scene.lookUp();
+    Row twoBack{2570.792f, 0.0f, 0.0f, 0.0f};
+    Row latest{755.9406f, 0.0f, 0.0f, 0.0f};
+    std::array<float, 4> out = latest;
+    check::equal(lookUp.rebaseStage(twoBack, latest, scene.viewAtN, scene.viewBetween, out),
+                 size_t{0}, "a moved scalar seen through a level camera is not the light's");
+    check::isTrue(out == latest, "the scalar is drawn as the title drew it");
 }
 
 void aMovedDepthRowIsRebasedToTheInBetweenView() {
@@ -177,7 +228,8 @@ void aStillRowAndARowOffTheLightsPlanesAreLeft() {
 namespace wiiuport::tests {
 
 void runLightLookUpTests() {
-    theAxesAreTheMapsUnitRowsWithoutTranslation();
+    theAxesAreTheRotationTheMapDrawsTurned();
+    aScalarIsNotTurnedThroughTheWorldsOwnAxes();
     aMovedDepthRowIsRebasedToTheInBetweenView();
     aMixedRowOfTwoAxesIsTheLights();
     aDirectionKeepsItsFourthValue();
