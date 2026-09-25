@@ -16,9 +16,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 DEFAULT_PORT = 21337
-"""The port maintainer tools use. The product opens none unless one is
-configured, so this is a convention between tools, not a default the product
-carries."""
+"""The port the product listens on, loopback only, unless WIIUPORT_CONTROL_PORT
+moves it (`ControlChannel::kDefaultPort`); `./run.sh` sessions answer here too."""
 
 
 ENV_CONTROL_PORT = "WIIUPORT_CONTROL_PORT"
@@ -209,7 +208,7 @@ def _get(path: str, port: int, timeout: float) -> dict:
     except urllib.error.URLError as unreachable:
         raise ControlUnavailable(
             f"{url} did not answer ({unreachable.reason}). The runtime is not running, "
-            "or was started without WIIUPORT_CONTROL_PORT."
+            "or listens on another WIIUPORT_CONTROL_PORT."
         ) from unreachable
     except json.JSONDecodeError as malformed:
         raise ControlUnavailable(f"{url} answered something that is not JSON: {malformed}") from (
@@ -231,7 +230,7 @@ def request_bytes(method: str, path: str, port: int, timeout: float) -> bytes:
     except urllib.error.URLError as unreachable:
         raise ControlUnavailable(
             f"{url} did not answer ({unreachable.reason}). The runtime is not running, "
-            "or was started without WIIUPORT_CONTROL_PORT."
+            "or listens on another WIIUPORT_CONTROL_PORT."
         ) from unreachable
 
 

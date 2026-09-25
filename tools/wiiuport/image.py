@@ -100,7 +100,7 @@ def read_capture(port: int = DEFAULT_PORT, timeout: float = 20.0, slot: int = 0)
     except urllib.error.URLError as unreachable:
         raise ControlUnavailable(
             f"{url} did not answer ({unreachable.reason}). The runtime is not running, "
-            "or was started without WIIUPORT_CONTROL_PORT."
+            "or listens on another WIIUPORT_CONTROL_PORT."
         ) from unreachable
 
 
