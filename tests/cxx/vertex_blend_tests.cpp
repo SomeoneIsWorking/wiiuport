@@ -903,26 +903,27 @@ void aRingGivenTheBlocksOfOneThatGoesOnElsewhereIsNew() {
                   "and counted with no partner");
 }
 
-// Ripple rings told apart only by place, each kept in a pair of buffers of
-// its own: one grows from 50 in buffers 0 and 1, another from 28 in buffers
-// 2 and 3. At N the first has ended and a new ring stands at 10 in its
-// buffer 0, whose draw two frames back is the old ring at 52; the other
-// ring a frame before stands at 31, half way, as a trail of rings lies on a
-// line. Returns each draw of N as drawn.
-enum class OldRing : uint8_t {
-    // Drawn a frame before N.
-    EndedAtN,
-    // Not drawn a frame before N.
-    EndedAFrameEarly,
-    // Drawn a frame before N, and first drawn at N-3: buffer 0 was not
-    // yet blended from its own when N is.
-    BeganAtNMinusThree,
+// Ripple rings told apart only by place, each kept in two buffers it
+// alternates through: one grows from 50 in buffers 0 and 1, another from 28
+// in buffers 2 and 3, and a third far off in 4 and 5 goes on throughout, so
+// every frame draws a pool of rings. At N the first has ended and a new ring
+// stands at 10 in its buffer 0, whose draw two frames back is the old ring at
+// 52; the second ring a frame before stands at 31, half way, as a trail of
+// rings lies on a line. Returns each draw of N as drawn.
+enum class Rings : uint8_t {
+    // The old ring drawn a frame before N.
+    OldEndedAtN,
+    // The old ring not drawn a frame before N.
+    OldEndedAFrameEarly,
+    // The second ring first drawn a frame before N, at 31: its draw there
+    // went on from nothing.
+    SecondBeganAtNMinusOne,
 };
 
-std::vector<std::vector<float>> ringsAfterOneEnds(Blends& blends, OldRing old) {
+std::vector<std::vector<float>> ringsAfterOneEnds(Blends& blends, Rings rings) {
     blends.objects.setPlanning(true);
     KeptBuffers kept;
-    auto rings = [&kept](uint32_t block, float uniform,
+    auto frame = [&kept](uint32_t block, float uniform,
                          const std::vector<std::pair<float, size_t>>& drawn) {
         std::vector<ActorDraw> draws;
         draws.reserve(drawn.size());
@@ -932,45 +933,49 @@ std::vector<std::vector<float>> ringsAfterOneEnds(Blends& blends, OldRing old) {
         }
         return GuestFrame(std::move(draws), &kept);
     };
-    if (old == OldRing::BeganAtNMinusThree) {
-        blends.record(rings(kSkyBlock, 1.0f, {{28.0f, 2}}));
+    if (rings == Rings::SecondBeganAtNMinusOne) {
+        blends.record(frame(kSkyBlock, 1.0f, {{50.0f, 0}, {500.0f, 4}}));
+        blends.record(frame(kSkyBlockB, 2.0f, {{51.0f, 1}, {501.0f, 5}}));
+        blends.record(frame(kSkyBlock, 3.0f, {{52.0f, 0}, {502.0f, 4}}));
     } else {
-        blends.record(rings(kSkyBlock, 1.0f, {{50.0f, 0}, {28.0f, 2}}));
+        blends.record(frame(kSkyBlock, 1.0f, {{50.0f, 0}, {28.0f, 2}, {500.0f, 4}}));
+        blends.record(frame(kSkyBlockB, 2.0f, {{51.0f, 1}, {29.0f, 3}, {501.0f, 5}}));
+        blends.record(frame(kSkyBlock, 3.0f, {{52.0f, 0}, {30.0f, 2}, {502.0f, 4}}));
     }
-    blends.record(rings(kSkyBlockB, 2.0f, {{51.0f, 1}, {29.0f, 3}}));
-    blends.record(rings(kSkyBlock, 3.0f, {{52.0f, 0}, {30.0f, 2}}));
-    if (old == OldRing::EndedAFrameEarly) {
-        blends.record(rings(kSkyBlockB, 4.0f, {{31.0f, 3}}));
+    if (rings == Rings::OldEndedAFrameEarly) {
+        blends.record(frame(kSkyBlockB, 4.0f, {{31.0f, 3}, {503.0f, 5}}));
     } else {
-        blends.record(rings(kSkyBlockB, 4.0f, {{53.0f, 1}, {31.0f, 3}}));
+        blends.record(frame(kSkyBlockB, 4.0f, {{53.0f, 1}, {31.0f, 3}, {503.0f, 5}}));
     }
-    GuestFrame latest = rings(kSkyBlock, 5.0f, {{10.0f, 0}, {32.0f, 2}});
+    GuestFrame latest = frame(kSkyBlock, 5.0f, {{10.0f, 0}, {32.0f, 2}, {504.0f, 4}});
     blends.record(latest);
     return blends.replay(latest);
 }
 
 void aRingNewInTheBuffersOfOneThatEndedIsNotBlendedFromAnotherOnItsPath() {
-    // The ring a frame before at 31 is in the pair of buffers 2 and 3, not
-    // the pair the new ring's buffer 0 is in: another ring, which the new
-    // one is not drawn flying from.
+    // The ring a frame before at 31 went on from buffer 2, not the new
+    // ring's buffer 0, and the old ring went on from buffer 0: another ring,
+    // which the new one is not drawn flying from.
     Blends blends;
-    std::vector<std::vector<float>> drawn = ringsAfterOneEnds(blends, OldRing::EndedAtN);
+    std::vector<std::vector<float>> drawn = ringsAfterOneEnds(blends, Rings::OldEndedAtN);
     check::equal(drawn[0][0], 10.0f, "the new ring is drawn as the title drew it");
     check::equal(drawn[1][0], 31.5f, "the other ring is blended from its own");
 
-    // Ended a frame earlier, nothing a frame before is in its pair at all.
+    // Nothing a frame before went on from buffer 0; the ring at 31 went on
+    // from another.
     Blends endedEarlier;
-    drawn = ringsAfterOneEnds(endedEarlier, OldRing::EndedAFrameEarly);
-    check::equal(drawn[0][0], 10.0f, "a new ring with no draw in its pair is drawn as drawn");
+    drawn = ringsAfterOneEnds(endedEarlier, Rings::OldEndedAFrameEarly);
+    check::equal(drawn[0][0], 10.0f, "a new ring nothing went on from is drawn as drawn");
     check::equal(endedEarlier.vertices.draws(VertexOutcome::NoPartner), uint64_t{1},
                  "and counted with no partner");
     check::equal(drawn[1][0], 31.5f, "while the other ring is blended from its own");
 
-    // Its buffer 0 not yet blended from its own, the other ring's buffer 3
-    // is still known to pair with buffer 2, not 0.
-    Blends beganLate;
-    drawn = ringsAfterOneEnds(beganLate, OldRing::BeganAtNMinusThree);
-    check::equal(drawn[0][0], 10.0f, "a new ring whose buffer's pair is unknown is drawn as drawn");
+    // The ring at 31 went on from nothing; the old ring went on from buffer
+    // 0, so the ring at 31 is not the one that did.
+    Blends secondNew;
+    drawn = ringsAfterOneEnds(secondNew, Rings::SecondBeganAtNMinusOne);
+    check::equal(drawn[0][0], 10.0f,
+                 "a new ring is not blended from a ring that went on from nothing");
 }
 
 void nothingIsReplacedBeforeThreeFramesArePlanned() {

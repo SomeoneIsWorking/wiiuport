@@ -368,6 +368,8 @@ void VertexBlend::Frame::clear() {
     byShader.clear();
     meshes.clear();
     bySource.clear();
+    continuedFrom.clear();
+    continuedBy.clear();
     reads.clear();
     frameIndex = 0;
     assemblies = 0;
@@ -456,7 +458,7 @@ void VertexBlend::recordReads(const LatteFrameHooks::DrawPrepared& draw,
 void VertexBlend::onFrameRecorded(const frame::FrameRecording& /*recording*/) {
     // The frames it blends are about to move.
     m_pool.waitAll();
-    learnPairedBuffers();
+    recordContinuations();
     publishCounts();
     m_building.frameIndex = m_objects.framesEnded();
     std::swap(m_twoBack, m_previous);
@@ -886,7 +888,7 @@ std::optional<size_t> VertexBlend::mostResembling(const Draw& drawn, const Verte
     std::optional<size_t> found;
     std::optional<Resemblance> closest;
     auto consider = [&](size_t index) {
-        if (pairedElsewhere(frame.draws()[index], ownSource)) {
+        if (wentOnElsewhere(frame, frame.draws()[index], ownSource)) {
             return;
         }
         gather(frame, frame.draws()[index], scratch.candidate);
@@ -909,26 +911,28 @@ std::optional<size_t> VertexBlend::mostResembling(const Draw& drawn, const Verte
     return found;
 }
 
-bool VertexBlend::pairedElsewhere(const Draw& draw, const void* ownSource) const {
+bool VertexBlend::wentOnElsewhere(const Frame& frame, const Draw& draw, const void* ownSource) {
     if (ownSource == nullptr || draw.bufferSources.empty()) {
         return false;
     }
     const void* source = draw.bufferSources.front();
-    auto pairedOtherwise = [this, &draw](const void* from, const void* to) {
-        auto paired = m_pairedBuffers.find({draw.vertexShaderBaseHash, from});
-        return paired != m_pairedBuffers.end() && paired->second != to;
-    };
-    return pairedOtherwise(ownSource, source) || pairedOtherwise(source, ownSource);
+    auto wentOnFrom = frame.continuedFrom.find({draw.vertexShaderBaseHash, source});
+    if (wentOnFrom != frame.continuedFrom.end() && wentOnFrom->second != ownSource) {
+        return true;
+    }
+    auto wentOnBy = frame.continuedBy.find({draw.vertexShaderBaseHash, ownSource});
+    return wentOnBy != frame.continuedBy.end() && wentOnBy->second != source;
 }
 
-void VertexBlend::learnPairedBuffers() {
+void VertexBlend::recordContinuations() {
     for (const PairSlot& pair : m_pairSlots) {
         if (pair.partnerSource == nullptr) {
             continue;
         }
         const Draw& drawn = m_latest.draws()[pair.job.draw];
-        m_pairedBuffers[{drawn.vertexShaderBaseHash, drawn.bufferSources.front()}] =
-            pair.partnerSource;
+        const void* own = drawn.bufferSources.front();
+        m_latest.continuedFrom[{drawn.vertexShaderBaseHash, own}] = pair.partnerSource;
+        m_latest.continuedBy[{drawn.vertexShaderBaseHash, pair.partnerSource}] = own;
     }
 }
 
