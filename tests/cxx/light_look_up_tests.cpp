@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <span>
 #include <vector>
 
 using wiiuport::interp::LightLookUp;
@@ -68,12 +69,28 @@ struct Scene {
     Transform3x4 viewTwoBack = turned(0.45f, true, {3.5f, -2.0f, 41.0f});
     Transform3x4 viewBetween = turned(0.52f, true, {3.2f, -2.0f, 40.5f});
 
-    // The map draws' values: the light's rotation, an object's that stood
-    // still -- the world's own axes -- and two that moved but are no
-    // rotation of the light's space, one translated and one scaled. Taken
-    // for axes, the last two would put a row across every light axis in a
-    // plane of two.
+    // The frame's draws into the map. Three hold the light's rotation, each
+    // with an object's own: one that stood still -- the world's own axes --
+    // and two that moved but are no rotation of the light's space, one
+    // translated and one scaled. Two more, one a cascade, hold a caster
+    // turning about the upright. Taken for axes, the decoys would put a row
+    // across every light axis in a plane of two, and the caster's upright a
+    // scalar seen through a level camera.
     LightLookUp lookUp() const {
+        LightLookUp found;
+        for (const MapDraw& draw : mapDraws()) {
+            found.addMapValues(draw.twoBack, draw.latest);
+        }
+        found.chooseAxes();
+        return found;
+    }
+
+    struct MapDraw {
+        std::vector<float> twoBack;
+        std::vector<float> latest;
+    };
+
+    std::vector<MapDraw> mapDraws() const {
         Vec3 a = axis(0);
         Vec3 b = axis(1);
         Vec3 c = axis(2);
@@ -83,21 +100,29 @@ struct Scene {
             Vec3{(a.x + b.x) * half, (a.y + b.y) * half, (a.z + b.z) * half}, c};
         std::array<Vec3, 3> world = {Vec3{1.0f, 0.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f},
                                      Vec3{0.0f, 0.0f, 1.0f}};
-        std::vector<float> latest = rotationRows(axesOf(light), {0.0f, 0.0f, 0.0f}, 1.0f);
-        std::vector<float> twoBack = rotationRows(axesOf(lightTwoBack), {0.0f, 0.0f, 0.0f}, 1.0f);
-        for (const std::vector<float>& rows : {rotationRows(world, {0.0f, 0.0f, 0.0f}, 1.0f),
-                                               rotationRows(decoy, {7.0f, 0.0f, 0.0f}, 1.0f),
-                                               rotationRows(decoy, {0.0f, 0.0f, 0.0f}, 2.0f)}) {
-            latest.insert(latest.end(), rows.begin(), rows.end());
+        std::vector<float> lightRows = rotationRows(axesOf(light), {0.0f, 0.0f, 0.0f}, 1.0f);
+        std::vector<float> lightRowsTwoBack =
+            rotationRows(axesOf(lightTwoBack), {0.0f, 0.0f, 0.0f}, 1.0f);
+        std::array<std::array<std::vector<float>, 2>, 3> own = {{
+            {rotationRows(world, {0.0f, 0.0f, 0.0f}, 1.0f),
+             rotationRows(world, {0.0f, 0.0f, 0.0f}, 1.0f)},
+            {rotationRows(decoy, {6.0f, 0.0f, 0.0f}, 1.0f),
+             rotationRows(decoy, {7.0f, 0.0f, 0.0f}, 1.0f)},
+            {rotationRows(decoy, {0.0f, 0.0f, 0.0f}, 3.0f),
+             rotationRows(decoy, {0.0f, 0.0f, 0.0f}, 2.0f)},
+        }};
+        std::vector<MapDraw> draws;
+        for (const std::array<std::vector<float>, 2>& object : own) {
+            MapDraw draw{lightRowsTwoBack, lightRows};
+            draw.twoBack.insert(draw.twoBack.end(), object[0].begin(), object[0].end());
+            draw.latest.insert(draw.latest.end(), object[1].begin(), object[1].end());
+            draws.push_back(draw);
         }
-        for (const std::vector<float>& rows : {rotationRows(world, {0.0f, 0.0f, 0.0f}, 1.0f),
-                                               rotationRows(decoy, {6.0f, 0.0f, 0.0f}, 1.0f),
-                                               rotationRows(decoy, {0.0f, 0.0f, 0.0f}, 3.0f)}) {
-            twoBack.insert(twoBack.end(), rows.begin(), rows.end());
-        }
-        LightLookUp found;
-        found.addMapValues(twoBack, latest);
-        return found;
+        MapDraw caster{rotationRows(axesOf(turned(0.2f, true, {})), {0.0f, 0.0f, 0.0f}, 1.0f),
+                       rotationRows(axesOf(turned(0.5f, true, {})), {0.0f, 0.0f, 0.0f}, 1.0f)};
+        draws.push_back(caster);
+        draws.push_back(caster);
+        return draws;
     }
 
     Vec3 axis(size_t index) const {
@@ -125,7 +150,44 @@ void theAxesAreTheRotationTheMapDrawsTurned() {
     LightLookUp still;
     std::vector<float> light = rotationRows(axesOf(scene.light), {0.0f, 0.0f, 0.0f}, 1.0f);
     still.addMapValues(light, light);
+    still.addMapValues(light, light);
+    still.chooseAxes();
     check::equal(still.axisCount(), size_t{0}, "a rotation that stood still is not the light's");
+    std::vector<Scene::MapDraw> draws = scene.mapDraws();
+    LightLookUp even;
+    for (size_t draw = 0; draw < draws.size(); ++draw) {
+        // The light's rotation in two draws, as many as the caster's.
+        if (draw != 0) {
+            even.addMapValues(draws[draw].twoBack, draws[draw].latest);
+        }
+    }
+    even.chooseAxes();
+    check::equal(even.axisCount(), size_t{0},
+                 "two rotations held by as many draws do not name the light");
+    LightLookUp once;
+    once.addMapValues(draws[0].twoBack, draws[0].latest);
+    once.chooseAxes();
+    check::equal(once.axisCount(), size_t{0}, "a rotation one draw holds is an object's");
+    LightLookUp twice;
+    std::vector<float> doubled = draws.back().latest;
+    doubled.insert(doubled.end(), draws.back().latest.begin(), draws.back().latest.end());
+    std::vector<float> doubledTwoBack = draws.back().twoBack;
+    doubledTwoBack.insert(doubledTwoBack.end(), draws.back().twoBack.begin(),
+                          draws.back().twoBack.end());
+    twice.addMapValues(doubledTwoBack, doubled);
+    twice.chooseAxes();
+    check::equal(twice.axisCount(), size_t{0}, "a draw holding a rotation twice is one draw");
+    // The translated and the scaled decoys, each in every draw.
+    for (size_t decoy : {size_t{1}, size_t{2}}) {
+        std::span<const float> latest = std::span<const float>(draws[decoy].latest).subspan(12);
+        std::span<const float> twoBack = std::span<const float>(draws[decoy].twoBack).subspan(12);
+        LightLookUp alone;
+        alone.addMapValues(twoBack, latest);
+        alone.addMapValues(twoBack, latest);
+        alone.chooseAxes();
+        check::equal(alone.axisCount(), size_t{0},
+                     "rows translated or scaled are no rotation of the light's");
+    }
     Row row{1.0f, 0.0f, 0.0f, 0.0f};
     Row moved{0.0f, 1.0f, 0.0f, 0.0f};
     check::isTrue(still.classify(row, moved, scene.viewAtN) == LightLookUp::RowForm::Unrelated,
