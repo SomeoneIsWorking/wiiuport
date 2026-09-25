@@ -36,6 +36,8 @@ add_library(wiiuport STATIC
   Runtime.h
   control/ControlChannel.cpp
   control/ControlChannel.h
+  control/GuestMemoryRead.cpp
+  control/GuestMemoryRead.h
   frame/FrameCapture.cpp
   frame/FrameCapture.h
   frame/FrameGate.cpp
@@ -67,6 +69,8 @@ add_library(wiiuport STATIC
   guest/GuestWords.h
   guest/BufferWriters.cpp
   guest/BufferWriters.h
+  guest/CallerCensus.cpp
+  guest/CallerCensus.h
   guest/ParticleProbe.cpp
   guest/ParticleProbe.h
   guest/LineProbe.cpp
