@@ -13,7 +13,8 @@
 
 namespace wiiuport::guest {
 
-// The title's particles, by the vertex buffer each last wrote its quad to.
+// The title's particles and sea waves, by the vertex buffer each last wrote
+// its quad to.
 //
 // A particle's quad carries nothing of its own -- four corners and the UVs
 // every quad of its kind has -- and the title hands a pool of particles
@@ -21,19 +22,20 @@ namespace wiiuport::guest {
 // draw is. The title's code can: Wind Waker HD's particle writers
 // (JSystem's JPA draw executors and `dPa_ripplePcallBack::draw`, recovered in
 // setsail's docs/render-state.md) each write one particle's quad into one of
-// the particle's own two vertex buffers and then commit it. ParticleProbe
-// watches that commit and records here, by the buffer, the particle's
-// address and age and the quad's bytes as written; a draw from that buffer
-// is that particle's when it reads those bytes.
+// the particle's own two vertex buffers and then commit it, and its sea
+// waves' writer does the same for each wave. ParticleProbe and WaveProbe
+// watch those calls and record here, by the buffer, the object's address
+// and age and the quad's bytes as written; a draw from that buffer is that
+// object's when it reads those bytes.
 class Particles final : public interp::DrawObjects {
   public:
     // A quad as the writers leave it: four corners of 20 bytes each.
     static constexpr size_t kQuadBytes = 80;
     using Quad = std::array<std::byte, kQuadBytes>;
 
-    // Whether the probe was installed in the title's code, once it is linked.
-    void noteInstalled(bool installed) {
-        m_installed.store(installed);
+    // A probe installed in the title's code, once it is linked.
+    void noteInstalled() {
+        m_installed.fetch_add(1);
     }
 
     // A commit whose particle or vertex store could not be read.
@@ -48,7 +50,8 @@ class Particles final : public interp::DrawObjects {
     std::optional<interp::GuestObject> objectDrawn(const void* source,
                                                    std::span<const std::byte> bytes) const override;
 
-    bool installed() const {
+    // How many of the probes that record here were installed.
+    uint32_t installed() const {
         return m_installed.load();
     }
 
@@ -78,7 +81,7 @@ class Particles final : public interp::DrawObjects {
         Quad quad;
     };
 
-    std::atomic<bool> m_installed{false};
+    std::atomic<uint32_t> m_installed{0};
     std::atomic<uint64_t> m_calls{0};
     std::atomic<uint64_t> m_unreadable{0};
     mutable std::atomic<uint64_t> m_identified{0};

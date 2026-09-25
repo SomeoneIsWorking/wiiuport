@@ -11,10 +11,12 @@ void ParticleProbe::install() {
 }
 
 void ParticleProbe::OnInstall(GuestCallProbes::Installation installation) {
-    m_particles.noteInstalled(installation == GuestCallProbes::Installation::Installed);
+    if (installation == GuestCallProbes::Installation::Installed) {
+        m_particles.noteInstalled();
+    }
 }
 
-void ParticleProbe::OnCall(std::span<const uint32_t, 32> gpr) {
+void ParticleProbe::OnCall(std::span<const uint32_t, 32> gpr, uint32_t /*returnAddress*/) {
     if (gpr[kStoreRegister] != 0) {
         return;
     }

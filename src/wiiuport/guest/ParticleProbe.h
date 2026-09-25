@@ -42,7 +42,7 @@ class ParticleProbe final : public GuestCallProbes::Probe {
     void install();
 
     void OnInstall(GuestCallProbes::Installation installation) override;
-    void OnCall(std::span<const uint32_t, 32> gpr) override;
+    void OnCall(std::span<const uint32_t, 32> gpr, uint32_t returnAddress) override;
 
   private:
     Particles& m_particles;
