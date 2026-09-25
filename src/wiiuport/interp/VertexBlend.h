@@ -464,9 +464,10 @@ class VertexBlend final : public frame::AssemblyRecordedListener,
     // Of `planned` and the draws of `drawn`'s shader with its buffers in
     // `frame`, the one `drawn` -- gathered into scratch.after -- most
     // resembles under `layout`; given its vertices two frames back
-    // (`twoBack`), nearness counts only what moved from them.
+    // (`twoBack`), nearness counts only what moved from them, and where those
+    // are known to be its own (`twoBackIsItsOwn`), nearness alone decides.
     size_t mostResembling(const Draw& drawn, const VertexLayout& layout, const Frame& frame,
-                          size_t planned, std::span<const std::byte> twoBack,
+                          size_t planned, std::span<const std::byte> twoBack, bool twoBackIsItsOwn,
                           Scratch& scratch) const;
     // A draw's buffers one after another into `into`, as the blend reads them.
     void gather(const Frame& frame, const Draw& draw, std::vector<std::byte>& into) const;

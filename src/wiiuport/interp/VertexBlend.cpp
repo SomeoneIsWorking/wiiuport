@@ -107,8 +107,12 @@ struct Resemblance {
     size_t same{0};
     double apartSquared{0.0};
 
-    bool closerThan(const Resemblance& other) const {
-        if (same != other.same) {
+    // `byMoveAlone` ranks by how near alone: where the draw two frames back is
+    // known to be the object's own, what moved from it is where the object
+    // passed, and a value it holds bit for bit is no better evidence than a
+    // value the title flips in another object's buffers and happens to share.
+    bool closerThan(const Resemblance& other, bool byMoveAlone) const {
+        if (!byMoveAlone && same != other.same) {
             return same > other.same;
         }
         return apartSquared < other.apartSquared;
@@ -856,7 +860,8 @@ void VertexBlend::gather(const Frame& frame, const Draw& draw, std::vector<std::
 
 size_t VertexBlend::mostResembling(const Draw& drawn, const VertexLayout& layout,
                                    const Frame& frame, size_t planned,
-                                   std::span<const std::byte> twoBack, Scratch& scratch) const {
+                                   std::span<const std::byte> twoBack, bool twoBackIsItsOwn,
+                                   Scratch& scratch) const {
     gather(frame, frame.draws()[planned], scratch.candidate);
     Resemblance closest = resemblance(layout, scratch.candidate, scratch.after, twoBack);
     size_t found = planned;
@@ -870,7 +875,7 @@ size_t VertexBlend::mostResembling(const Draw& drawn, const VertexLayout& layout
         }
         gather(frame, frame.draws()[index], scratch.candidate);
         Resemblance candidate = resemblance(layout, scratch.candidate, scratch.after, twoBack);
-        if (candidate.closerThan(closest)) {
+        if (candidate.closerThan(closest, twoBackIsItsOwn)) {
             closest = candidate;
             found = index;
         }
@@ -884,11 +889,12 @@ void VertexBlend::placeByVertices(Job& job, Scratch& scratch) {
     size_t plannedPartner = job.partner;
     gather(m_latest, drawn, scratch.after);
     if (!job.earlierByBuffers) {
-        job.earlier = mostResembling(drawn, *job.layout, m_twoBack, job.earlier, {}, scratch);
+        job.earlier =
+            mostResembling(drawn, *job.layout, m_twoBack, job.earlier, {}, false, scratch);
     }
     gather(m_twoBack, m_twoBack.draws()[job.earlier], scratch.twoBack);
-    job.partner =
-        mostResembling(drawn, *job.layout, m_previous, job.partner, scratch.twoBack, scratch);
+    job.partner = mostResembling(drawn, *job.layout, m_previous, job.partner, scratch.twoBack,
+                                 job.earlierByBuffers, scratch);
     if (job.earlier != plannedEarlier || job.partner != plannedPartner) {
         ++m_partnersFoundByVertices;
     }
