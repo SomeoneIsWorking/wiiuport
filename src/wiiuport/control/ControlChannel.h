@@ -13,7 +13,7 @@
 #include "wiiuport/frame/RecordingSnapshot.h"
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/frame/VertexChanges.h"
-#include "wiiuport/guest/RippleParticles.h"
+#include "wiiuport/guest/Particles.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/interp/ContinuousInterpolator.h"
 #include "wiiuport/interp/FrameInterpolator.h"
@@ -78,7 +78,7 @@ class ControlChannel {
         interp::NeighbourCheck& neighbourCheck;
         interp::ObjectBlend& objects;
         interp::VertexBlend& vertices;
-        const guest::RippleParticles& ripples;
+        const guest::Particles& particles;
         frame::RecordingSnapshot& snapshot;
         frame::PresentPacing& pacing;
         // Frame times as the presentation engine reports them shown.
@@ -201,7 +201,7 @@ class ControlChannel {
     interp::NeighbourCheck& m_neighbourCheck;
     interp::ObjectBlend& m_objects;
     interp::VertexBlend& m_vertices;
-    const guest::RippleParticles& m_ripples;
+    const guest::Particles& m_particles;
     frame::RecordingSnapshot& m_snapshot;
     frame::PresentPacing& m_pacing;
     frame::PresentPacing& m_scanOut;

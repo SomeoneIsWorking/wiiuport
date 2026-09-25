@@ -31,6 +31,6 @@ void runGateTests();
 void runShadowTests();
 void runMapPassTests();
 void runLightLookUpTests();
-void runRippleParticlesTests();
+void runParticlesTests();
 
 } // namespace wiiuport::tests

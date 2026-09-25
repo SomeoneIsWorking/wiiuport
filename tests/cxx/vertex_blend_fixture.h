@@ -6,7 +6,7 @@
 
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/FrameRecording.h"
-#include "wiiuport/guest/RippleParticles.h"
+#include "wiiuport/guest/Particles.h"
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/VertexBlend.h"
 
@@ -107,8 +107,8 @@ LatteFrameHooks::DrawPrepared preparedOf(std::span<const std::byte> mesh, bool f
 
 struct Blends {
     interp::ObjectBlend objects{kHalfway};
-    guest::RippleParticles ripples;
-    interp::VertexBlend vertices{objects, ripples, kHalfway};
+    guest::Particles particles;
+    interp::VertexBlend vertices{objects, particles, kHalfway};
     // Every frame recorded, alive to the end: a frame's own buffers are
     // then at addresses no later frame's are, as the title's rewritten ones
     // are not at a kept buffer's two frames on. A test's temporary frame,

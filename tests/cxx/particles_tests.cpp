@@ -1,19 +1,20 @@
 #include "check.h"
 #include "suites.h"
 #include "vertex_blend_fixture.h"
-#include "wiiuport/guest/RippleParticles.h"
+#include "wiiuport/guest/Particles.h"
 #include "wiiuport/interp/DrawObjects.h"
 #include "wiiuport/interp/VertexBlend.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
+#include <optional>
+#include <span>
 #include <vector>
 
-using wiiuport::guest::RippleParticles;
+using wiiuport::guest::Particles;
 using wiiuport::interp::GuestObject;
 using wiiuport::interp::VertexOutcome;
 
@@ -21,17 +22,15 @@ namespace {
 
 using namespace wiiuport::tests::vertex_blend;
 
-constexpr size_t kValuesPerCorner = RippleParticles::kCornerStride / sizeof(float);
+constexpr size_t kValuesPerCorner = 5;
 
-// A ring's quad as the title writes it about (x, z): each corner the centre
-// plus one offset, the opposite corner the centre plus its negation. The
-// offsets are the half-extents turned by the particle's angle, as its code
-// turns them: `turned` and `across`, sums of two products.
+// A particle's quad about (x, z): each corner the centre plus one offset, and
+// the UVs every quad has.
 std::vector<float> quadAbout(float x, float z, float turned, float across) {
     std::array<float, 4> dx{-turned, turned, turned, -turned};
     std::array<float, 4> dz{-across, -across, across, across};
     std::vector<float> values;
-    for (size_t corner = 0; corner < RippleParticles::kCorners; ++corner) {
+    for (size_t corner = 0; corner < 4; ++corner) {
         std::array<float, kValuesPerCorner> vertex{x + dx[corner], 0.0f, z + dz[corner],
                                                    corner == 1 || corner == 2 ? 1.0f : 0.0f,
                                                    corner >= 2 ? 1.0f : 0.0f};
@@ -49,50 +48,38 @@ std::vector<std::byte> bytesOfQuad(const std::vector<float>& values) {
     return bytes;
 }
 
-void aQuadTheTitleWroteIsCentredOnItsParticle() {
-    // Corners whose rounding does not cancel: the two opposite corners sum
-    // to other than twice the centre.
-    float x = 123.456f;
-    float z = -93847.61f;
-    float turned = 6.5078f;
-    float across = 3.0f;
-    check::isTrue((x - turned) + (x + turned) != 2.0f * x,
-                  "the case is one where rounding shows in the sum");
-    std::vector<std::byte> bytes = bytesOfQuad(quadAbout(x, z, turned, across));
-    check::isTrue(RippleParticles::centredOn(bytes, x, z),
-                  "every corner rounded once still centres on the particle");
-    float nextX = std::nextafter(x, std::numeric_limits<float>::infinity());
-    float farX = std::nextafter(nextX, std::numeric_limits<float>::infinity());
-    check::isTrue(!RippleParticles::centredOn(bytes, farX, z),
-                  "not on a particle two float steps along");
-    check::isTrue(!RippleParticles::centredOn(bytes, x, z + 1.0f), "nor on one beside it");
-    check::isTrue(!RippleParticles::centredOn(std::span(bytes).first(bytes.size() - 1), x, z),
-                  "and bytes short of a quad are no quad");
+Particles::Quad quadOf(std::span<const std::byte> bytes) {
+    Particles::Quad quad{};
+    std::ranges::copy(bytes.first(quad.size()), quad.begin());
+    return quad;
 }
 
-void aDrawIsTheParticleSeenDrawingItsBufferWhenItsVerticesSaySo() {
-    RippleParticles particles;
+void aDrawIsTheParticleThatWroteItsBufferWhileItReadsWhatWasWritten() {
+    Particles particles;
+    // A draw's buffer runs on past the quad, as the title's do.
     std::vector<std::byte> bytes = bytesOfQuad(quadAbout(40.0f, 8.0f, 3.0f, 2.0f));
+    bytes.resize(bytes.size() + 12);
     const void* source = bytes.data();
     check::isTrue(!particles.objectDrawn(source, bytes).has_value(),
-                  "a buffer no particle was seen drawing names none");
+                  "a buffer no particle was seen writing names none");
 
-    particles.record(source,
-                     {.object = {.address = 0x4000'1000, .age = 7.0f}, .x = 40.0f, .z = 8.0f});
+    particles.record(source, {.address = 0x4000'1000, .age = 7.0f}, quadOf(bytes));
     std::optional<GuestObject> object = particles.objectDrawn(source, bytes);
-    check::isTrue(object.has_value(), "the particle seen drawing it names it");
+    check::isTrue(object.has_value(), "the particle that wrote it names it");
     check::equal(object.value_or(GuestObject{}).address, uint32_t{0x4000'1000}, "by its address");
     check::equal(object.value_or(GuestObject{}).age, 7.0f, "and its age");
 
-    // The buffer handed to another particle that has not drawn yet: the
-    // bytes are still the first particle's quad.
-    particles.record(source,
-                     {.object = {.address = 0x4000'2000, .age = 1.0f}, .x = 90.0f, .z = 8.0f});
-    check::isTrue(!particles.objectDrawn(source, bytes).has_value(),
-                  "a particle whose quad the bytes are not names nothing");
-    check::equal(particles.calls(), uint64_t{2}, "two draw calls were recorded");
+    // Another draw since wrote the buffer: one bit of the quad differs.
+    std::vector<std::byte> since = bytes;
+    since[Particles::kQuadBytes - 1] ^= std::byte{1};
+    check::isTrue(!particles.objectDrawn(source, since).has_value(),
+                  "bytes the particle did not write name nothing");
+    check::isTrue(!particles.objectDrawn(source, std::span(bytes).first(Particles::kQuadBytes - 1))
+                       .has_value(),
+                  "nor do bytes short of a quad");
+    check::equal(particles.calls(), uint64_t{1}, "one commit was recorded");
     check::equal(particles.identified(), uint64_t{1}, "one draw was identified");
-    check::equal(particles.offCentre(), uint64_t{1}, "and one refused, counted");
+    check::equal(particles.rewritten(), uint64_t{2}, "and two refused, counted");
 }
 
 // A ripple particle drawn in a frame: its address, age and place, and the
@@ -120,9 +107,9 @@ GuestFrame ripples(Blends& blends, KeptBuffers& kept, uint32_t block,
     }
     GuestFrame frame(std::move(draws), &kept);
     for (const Ripple& ripple : drawn) {
-        blends.ripples.record(
-            kept.buffers.at(ripple.buffer).data(),
-            {.object = {.address = ripple.address, .age = ripple.age}, .x = ripple.x, .z = 0.0f});
+        const std::vector<std::byte>& buffer = kept.buffers.at(ripple.buffer);
+        blends.particles.record(buffer.data(), {.address = ripple.address, .age = ripple.age},
+                                quadOf(buffer));
     }
     return frame;
 }
@@ -191,9 +178,8 @@ void aRingWhoseParticleWasNotDrawnAFrameBeforeIsDrawnAsTheTitleDrewIt() {
 
 namespace wiiuport::tests {
 
-void runRippleParticlesTests() {
-    aQuadTheTitleWroteIsCentredOnItsParticle();
-    aDrawIsTheParticleSeenDrawingItsBufferWhenItsVerticesSaySo();
+void runParticlesTests() {
+    aDrawIsTheParticleThatWroteItsBufferWhileItReadsWhatWasWritten();
     aRingIsBlendedFromItsOwnParticleWhateverBuffersItIsGiven();
     aRingRebornInItsParticleIsDrawnAsTheTitleDrewIt();
     aRingWhoseParticleWasNotDrawnAFrameBeforeIsDrawnAsTheTitleDrewIt();
