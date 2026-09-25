@@ -58,7 +58,8 @@ struct Fixture {
     wiiuport::frame::FrameShapeLog shapeLog;
     wiiuport::interp::ViewTracker viewTracker{search};
     wiiuport::interp::ObjectBlend objects{wiiuport::interp::ContinuousInterpolator::kBlendPoint};
-    wiiuport::interp::VertexBlend vertices{objects,
+    wiiuport::guest::RippleParticles ripples;
+    wiiuport::interp::VertexBlend vertices{objects, ripples,
                                            wiiuport::interp::ContinuousInterpolator::kBlendPoint};
     wiiuport::frame::GuestStateGuard guard{&noGuard, &noRestore};
     wiiuport::interp::RestoreCheck restoreCheck{presenter, capture};
@@ -98,6 +99,7 @@ struct Fixture {
         .neighbourCheck = neighbourCheck,
         .objects = objects,
         .vertices = vertices,
+        .ripples = ripples,
         .snapshot = snapshot,
         .pacing = pacing,
         .scanOut = scanOut,

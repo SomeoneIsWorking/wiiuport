@@ -275,12 +275,14 @@ void aValueBlendedDrawsDisagreeOnIsNotShared() {
     check::equal(blend.planner().leftAtN(), uint64_t{1}, "counted as left at N");
 }
 
+// The block every draw into the light's map sources: its cascade.
+constexpr uint32_t kCascade = 0xf4003000;
+
 void aDrawIntoTheMapMovesWithItsObjectAndHoldsTheLight() {
     // The walker and the pier are both drawn into the light's map through the
     // cascade's block, and both hold the light, which moved with the camera;
     // the walker also moved of itself. The pixel stage looking the map up
     // holds the light too.
-    constexpr uint32_t kCascade = 0xf4003000;
     auto frame = [](float walker, float light) {
         return std::vector<Draw>{
             {kBlockA, {walker, 7.0f}},
@@ -365,7 +367,6 @@ void aPixelStageThatLooksUpTheLightsMapItselfIsDrawnAtN() {
 }
 
 void withMapBlendingOffADrawIntoTheMapIsDrawnAsTheTitleDrewIt() {
-    constexpr uint32_t kCascade = 0xf4003000;
     auto frame = [](float walker, float light) {
         return std::vector<Draw>{{kBlockA, {walker, 7.0f}},
                                  {kOtherA, {walker, light}, kActorShader, 0, 0, false, kCascade}};

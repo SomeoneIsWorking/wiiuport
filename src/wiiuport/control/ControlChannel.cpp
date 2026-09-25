@@ -159,9 +159,9 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_shapeLog(sources.shapeLog), m_viewTracker(sources.viewTracker),
       m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
       m_neighbourCheck(sources.neighbourCheck), m_objects(sources.objects),
-      m_vertices(sources.vertices), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
-      m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate),
-      m_shadowCheck(sources.shadowCheck) {
+      m_vertices(sources.vertices), m_ripples(sources.ripples), m_snapshot(sources.snapshot),
+      m_pacing(sources.pacing), m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges),
+      m_gate(sources.gate), m_shadowCheck(sources.shadowCheck) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -452,6 +452,13 @@ std::string ControlChannel::verticesJson() const {
         body += std::string(interp::vertexOutcomeName(outcome)) +
                 "\":" + std::to_string(m_vertices.draws(outcome));
     }
+    body += "},\"guestObjectDraws\":{";
+    for (size_t index = 0; index < interp::kVertexOutcomeCount; ++index) {
+        auto outcome = static_cast<interp::VertexOutcome>(index);
+        body += index == 0 ? "\"" : ",\"";
+        body += std::string(interp::vertexOutcomeName(outcome)) +
+                "\":" + std::to_string(m_vertices.objectDraws(outcome));
+    }
     body += "}";
     body += ",\"runtimeDrawsReplaceable\":" + std::to_string(m_recorder.runtimeDrawsReplaceable());
     body += ",\"runtimeDrawsReplaced\":" + std::to_string(m_recorder.runtimeDrawsReplaced());
@@ -462,6 +469,12 @@ std::string ControlChannel::verticesJson() const {
     body += ",\"vertexCopyingNanoseconds\":" + std::to_string(m_vertices.copying().count());
     body += ",\"vertexBlendingNanoseconds\":" + std::to_string(m_vertices.blending().count());
     body += ",\"vertexWaitingNanoseconds\":" + std::to_string(m_vertices.waiting().count());
+    body += std::string(",\"rippleParticles\":{\"installed\":") +
+            (m_ripples.installed() ? "true" : "false");
+    body += ",\"calls\":" + std::to_string(m_ripples.calls());
+    body += ",\"unreadable\":" + std::to_string(m_ripples.unreadable());
+    body += ",\"identified\":" + std::to_string(m_ripples.identified());
+    body += ",\"offCentre\":" + std::to_string(m_ripples.offCentre()) + "}";
     return body;
 }
 
