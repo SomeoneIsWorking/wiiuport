@@ -1,6 +1,7 @@
 #pragma once
 
 #include "wiiuport/control/ControllerStatus.h"
+#include "wiiuport/control/GuestMemoryRead.h"
 #include "wiiuport/control/HostStop.h"
 #include "wiiuport/control/SetupStatus.h"
 #include "wiiuport/frame/FrameCapture.h"
@@ -14,6 +15,7 @@
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/frame/VertexChanges.h"
 #include "wiiuport/guest/BufferWriters.h"
+#include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/interp/ContinuousInterpolator.h"
 #include "wiiuport/interp/FrameInterpolator.h"
@@ -82,6 +84,8 @@ class ControlChannel {
         interp::ObjectBlend& objects;
         interp::VertexBlend& vertices;
         const guest::BufferWriters& writers;
+        const guest::CallerCensus& callers;
+        GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
         frame::PresentPacing& pacing;
         // Frame times as the presentation engine reports them shown.
@@ -205,6 +209,8 @@ class ControlChannel {
     interp::ObjectBlend& m_objects;
     interp::VertexBlend& m_vertices;
     const guest::BufferWriters& m_writers;
+    const guest::CallerCensus& m_callers;
+    GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;
     frame::PresentPacing& m_pacing;
     frame::PresentPacing& m_scanOut;

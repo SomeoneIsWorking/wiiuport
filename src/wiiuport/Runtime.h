@@ -14,6 +14,7 @@
 #include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/frame/SearchFeed.h"
 #include "wiiuport/guest/BufferWriters.h"
+#include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/guest/EnvironmentProbe.h"
 #include "wiiuport/guest/LineProbe.h"
 #include "wiiuport/guest/ParticleProbe.h"
@@ -129,6 +130,7 @@ class Runtime {
     guest::ParticleProbe m_particleProbe{m_writers};
     guest::EnvironmentProbe m_environmentProbe{m_writers};
     guest::LineProbe m_lineProbe{m_writers};
+    guest::CallerCensus m_callers{&GuestCallProbes::Register};
     interp::VertexBlend m_vertexBlend{m_objectBlend, m_writers,
                                       interp::ContinuousInterpolator::kBlendPoint};
     interp::FrameInterpolator m_interpolator{m_search, m_substitution, m_scheduler};
@@ -160,6 +162,8 @@ class Runtime {
         .objects = m_objectBlend,
         .vertices = m_vertexBlend,
         .writers = m_writers,
+        .callers = m_callers,
+        .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,
         .pacing = m_pacing,
         .scanOut = m_scanOut,

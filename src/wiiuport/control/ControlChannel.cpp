@@ -21,7 +21,8 @@ lucent::http::Response notFound() {
         404, "Not Found",
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
         "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
-        "GET /recordings, GET /objects, GET /draws, GET /vertices, POST /replay, POST /capture, "
+        "GET /recordings, GET /objects, GET /draws, GET /vertices, GET /memory, GET /callers, POST "
+        "/replay, POST /capture, "
         "POST /present, "
         "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, "
         "POST /shadowcheck, "
@@ -159,9 +160,10 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_shapeLog(sources.shapeLog), m_viewTracker(sources.viewTracker),
       m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
       m_neighbourCheck(sources.neighbourCheck), m_objects(sources.objects),
-      m_vertices(sources.vertices), m_writers(sources.writers), m_snapshot(sources.snapshot),
-      m_pacing(sources.pacing), m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges),
-      m_gate(sources.gate), m_shadowCheck(sources.shadowCheck) {
+      m_vertices(sources.vertices), m_writers(sources.writers), m_callers(sources.callers),
+      m_guestBytes(sources.guestBytes), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
+      m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate),
+      m_shadowCheck(sources.shadowCheck) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -1062,6 +1064,23 @@ bool ControlChannel::start(uint16_t port) {
             }
             if (request.path() == "/substitution") {
                 return lucent::http::Response::json(200, "OK", substitutionJson());
+            }
+            if (request.path() == "/callers") {
+                return lucent::http::Response::json(200, "OK", m_callers.json());
+            }
+            if (request.path() == "/memory") {
+                std::string refusal;
+                auto wanted = GuestMemoryRead::parse(request.query(), refusal);
+                if (!wanted.has_value()) {
+                    return lucent::http::Response::text(400, "Bad Request", refusal);
+                }
+                auto bytes = GuestMemoryRead::read(*wanted, m_guestBytes);
+                if (!bytes.has_value()) {
+                    return lucent::http::Response::text(
+                        404, "Not Found", "some of that range is not guest memory.\n");
+                }
+                return lucent::http::Response::binary(200, "OK", "application/octet-stream",
+                                                      *bytes);
             }
             if (request.path() == "/transforms") {
                 return lucent::http::Response::json(200, "OK",

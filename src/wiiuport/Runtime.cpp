@@ -102,6 +102,13 @@ void Runtime::installHooks() {
     // Always open, on loopback: the channel is how an agent asks a running
     // product, the player's own session included, what it is doing.
     lucent::config::set_prefix("WIIUPORT_");
+    std::string refusal;
+    auto census = guest::CallerCensus::parse(lucent::config::text("CALLER_CENSUS"), refusal);
+    if (census.has_value()) {
+        m_callers.install(*census);
+    } else {
+        lucent::error("runtime", "WIIUPORT_CALLER_CENSUS: {}; no census", refusal);
+    }
     long long port = lucent::config::number("CONTROL_PORT", control::ControlChannel::kDefaultPort);
     // On unless switched off: the product is the 60 Hz one, and the switch is
     // there to compare against the title's own rate.
