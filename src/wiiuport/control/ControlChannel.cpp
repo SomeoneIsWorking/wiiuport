@@ -159,7 +159,7 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_shapeLog(sources.shapeLog), m_viewTracker(sources.viewTracker),
       m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
       m_neighbourCheck(sources.neighbourCheck), m_objects(sources.objects),
-      m_vertices(sources.vertices), m_ripples(sources.ripples), m_snapshot(sources.snapshot),
+      m_vertices(sources.vertices), m_particles(sources.particles), m_snapshot(sources.snapshot),
       m_pacing(sources.pacing), m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges),
       m_gate(sources.gate), m_shadowCheck(sources.shadowCheck) {
 }
@@ -469,12 +469,12 @@ std::string ControlChannel::verticesJson() const {
     body += ",\"vertexCopyingNanoseconds\":" + std::to_string(m_vertices.copying().count());
     body += ",\"vertexBlendingNanoseconds\":" + std::to_string(m_vertices.blending().count());
     body += ",\"vertexWaitingNanoseconds\":" + std::to_string(m_vertices.waiting().count());
-    body += std::string(",\"rippleParticles\":{\"installed\":") +
-            (m_ripples.installed() ? "true" : "false");
-    body += ",\"calls\":" + std::to_string(m_ripples.calls());
-    body += ",\"unreadable\":" + std::to_string(m_ripples.unreadable());
-    body += ",\"identified\":" + std::to_string(m_ripples.identified());
-    body += ",\"offCentre\":" + std::to_string(m_ripples.offCentre()) + "}";
+    body += std::string(",\"particles\":{\"installed\":") +
+            (m_particles.installed() ? "true" : "false");
+    body += ",\"calls\":" + std::to_string(m_particles.calls());
+    body += ",\"unreadable\":" + std::to_string(m_particles.unreadable());
+    body += ",\"identified\":" + std::to_string(m_particles.identified());
+    body += ",\"rewritten\":" + std::to_string(m_particles.rewritten()) + "}";
     return body;
 }
 

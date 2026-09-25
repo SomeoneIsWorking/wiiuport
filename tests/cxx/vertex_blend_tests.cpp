@@ -2,7 +2,6 @@
 #include "suites.h"
 #include "vertex_blend_fixture.h"
 #include "wiiuport/frame/FrameRecording.h"
-#include "wiiuport/guest/RippleParticles.h"
 #include "wiiuport/interp/ObjectBlend.h"
 #include "wiiuport/interp/VertexBlend.h"
 
@@ -19,7 +18,6 @@
 
 using wiiuport::frame::FrameRecording;
 using wiiuport::frame::RecordedUniformAssembly;
-using wiiuport::guest::RippleParticles;
 using wiiuport::interp::blendVertexBytes;
 using wiiuport::interp::ObjectBlend;
 using wiiuport::interp::PartnerIdentity;
