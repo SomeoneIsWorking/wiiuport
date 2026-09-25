@@ -826,8 +826,12 @@ void ObjectPlanner::findLightLookUps() {
     Plan& plan = m_buildingPlan;
     const KeyedFrame& twoBack = m_frames[1];
     for (size_t entry = 0; entry < m_building.size(); ++entry) {
-        if (plan.drawsMap[entry] != 0) {
-            plan.light.addMapValues(m_building.values(entry));
+        if (plan.drawsMap[entry] == 0) {
+            continue;
+        }
+        if (std::optional<size_t> earlier = twoBack.find(m_building.key(entry));
+            earlier.has_value()) {
+            plan.light.addMapValues(twoBack.values(*earlier), m_building.values(entry));
         }
     }
     if (plan.light.axisCount() == 0) {

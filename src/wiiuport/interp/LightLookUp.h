@@ -26,15 +26,19 @@ namespace wiiuport::interp {
 // look-up row of shader `62ae9bc6` lies in a plane of two of the light's
 // axes -- a row along its depth axis, or one mixing an axis with the depth a
 // projection divides by -- and the draws into the map at N hold those axes as
-// unit rows with no translation. A row the camera does not carry, or one that
+// a rotation with no translation. The light's rotation is told from others a
+// map draw holds, an object's identity among them, by having moved since N-2:
+// with the world's own axes taken for the light's, a scalar the stage keeps
+// in a row's first value lay in a plane of two of them for any camera that
+// does not roll, and was turned as a direction. A row the camera does not carry, or one that
 // lies in such a plane by chance but does not move, is left as it is. A row
 // whose fourth value stood bit for bit still while the rest turned is a
 // direction, whose fourth value is not a translation: it is turned alone.
 // Pure, so the shipping arithmetic is what a test checks.
 class LightLookUp {
   public:
-    // A row is on the light's axes when unit length and at right angles to
-    // within this much.
+    // Rows are a rotation when unit length and at right angles to within
+    // this much.
     static constexpr float kAxisTolerance = 1e-3f;
     // A row lies in a plane of two axes when its direction's part along the
     // third is at most this.
@@ -50,8 +54,9 @@ class LightLookUp {
     };
 
     void clearAxes();
-    // Takes the light's axes from the values of a draw into the map at N.
-    void addMapValues(std::span<const float> values);
+    // Takes the light's axes from a draw into the map, by its values at N-2
+    // and at N: every rotation among them that moved.
+    void addMapValues(std::span<const float> twoBack, std::span<const float> latest);
 
     size_t axisCount() const {
         return m_axes.size();

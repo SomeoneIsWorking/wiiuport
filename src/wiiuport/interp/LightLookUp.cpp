@@ -48,8 +48,36 @@ void intoView(const Row& world, const Transform3x4& view, bool direction, std::s
     out[3] = direction ? static_cast<float>(world[3]) : static_cast<float>(out[3] + world[3]);
 }
 
-bool unit(const Vec3& axis) {
-    return std::abs(dot(axis, axis) - 1.0) <= LightLookUp::kAxisTolerance;
+Vec3 axisOf(std::span<const float> row) {
+    return {row[0], row[1], row[2]};
+}
+
+// Three rows of four that are a rotation with no translation: unit rows at
+// right angles, each fourth value zero.
+bool isRotation(std::span<const float> rows) {
+    for (size_t row = 0; row < 3; ++row) {
+        Vec3 axis = axisOf(rows.subspan(row * kRow));
+        if (rows[(row * kRow) + 3] != 0.0f ||
+            std::abs(dot(axis, axis) - 1.0) > LightLookUp::kAxisTolerance) {
+            return false;
+        }
+        for (size_t other = row + 1; other < 3; ++other) {
+            if (std::abs(dot(axis, axisOf(rows.subspan(other * kRow)))) >
+                LightLookUp::kAxisTolerance) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool moved(std::span<const float> twoBack, std::span<const float> latest) {
+    for (size_t index = 0; index < latest.size(); ++index) {
+        if (!sameBits(twoBack[index], latest[index])) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -58,17 +86,24 @@ void LightLookUp::clearAxes() {
     m_axes.clear();
 }
 
-void LightLookUp::addMapValues(std::span<const float> values) {
-    for (size_t at = 0; at + kRow <= values.size(); at += kRow) {
-        Vec3 axis{values[at], values[at + 1], values[at + 2]};
-        if (values[at + 3] != 0.0f || !unit(axis)) {
+void LightLookUp::addMapValues(std::span<const float> twoBack, std::span<const float> latest) {
+    constexpr size_t kRotation = 3 * kRow;
+    if (twoBack.size() != latest.size()) {
+        return;
+    }
+    for (size_t at = 0; at + kRotation <= latest.size(); at += kRow) {
+        std::span<const float> rows = latest.subspan(at, kRotation);
+        if (!isRotation(rows) || !moved(twoBack.subspan(at, kRotation), rows)) {
             continue;
         }
-        bool known = std::ranges::any_of(m_axes, [&axis](const Vec3& other) {
-            return std::abs(dot(axis, other)) >= 1.0 - kAxisTolerance;
-        });
-        if (!known) {
-            m_axes.push_back(axis);
+        for (size_t row = 0; row < kRotation; row += kRow) {
+            Vec3 axis{rows[row], rows[row + 1], rows[row + 2]};
+            bool known = std::ranges::any_of(m_axes, [&axis](const Vec3& other) {
+                return std::abs(dot(axis, other)) >= 1.0 - kAxisTolerance;
+            });
+            if (!known) {
+                m_axes.push_back(axis);
+            }
         }
     }
 }
@@ -76,11 +111,7 @@ void LightLookUp::addMapValues(std::span<const float> values) {
 LightLookUp::RowForm LightLookUp::classify(std::span<const float> twoBack,
                                            std::span<const float> latest,
                                            const Transform3x4& viewAtN) const {
-    bool moved = false;
-    for (size_t index = 0; index < 3; ++index) {
-        moved = moved || !sameBits(twoBack[index], latest[index]);
-    }
-    if (!moved || m_axes.empty()) {
+    if (!moved(twoBack.first(3), latest.first(3)) || m_axes.empty()) {
         return RowForm::Unrelated;
     }
     Row world = throughView(latest, viewAtN, true);
