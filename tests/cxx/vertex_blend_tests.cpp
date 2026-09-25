@@ -865,6 +865,34 @@ void aRingKeptInItsBuffersIsNotTakenForOneSharingAFlippedValue() {
     check::equal(drawn[1][0], 501.5f, "and so is the second");
 }
 
+void aRingGivenTheBlocksOfOneThatGoesOnElsewhereIsNew() {
+    // Two rings, each alone in its blocks and kept in a pair of buffers of
+    // its own. At N the first ring is drawn under the second's blocks, the
+    // second is gone, and a new ring takes the first's blocks: the first's
+    // buffers are read at N by another draw, so the new ring has no frame
+    // before, however near the first ring's path it stands.
+    Blends blends;
+    blends.objects.setPlanning(true);
+    KeptBuffers kept;
+    auto ring = [](uint32_t block, float uniform, float radius, size_t buffer) {
+        return ActorDraw{.block = block, .uniforms = {uniform}, .mesh = {radius}, .keptIn = buffer};
+    };
+    blends.record(
+        GuestFrame({ring(kBlockA, 1.0f, 96.0f, 0), ring(kSkyBlock, 11.0f, 50.0f, 2)}, &kept));
+    blends.record(
+        GuestFrame({ring(kBlockB, 2.0f, 97.0f, 1), ring(kSkyBlockB, 12.0f, 51.0f, 3)}, &kept));
+    blends.record(
+        GuestFrame({ring(kBlockA, 3.0f, 98.0f, 0), ring(kSkyBlock, 13.0f, 52.0f, 2)}, &kept));
+    blends.record(
+        GuestFrame({ring(kBlockB, 4.0f, 99.0f, 1), ring(kSkyBlockB, 14.0f, 53.0f, 3)}, &kept));
+    GuestFrame latest({ring(kBlockA, 5.0f, 100.2f, 4), ring(kSkyBlock, 15.0f, 100.0f, 0)}, &kept);
+    blends.record(latest);
+    std::vector<std::vector<float>> drawn = blends.replay(latest);
+    check::equal(drawn[0][0], 100.2f, "the new ring is drawn as the title drew it");
+    check::isTrue(blends.vertices.draws(VertexOutcome::NoPartner) >= uint64_t{1},
+                  "and counted with no partner");
+}
+
 void nothingIsReplacedBeforeThreeFramesArePlanned() {
     Blends blends;
     blends.objects.setPlanning(true);
@@ -947,6 +975,7 @@ void runVertexBlendTests() {
     aCloudNoSiblingPassedIsDrawnAsTheTitleDrewIt();
     aRingNewAtNInABufferOfItsOwnIsNotTakenForAnother();
     aRingKeptInItsBuffersIsNotTakenForOneSharingAFlippedValue();
+    aRingGivenTheBlocksOfOneThatGoesOnElsewhereIsNew();
     nothingIsReplacedBeforeThreeFramesArePlanned();
     aReplayOutOfStepStopsReplacing();
     verticesSwitchedOffAreDrawnAsTheTitleDrewThemAndBlendAgainOnceOn();
