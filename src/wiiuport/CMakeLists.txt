@@ -215,6 +215,13 @@ if(TARGET CemuCafe)
     OUTPUT_NAME "wiiuport"
   )
 
+  # A maintainer's reader of a title's own files, for reverse engineering: it
+  # lists or extracts through the core that mounts titles.
+  add_executable(wiiuport_title_files maint/TitleFiles.cpp)
+  target_link_libraries(wiiuport_title_files PRIVATE CemuCafe CemuCommon CemuConfig wiiuport::host)
+  target_include_directories(wiiuport_title_files PRIVATE "${WIIUPORT_FORK_INCLUDE_DIR}")
+  cemu_use_precompiled_header(wiiuport_title_files)
+
   # A product built the way a title project builds one, through the host's
   # interface alone. It is compiled and linked with every runtime build so a
   # change that narrows or breaks that interface fails here, not in a title.
