@@ -86,6 +86,25 @@ class JsonBody {
     bool m_first = true;
 };
 
+// The fork's own names for a probe's installation, so the report says "the
+// entry was held by another probe" in words rather than as an enumeration.
+std::string_view installationName(std::optional<GuestCallProbes::Installation> value) {
+    if (!value.has_value()) {
+        return "pending";
+    }
+    switch (*value) {
+    case GuestCallProbes::Installation::Installed:
+        return "installed";
+    case GuestCallProbes::Installation::EntryHeldOther:
+        return "entryHeldOther";
+    case GuestCallProbes::Installation::EntryNotRelocatable:
+        return "entryNotRelocatable";
+    case GuestCallProbes::Installation::NoCodeSpace:
+        return "noCodeSpace";
+    }
+    return "unknown";
+}
+
 uint32_t branchTo(uint32_t from, uint32_t to, bool link) {
     return (kPrimaryBranch << 26) | (link ? 1u : 0u) | ((to - from) & 0x03fffffcu);
 }
@@ -111,8 +130,8 @@ class LogicGate::Moment final : public GuestCallProbes::Probe {
     LogicGate& m_owner;
 };
 
-void LogicGate::Moment::OnInstall(GuestCallProbes::Installation) {
-    m_owner.onInstalled();
+void LogicGate::Moment::OnInstall(GuestCallProbes::Installation installation) {
+    m_owner.onInstalled(installation);
 }
 
 void LogicGate::Moment::OnCall(std::span<const uint32_t, 32>, uint32_t) {
@@ -128,8 +147,9 @@ void LogicGate::install() {
     m_register(kTick, kTickFirst, *m_moment);
 }
 
-void LogicGate::onInstalled() {
+void LogicGate::onInstalled(GuestCallProbes::Installation installation) {
     std::scoped_lock lock(m_mutex);
+    m_probe = installation;
     if (m_block != 0 || m_enabled) {
         return;
     }
@@ -261,6 +281,16 @@ std::string LogicGate::json() const {
     body.string("block", hex(m_block));
     body.string("calls", hex(m_block + 4 * kCallsWord));
     body.string("ticks", hex(m_block + 4 * kTicksWord));
+    body.number("blockBytes", kBlockBytes);
+    // What the fork says about the probe that holds the tick's entry, and what
+    // the entry's next word actually holds right now. Between them they say
+    // whether a zero count means "no calls came" or "the gate is not wired to
+    // the tick", which are the same number and not the same finding.
+    body.string("probe", std::string(installationName(m_probe)));
+    uint32_t atBody = 0;
+    body.raw("wordAtTickBody", m_readWord(kTickBody, atBody) ? hex(atBody) : std::string("null"));
+    uint32_t atEntry = 0;
+    body.raw("wordAtTickEntry", m_readWord(kTick, atEntry) ? hex(atEntry) : std::string("null"));
     body.raw("enabled", m_enabled ? "true" : "false");
     uint32_t calls = 0;
     uint32_t ticks = 0;

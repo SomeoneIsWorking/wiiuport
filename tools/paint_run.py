@@ -202,6 +202,24 @@ def save_block_dumps(layout: Layout, block: int, before: bytes, after: bytes) ->
     return first, second
 
 
+def _callers_at(port: int) -> str:
+    """The caller census on the tick, or what it said it could not do.
+
+    With the gate in, the gate holds the tick's entry and the census's own probe
+    is refused -- so a zero here is the gate's doing and not evidence about the
+    simulation. Saying which keeps the two apart.
+    """
+    try:
+        entries = read_callers(port)
+    except ControlUnavailable as unavailable:
+        return f"unavailable: {unavailable}"
+    lines = []
+    for entry in entries:
+        if entry.entry == 0x025D42EC or not lines:
+            lines.append(f"{entry.entry:#010x} {entry.installation}: {entry.calls} calls")
+    return "; ".join(lines) if lines else "the census holds no entries"
+
+
 def _window(name: str, port: int, seconds: float, before: tuple[int, int]) -> Window:
     time.sleep(seconds)
     # One reading of each counter, so the two rates come from the same moment.
@@ -333,6 +351,59 @@ def main(argv: list[str] | None = None) -> int:
                         break
                 except ControlUnavailable:
                     continue
+            # Before the windows, not after: the product has been seen to stop
+            # answering near the end of a run, and this is the measurement that
+            # cannot be taken again without another nine minutes. The census is
+            # the title's own binder counted over the whole run, and the two slots
+            # of its ring are what say whether the previous tick's values are still
+            # in memory when this tick paints.
+        try:
+            census = read_blocks(args.port)
+            print(census.render())
+            print(f"  its two entries: {census.parity()}")
+            for binding in census.examples[:2]:
+                print(
+                    f"  a binding read cursor {binding.cursor}, offset {binding.offset}, "
+                    f"size {binding.size}, entry "
+                    + ", ".join(
+                        f"{word}:{value:#010x}" for word, value in sorted(binding.entry.items())
+                    )
+                )
+                block = binding.block()
+                other = binding.other_block()
+                if block is None:
+                    print("    no single word of the entry names a readable block, so no address")
+                    continue
+                # Both slots, twice, half a tick apart. The bound one says what the
+                # tick is drawing from now; the other one says whether the previous
+                # tick's values are still in memory when it does, which is the whole
+                # question a blend has to answer before it can be built on this ring.
+                # Their difference is the per-tick pose, and it is a range, not a
+                # guess: the bytes that move are the bytes a blend would write.
+                before_bytes = dump_guest(args.port, block, binding.size)
+                before_other = dump_guest(args.port, other, binding.other_size) if other else None
+                time.sleep(0.3)
+                after_bytes = dump_guest(args.port, block, binding.size)
+                after_other = dump_guest(args.port, other, binding.other_size) if other else None
+                print(
+                    f"    slot {binding.cursor} at {block:#010x}: {compare_bytes(before_bytes, after_bytes)}"
+                )
+                if other is not None:
+                    print(
+                        f"    slot {binding.other_cursor} at {other:#010x}: "
+                        f"{compare_bytes(before_other, after_other)}"
+                    )
+                    print(
+                        "    and the two slots against each other, right now: "
+                        f"{compare_bytes(before_bytes, before_other)}"
+                    )
+                    saved = save_block_dumps(layout, block, before_bytes, after_bytes)
+                    other_saved = save_block_dumps(layout, other, before_other, after_other)
+                    print(
+                        f"    saved {saved[0].name} and {other_saved[0].name} for tools/block_pose.py"
+                    )
+        except ControlUnavailable as unavailable:
+            print(f"refused: {unavailable}", file=sys.stderr)
             try:
                 for name in ("off", "on", "off")[: max(args.windows, 1)]:
                     if running.poll() is not None:
@@ -357,6 +428,13 @@ def main(argv: list[str] | None = None) -> int:
                         print(
                             f"  gate {'in' if gate.enabled else 'out'}: {gate.render()}", flush=True
                         )
+                        # The gate's own report of what is in memory: its probe's
+                        # installation, and the words at the tick's entry and the
+                        # one after it. Read right after arming, because a count of
+                        # zero is the same number whether the gate is not wired to
+                        # the tick or no calls came, and only these say which.
+                        print(f"    {read_gate(args.port).render()}", flush=True)
+                        print(f"    the census on that tick: {_callers_at(args.port)}", flush=True)
                     # One settle second, then the window's own start reading, so
                     # the first second's paints are not counted twice.
                     time.sleep(1.0)
@@ -417,57 +495,6 @@ def main(argv: list[str] | None = None) -> int:
     device = session.rendered_on()
     print(f"rendered on: {device}")
     print(f"stand-in mode {args.mode} requested")
-    # The title's own uniform block binder, counted over the whole run: whether
-    # the per-object descriptor's cursor alternates decides if the previous
-    # tick's block is still there to read when this tick paints, which is what a
-    # blend is built on. Measured on the same run, not a separate one.
-    try:
-        census = read_blocks(args.port)
-        print(census.render())
-        print(f"  its two entries: {census.parity()}")
-        for binding in census.examples[:2]:
-            print(
-                f"  a binding read cursor {binding.cursor}, offset {binding.offset}, "
-                f"size {binding.size}, entry "
-                + ", ".join(
-                    f"{word}:{value:#010x}" for word, value in sorted(binding.entry.items())
-                )
-            )
-            block = binding.block()
-            other = binding.other_block()
-            if block is None:
-                print("    no single word of the entry names a readable block, so no address")
-                continue
-            # Both slots, twice, half a tick apart. The bound one says what the
-            # tick is drawing from now; the other one says whether the previous
-            # tick's values are still in memory when it does, which is the whole
-            # question a blend has to answer before it can be built on this ring.
-            # Their difference is the per-tick pose, and it is a range, not a
-            # guess: the bytes that move are the bytes a blend would write.
-            before_bytes = dump_guest(args.port, block, binding.size)
-            before_other = dump_guest(args.port, other, binding.other_size) if other else None
-            time.sleep(0.3)
-            after_bytes = dump_guest(args.port, block, binding.size)
-            after_other = dump_guest(args.port, other, binding.other_size) if other else None
-            print(
-                f"    slot {binding.cursor} at {block:#010x}: {compare_bytes(before_bytes, after_bytes)}"
-            )
-            if other is not None:
-                print(
-                    f"    slot {binding.other_cursor} at {other:#010x}: "
-                    f"{compare_bytes(before_other, after_other)}"
-                )
-                print(
-                    "    and the two slots against each other, right now: "
-                    f"{compare_bytes(before_bytes, before_other)}"
-                )
-                saved = save_block_dumps(layout, block, before_bytes, after_bytes)
-                other_saved = save_block_dumps(layout, other, before_other, after_other)
-                print(
-                    f"    saved {saved[0].name} and {other_saved[0].name} for tools/block_pose.py"
-                )
-    except ControlUnavailable as unavailable:
-        print(f"refused: {unavailable}", file=sys.stderr)
     if state is not None:
         print(state.render())
     if comparison:
