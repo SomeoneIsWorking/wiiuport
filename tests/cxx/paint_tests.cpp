@@ -87,6 +87,12 @@ void linked() {
 // took: a fake that refuses is how the refusal path is reached.
 uint32_t g_pacing = 2;
 bool g_pacingTakes = true;
+// What the emulator's shared area holds before the graphics bring-up has made
+// it. The real one is a null dereference if the accessor does not check, and a
+// control channel that asks what the pacing is before a title has a surface is
+// exactly that case.
+constexpr uint32_t kNoSharedArea = 0xffffffffu;
+bool g_sharedAreaExists = true;
 
 uint32_t setPacing(uint32_t vblanks) {
     if (g_pacingTakes) {
@@ -96,7 +102,7 @@ uint32_t setPacing(uint32_t vblanks) {
 }
 
 uint32_t pacing() {
-    return g_pacing;
+    return g_sharedAreaExists ? g_pacing : kNoSharedArea;
 }
 
 uint32_t allocateCode(uint32_t sizeInBytes) {
@@ -120,6 +126,7 @@ WindWakerPaint makeMod(FakeGuest& guest) {
     g_probe = nullptr;
     g_pacing = 2;
     g_pacingTakes = true;
+    g_sharedAreaExists = true;
     return WindWakerPaint(&keepRegistration, &allocateCode, &writeWord, &readWord, &setPacing,
                           &pacing);
 }
@@ -140,7 +147,30 @@ FakeGuest loadedTitle() {
 
 } // namespace
 
+// A report read before the graphics bring-up has made its shared area. The
+// pacing is not an interval then, and the two ways of saying so are not equal:
+// a number nobody can interpret reads as a bug, and 0xffffffff in a report reads
+// as a bug too. It says so in words, and the product does not fault asking.
+namespace {
+
+void thePacingIsReportedAsNotYetThereRatherThanAsANumber() {
+    FakeGuest guest = loadedTitle();
+    auto mod = makeMod(guest);
+    g_sharedAreaExists = false;
+    const std::string body = mod.json();
+    g_sharedAreaExists = true;
+    check::isTrue(body.find("\"pacing\":null") != std::string::npos,
+                  "no interval is in force and the report says so");
+    check::isTrue(body.find("pacingWhy") != std::string::npos,
+                  "and says why, which is the graphics bring-up");
+    check::isTrue(body.find("\"pacing\":2") == std::string::npos,
+                  "and does not print a number that would read as one");
+}
+
+} // namespace
+
 void wiiuport::tests::runPaintTests() {
+    thePacingIsReportedAsNotYetThereRatherThanAsANumber();
     // The words of the payload, checked against the title's own image: the
     // The payload, and the branch encoding its computed words depend on. The
     // only word not lifted from the title is `li r3,1`; every other word is a
