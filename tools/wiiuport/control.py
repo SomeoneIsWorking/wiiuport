@@ -670,11 +670,11 @@ def read_gate(port: int = DEFAULT_PORT, timeout: float = 2.0) -> GateState:
 
 
 def set_gate(on: bool, port: int = DEFAULT_PORT, timeout: float = 5.0) -> GateState:
-    body = request_bytes("POST", f"/gate?on={1 if on else 0}", port, timeout)
+    body = request_bytes("POST", f"/logic?on={1 if on else 0}", port, timeout)
     try:
         payload = json.loads(body.decode("utf-8"))
     except json.JSONDecodeError as malformed:
-        raise ControlUnavailable(f"POST /gate answered something that is not JSON: {malformed}")
+        raise ControlUnavailable(f"POST /logic answered something that is not JSON: {malformed}")
     return (
         read_gate(port, timeout)
         if "tick" not in payload

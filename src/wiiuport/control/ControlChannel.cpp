@@ -22,13 +22,13 @@ lucent::http::Response notFound() {
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
         "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
         "GET /recordings, GET /objects, GET /draws, GET /vertices, GET /memory, GET /callers, "
-        "GET /paint, GET /blocks, GET /gate, POST "
+        "GET /paint, GET /blocks, GET /logic, POST "
         "/replay, POST /capture, "
         "POST /present, "
         "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, "
         "POST /shadowcheck, "
         "POST /neighbourcheck, POST /blends, POST /pacing, "
-        "POST /objects, POST /draws, POST /recordings, POST /paint, POST /gate, POST /input "
+        "POST /objects, POST /draws, POST /recordings, POST /paint, POST /logic, POST /input "
         "and POST /quit.\n");
 }
 
@@ -1100,10 +1100,13 @@ bool ControlChannel::start(uint16_t port) {
             if (request.path() == "/blocks") {
                 return lucent::http::Response::json(200, "OK", m_blocks.json());
             }
-            if (request.method == "GET" && request.path() == "/gate") {
+            // The logic gate is `/logic` and not `/gate`: the frame gate has held
+            // that route since it existed, and two things meaning "hold" by the
+            // same name is how one of them ends up answering for the other.
+            if (request.method == "GET" && request.path() == "/logic") {
                 return lucent::http::Response::json(200, "OK", m_logic.json());
             }
-            if (request.method == "POST" && request.path() == "/gate") {
+            if (request.method == "POST" && request.path() == "/logic") {
                 if (!requestedFlag(std::string(request.query()), "on", true)) {
                     const std::string refusal = m_logic.disable();
                     if (!refusal.empty()) {
