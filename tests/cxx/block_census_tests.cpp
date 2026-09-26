@@ -94,9 +94,14 @@ void writeEntry(FakeGuest& guest, uint32_t entry, uint32_t offset, uint32_t size
     }
 }
 
+void theOtherSlotIsReadAsWellAsTheBoundOne();
+void cursorSwitchesAreCountedAgainstTheBindsTheyCouldBeAmong();
+
 } // namespace
 
 void wiiuport::tests::runBlockCensusTests() {
+    theOtherSlotIsReadAsWellAsTheBoundOne();
+    cursorSwitchesAreCountedAgainstTheBindsTheyCouldBeAmong();
     // An object the binder would be handed, with its cursor naming the second
     // entry and both entries filled in.
     FakeGuest guest;
@@ -173,3 +178,72 @@ void wiiuport::tests::runBlockCensusTests() {
     bind(g_first, 0);
     check::isTrue(blind.bindings() == 2, "a binding with no object still counts");
 }
+
+namespace {
+
+// The other slot, read whole -- because whether the previous tick's values are
+// still in memory when this tick binds is what a blend rests on, and a ring read
+// only where the cursor points cannot answer it.
+void theOtherSlotIsReadAsWellAsTheBoundOne() {
+    FakeGuest guest;
+    auto census = makeCensus(guest);
+    census.install();
+    linked();
+    writeEntry(guest, 0, 0x40, 0x200);
+    writeEntry(guest, 1, 0x40, 0x300);
+    // Make both entries name memory that reads, so both are reported as blocks:
+    // the entry's word 0 plus its offset has to be a mapped address.
+    // The entries name blocks by putting their word 0 (0x1000) plus their offset
+    // (0x40) together, so both land on 0x1040, which is written here and so reads.
+    guest.writeWord(0x1000 + 0x40, 0);
+    guest.writeWord(0x1000 + 0x40 + 4, 0);
+
+    guest.writeWord(kObject + UniformBlockCensus::kCursorOffset, 1);
+    bind(g_first, kObject);
+    const std::string body = census.json();
+    check::isTrue(body.find("\"cursor\":1") != std::string::npos,
+                  "the bound slot is the one the cursor names");
+    check::isTrue(body.find("\"size\":768") != std::string::npos,
+                  "and its size is that entry's own: 0x300");
+    check::isTrue(body.find("\"otherCursor\":0") != std::string::npos,
+                  "the slot this binding did not use is named");
+    // Entry 0 was written with 0x200, entry 1 with 0x300, so a report that read
+    // the bound slot's size for both of them would say 0x300 twice. This is the
+    // check that it did not.
+    check::isTrue(body.find("\"otherSize\":512") != std::string::npos,
+                  "and the other slot carries its own size, not the bound one's");
+    check::isTrue(body.find("\"otherOffset\":64") != std::string::npos,
+                  "and that slot's own offset");
+    check::isTrue(body.find("\"otherEntry\"") != std::string::npos,
+                  "and the whole of that entry, word for word");
+    check::isTrue(body.find("\"otherReadableAtOffset\"") != std::string::npos,
+                  "and which of its words name memory the guest can read");
+}
+
+// Whether the ring turns per bind or per frame, counted rather than read, and
+// reported with the count it is a fraction of. A title that draws each object once
+// would otherwise report no switches at all for a ring that works.
+void cursorSwitchesAreCountedAgainstTheBindsTheyCouldBeAmong() {
+    FakeGuest guest;
+    auto census = makeCensus(guest);
+    census.install();
+    linked();
+    writeEntry(guest, 0, 0x40, 0x200);
+    writeEntry(guest, 1, 0x40, 0x200);
+    // Four bindings of one object, the cursor moving on the second and the third:
+    // the first is not a switch because nothing preceded it for this object, and
+    // the fourth is not one either because it did not move.
+    const std::array<uint32_t, 4> cursors = {0, 1, 0, 0};
+    for (uint32_t cursor : cursors) {
+        guest.writeWord(kObject + UniformBlockCensus::kCursorOffset, cursor);
+        bind(g_first, kObject);
+    }
+    const std::string body = census.json();
+    check::isTrue(body.find("\"bindings\":4") != std::string::npos, "four bindings were counted");
+    check::isTrue(body.find("\"cursorCompared\":3") != std::string::npos,
+                  "three of them could be compared, being bindings of an object already seen");
+    check::isTrue(body.find("\"cursorSwitches\":2") != std::string::npos,
+                  "and two of those moved the cursor");
+}
+
+} // namespace

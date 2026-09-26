@@ -582,23 +582,44 @@ class PaintState:
 @dataclass(frozen=True)
 class Binding:
     """One binding: the cursor, the descriptor entry whole, and which of its
-    words names memory the guest can read at the entry's offset."""
+    words names memory the guest can read at the entry's offset -- for both
+    slots of the ring, because the other one is where the previous tick's values
+    would still be."""
 
     cursor: int
+    object: int
     offset: int
     size: int
     entry: dict[int, int]
     readable: dict[int, bool]
+    other_cursor: int
+    other_offset: int
+    other_size: int
+    other_entry: dict[int, int]
+    other_readable: dict[int, bool]
 
-    def block(self) -> int | None:
-        """The block's address, if exactly one of the entry's words reads.
+    def _resolve(self, entry: dict[int, int], readable: dict[int, bool], offset: int) -> int | None:
+        """A slot's block address, if exactly one of its words reads.
 
         Zero or several is not an answer, and this returns nothing rather than
         picking one: a wrong base dumps another object's block and reads as a
         pose.
         """
-        named = [word for word, ok in self.readable.items() if ok]
-        return self.entry[named[0]] + self.offset if len(named) == 1 else None
+        named = [word for word, ok in readable.items() if ok]
+        return entry[named[0]] + offset if len(named) == 1 else None
+
+    def block(self) -> int | None:
+        """The block this binding is drawing from."""
+        return self._resolve(self.entry, self.readable, self.offset)
+
+    def other_block(self) -> int | None:
+        """The block of the slot this binding did *not* use.
+
+        Whether it still holds the previous tick's pose is what decides if a blend
+        can read two ticks' values when the tick paints, rather than recording one
+        and replaying it.
+        """
+        return self._resolve(self.other_entry, self.other_readable, self.other_offset)
 
 
 @dataclass(frozen=True)
@@ -612,6 +633,8 @@ class BlockCensus:
     objects: int
     cursors: dict[int, int]
     cursors_out_of_range: int
+    cursor_switches: int
+    cursor_compared: int
     examples: tuple[Binding, ...]
 
     def render(self) -> str:
@@ -626,16 +649,30 @@ class BlockCensus:
 
     def parity(self) -> str:
         """What the cursor did, in words, from the two entries the list holds."""
-        counts = sorted(self.cursors.values(), reverse=True)
         if not self.bindings:
             return "the binder was never called, so nothing is known"
+        counts = sorted(self.cursors.values(), reverse=True)
+        where = []
         if len(counts) < 2:
-            return "only one of the two entries was ever read"
-        if counts[0] == 0:
-            return "no entry was read at all"
-        if counts[0] == counts[1]:
-            return f"both entries equally ({counts[0]} each): no alternation"
-        return f"the two entries unevenly ({counts[0]} and {counts[1]}): they do alternate"
+            where.append("only one of the two entries was ever read")
+        elif counts[0] == 0:
+            where.append("no entry was read at all")
+        elif counts[0] == counts[1]:
+            where.append(f"both entries equally ({counts[0]} each)")
+        else:
+            where.append(f"the two entries unevenly ({counts[0]} and {counts[1]})")
+        # Whether the ring turns per bind or per frame, as a fraction of the
+        # bindings that could have been a switch at all. Near one and the two
+        # slots are two passes; near zero and the choice is not per bind.
+        if self.cursor_compared:
+            rate = self.cursor_switches / self.cursor_compared
+            where.append(
+                f"the cursor moved on {self.cursor_switches} of {self.cursor_compared} "
+                f"repeat bindings ({rate:.2f} per bind)"
+            )
+        else:
+            where.append("no object was bound twice, so the cursor's turn is unknown")
+        return "; ".join(where)
 
 
 @dataclass(frozen=True)
@@ -693,7 +730,17 @@ def read_blocks(port: int = DEFAULT_PORT, timeout: float = 2.0) -> BlockCensus:
     require_fields(
         "GET /blocks",
         payload,
-        ("binder", "probe", "entries", "bindings", "objects", "cursors", "cursorsOutOfRange"),
+        (
+            "binder",
+            "probe",
+            "entries",
+            "bindings",
+            "objects",
+            "cursors",
+            "cursorsOutOfRange",
+            "cursorSwitches",
+            "cursorCompared",
+        ),
         "the uniform block census",
     )
     return BlockCensus(
@@ -704,13 +751,23 @@ def read_blocks(port: int = DEFAULT_PORT, timeout: float = 2.0) -> BlockCensus:
         objects=int(payload["objects"]),
         cursors={int(k): int(v) for k, v in payload["cursors"].items()},
         cursors_out_of_range=int(payload["cursorsOutOfRange"]),
+        cursor_switches=int(payload["cursorSwitches"]),
+        cursor_compared=int(payload["cursorCompared"]),
         examples=tuple(
             Binding(
                 cursor=int(one["cursor"]),
+                object=int(one["object"], 16),
                 offset=int(one["offset"]),
                 size=int(one["size"]),
                 entry={int(k): int(v) for k, v in one.get("entry", {}).items()},
                 readable={int(k): bool(v) for k, v in one.get("readableAtOffset", {}).items()},
+                other_cursor=int(one.get("otherCursor", 0)),
+                other_offset=int(one.get("otherOffset", 0)),
+                other_size=int(one.get("otherSize", 0)),
+                other_entry={int(k): int(v) for k, v in one.get("otherEntry", {}).items()},
+                other_readable={
+                    int(k): bool(v) for k, v in one.get("otherReadableAtOffset", {}).items()
+                },
             )
             for one in payload.get("examples", {}).values()
         ),

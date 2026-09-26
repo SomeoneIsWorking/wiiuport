@@ -102,26 +102,28 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
         return;
     }
     Binding binding;
+    binding.object = object;
     binding.read = m_readWord(object + kCursorOffset, binding.cursor);
     if (binding.read) {
         // The whole entry, word for word. A partial read is a partial answer and
         // is reported as unread rather than as zeroes, because a block that was
         // dumped from zeroes would look like a real one.
-        const uint32_t entry = object + kEntriesOffset + binding.cursor * kEntrySize;
-        for (size_t word = 0; word < kEntryWords; word++) {
-            binding.read = m_readWord(entry + 4 * static_cast<uint32_t>(word),
-                                      binding.entry[word]) &&
-                           binding.read;
-        }
+        readEntry(object, binding.cursor, binding.entry, binding.read);
     }
     if (binding.read) {
-        // Which words, added to the offset, name memory the guest can read.
-        // One word is enough to answer that, and reading four costs nothing.
-        uint32_t probe = 0;
-        for (size_t word = 0; word < kEntryWords; word++) {
-            const uint32_t base = binding.entry[word] + binding.entry[kEntryOffsetOffset / 4];
-            binding.mapped[word] = m_readWord(base, probe) && m_readWord(base + 4, probe);
+        mapWords(object, binding.entry, binding.mapped);
+        // The other of the two, read the same way. This is the slot a blend
+        // reads: if it still holds the previous tick's pose, the two ticks'
+        // values are both in memory when the tick binds and the in-between frame
+        // is a lerp of two reads rather than a replay of a recording.
+        binding.otherCursor = 0;
+        for (uint32_t slot = 1; slot < kEntries; slot++) {
+            if (slot != binding.cursor) {
+                binding.otherCursor = slot;
+            }
         }
+        readEntry(object, binding.otherCursor, binding.otherEntry, binding.otherRead);
+        mapWords(object, binding.otherEntry, binding.otherMapped);
     }
     std::scoped_lock lock(m_mutex);
     if (std::find(m_seen.begin(), m_seen.end(), object) == m_seen.end()) {
@@ -139,11 +141,56 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
     } else {
         m_cursorsOutOfRange++;
     }
+    // Whether the ring turns per bind or per frame. Only a binding of an object
+    // already seen can be a switch, so the compared count is the denominator a
+    // switch rate is read against -- a switch count with no denominator says
+    // nothing at all, and a title that draws each object once would otherwise
+    // report zero switches for a ring that works.
+    const auto known =
+        std::find_if(m_lastCursor.begin(), m_lastCursor.end(), [object](const auto& pair) {
+            return pair.first == object;
+        });
+    if (known != m_lastCursor.end()) {
+        m_cursorCompared++;
+        if (known->second != binding.cursor) {
+            m_cursorSwitches++;
+        }
+        known->second = binding.cursor;
+    } else if (m_lastCursor.size() < 4096) {
+        m_lastCursor.emplace_back(object, binding.cursor);
+    }
     if (m_exampleCount < kExamples) {
         m_examples[m_exampleCount] = binding;
         m_exampleCount++;
     }
     (void)second;
+}
+
+void UniformBlockCensus::readEntry(uint32_t object, uint32_t cursor,
+                                   std::array<uint32_t, kEntryWords>& entry, bool& read) const {
+    const uint32_t at = object + kEntriesOffset + cursor * kEntrySize;
+    bool complete = read;
+    for (size_t word = 0; word < kEntryWords; word++) {
+        uint32_t value = 0;
+        complete = m_readWord(at + 4 * static_cast<uint32_t>(word), value) && complete;
+        entry[word] = value;
+    }
+    read = complete;
+}
+
+void UniformBlockCensus::mapWords(uint32_t object, const std::array<uint32_t, kEntryWords>& entry,
+                                  std::array<bool, kEntryWords>& mapped) const {
+    (void)object;
+    // Which words, added to the offset, name memory the guest can read. The
+    // offset is the entry's own word at +0x0c, which the binder passes to the GPU
+    // and which is relative to a base the title set elsewhere -- so the entry is
+    // the only place left to look for the address, and every word that reads is
+    // reported rather than the first one that happened to work.
+    uint32_t probe = 0;
+    for (size_t word = 0; word < kEntryWords; word++) {
+        const uint32_t base = entry[word] + entry[kEntryOffsetOffset / 4];
+        mapped[word] = m_readWord(base, probe) && m_readWord(base + 4, probe);
+    }
 }
 
 std::string UniformBlockCensus::json() const {
@@ -162,11 +209,14 @@ std::string UniformBlockCensus::json() const {
     }
     body.raw("cursors", cursors.text());
     body.number("cursorsOutOfRange", m_cursorsOutOfRange);
+    body.number("cursorSwitches", m_cursorSwitches);
+    body.number("cursorCompared", m_cursorCompared);
     JsonBody examples;
     for (size_t index = 0; index < m_exampleCount; index++) {
         const Binding& binding = m_examples[index];
         JsonBody one;
         one.number("cursor", binding.cursor);
+        one.string("object", hex(binding.object));
         one.number("offset", binding.entry[kEntryOffsetOffset / 4]);
         one.number("size", binding.entry[kEntrySizeOffset / 4]);
         JsonBody words;
@@ -179,6 +229,23 @@ std::string UniformBlockCensus::json() const {
             readable.raw(std::to_string(word).c_str(), binding.mapped[word] ? "true" : "false");
         }
         one.raw("readableAtOffset", readable.text());
+        // The other slot, whole, because whether the previous tick's values are
+        // still in memory when this tick binds is the question a blend rests on
+        // and it is answered by reading that slot and not by assuming a ring.
+        one.number("otherCursor", binding.otherCursor);
+        one.number("otherOffset", binding.otherEntry[kEntryOffsetOffset / 4]);
+        one.number("otherSize", binding.otherEntry[kEntrySizeOffset / 4]);
+        JsonBody otherWords;
+        for (size_t word = 0; word < kEntryWords; word++) {
+            otherWords.number(std::to_string(word).c_str(), binding.otherEntry[word]);
+        }
+        one.raw("otherEntry", otherWords.text());
+        JsonBody otherReadable;
+        for (size_t word = 0; word < kEntryWords; word++) {
+            otherReadable.raw(std::to_string(word).c_str(),
+                              binding.otherMapped[word] ? "true" : "false");
+        }
+        one.raw("otherReadableAtOffset", otherReadable.text());
         one.raw("read", binding.read ? "true" : "false");
         examples.raw(std::to_string(index).c_str(), one.text());
     }

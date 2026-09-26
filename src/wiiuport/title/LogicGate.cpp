@@ -34,6 +34,21 @@ constexpr uint32_t kReturn = 0x4e800020;         // blr
 constexpr uint32_t kPrimaryBranch = 18;
 constexpr int64_t kRelativeBranchReach = 0x02000000;
 
+// The tick's own first two instructions, lifted whole out of the title's image
+// at 0x025d42ec and 0x025d42f0 -- bytes read from it, not assembled here:
+//
+//     025d42ec  mfspr r0,LR        7c0802a6
+//     025d42f0  stw  r0,0x4(r1)    90010004
+//
+// The gate has to supply them, because it takes the word at 0x025d42f0 for its
+// own branch, and the tick cannot be entered past them: its epilogue reads the
+// saved link register back out of the caller's frame at 0x4(r1) and returns
+// through it, so a tick that skipped the store would return to whatever LR held
+// when the gate ran. This is the whole reason the gate replaces the *second*
+// instruction rather than branching around the first.
+constexpr uint32_t kTickSaveLink = 0x7c0802a6;  // mfspr r0,LR
+constexpr uint32_t kTickStoreLink = 0x90010004; // stw  r0,0x4(r1)
+
 std::string hex(uint32_t value) {
     std::array<char, 11> text{};
     std::snprintf(text.data(), text.size(), "0x%08x", value);
@@ -127,33 +142,49 @@ void LogicGate::onInstalled() {
 }
 
 std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress) {
-    // The gate runs in its own block, because a 52-byte tick has no room for it
-    // and the tick's own body must survive to be branched at. So the word after
-    // the entry -- where the probe put back the tick's first instruction -- gets
-    // a branch to here, and the gate's return and its tail branch both go to
-    // the title's own code.
+    // The gate runs in its own block, because a 52-byte tick has no room for it.
+    // The word at 0x025d42f0 -- the tick's second instruction -- takes a branch
+    // to here, and the gate's return and its tail branch both go to the title's
+    // own code. It supplies the tick's first two instructions itself, so a call
+    // it lets through is the title's tick entered the way the title enters it.
+    //
+    // Every word here is either lifted from the title's image or a branch, and
+    // each lifted form was checked against a second instruction in that image
+    // before being used. `ori` and `addi` both name their destination in bits
+    // 16-20 and their source in bits 21-25, and a payload that puts the
+    // destination in the source's field builds the address in r0 instead of r3 --
+    // where the next word overwrites it before anything reads it. The forms used
+    // here are the title's own: `ori r0,r0,0x7431` (0x60007431) and
+    // `addi r1,r1,0x8` (0x38210008).
+    //
+    // r3 to r6 are volatile under the EABI and the tick reads none of them on
+    // entry, so the gate keeps to them. r0 and r1 are untouched until the through
+    // path, where the title's own two instructions touch them.
     const uint32_t calls = blockAddress + 4 * kCallsWord;
     const uint32_t ticks = blockAddress + 4 * kTicksWord;
-    const uint32_t skipAt = blockAddress + 4 * 6;
-    const uint32_t tailAt = blockAddress + 4 * 12;
-    if (!withinReach(skipAt, blockAddress + 4 * 13) || !withinReach(tailAt, kTickBody + 4)) {
+    const uint32_t testAt = blockAddress + 4 * 6;
+    const uint32_t through = blockAddress + 4 * kThroughWord;
+    const uint32_t tailAt = through + 8;
+    if (!withinReach(testAt, through) || !withinReach(tailAt, kTickBody + 4)) {
         return {};
     }
     return {
-        kLoadUpper | (3 << 21) | ((calls >> 16) & 0xffff),             // lis r3, calls
-        kOrImmediate | (3 << 21) | (3 << 21) | (calls & 0xffff),       // ori r3, r3, calls
-        kLoadWord | (4 << 21) | (3 << 16),                             // lwz r4, 0(r3)
-        kAddImmediate | (4 << 21) | (4 << 21) | 1,                     // addi r4, r4, 1
-        kStoreWord | (4 << 21) | (3 << 16),                            // stw r4, 0(r3)
-        kAndImmediate | (4 << 21) | (4 << 16) | 1,                     // andi. r4, r4, 1
-        kBranchNotEqual | ((blockAddress + 4 * 13 - skipAt) & 0xfffc), // bne over the tick
-        kLoadUpper | (5 << 21) | ((ticks >> 16) & 0xffff),             // lis r5, ticks
-        kOrImmediate | (5 << 21) | (5 << 21) | (ticks & 0xffff),       // ori r5, r5, ticks
-        kLoadWord | (6 << 21) | (5 << 16),                             // lwz r6, 0(r5)
-        kAddImmediate | (6 << 21) | (6 << 21) | 1,                     // addi r6, r6, 1
-        kStoreWord | (6 << 21) | (5 << 16),                            // stw r6, 0(r5)
-        branchTo(tailAt, kTickBody + 4, false),                        // b   the tick's body
-        kReturn,                                                       // blr, on skipped calls
+        kLoadUpper | (3 << 21) | ((calls >> 16) & 0xffff),       // lis  r3, calls
+        kOrImmediate | (3 << 21) | (3 << 16) | (calls & 0xffff), // ori  r3, r3, calls
+        kLoadWord | (4 << 21) | (3 << 16),                       // lwz  r4, 0(r3)
+        kAddImmediate | (4 << 21) | (4 << 16) | 1,               // addi r4, r4, 1
+        kStoreWord | (4 << 21) | (3 << 16),                      // stw  r4, 0(r3)
+        kAndImmediate | (4 << 21) | (4 << 16) | 1,               // andi. r4, r4, 1
+        kBranchNotEqual | ((through - testAt) & 0xfffc),         // bne  the through path
+        kLoadUpper | (5 << 21) | ((ticks >> 16) & 0xffff),       // lis  r5, ticks
+        kOrImmediate | (5 << 21) | (5 << 16) | (ticks & 0xffff), // ori  r5, r5, ticks
+        kLoadWord | (6 << 21) | (5 << 16),                       // lwz  r6, 0(r5)
+        kAddImmediate | (6 << 21) | (6 << 16) | 1,               // addi r6, r6, 1
+        kStoreWord | (6 << 21) | (5 << 16),                      // stw  r6, 0(r5)
+        kReturn,                                                 // blr  on a skipped call
+        kTickSaveLink,                                           // mfspr r0,LR
+        kTickStoreLink,                                          // stw  r0,0x4(r1)
+        branchTo(tailAt, kTickBody + 4, false),                  // b    the tick's own body
     };
 }
 
@@ -165,14 +196,15 @@ std::string LogicGate::enable() {
     if (m_block == 0) {
         return m_refusal.empty() ? "no guest memory was reserved for a logic gate" : m_refusal;
     }
-    // The probe left the tick's own first instruction at the word after the
-    // entry, so that is the word this gate takes and the one it puts back. It is
-    // checked rather than assumed: a revision whose tick starts differently gets
-    // a refusal instead of a gate that ran the wrong code.
+    // The word the gate takes is the tick's second instruction, and it is
+    // checked rather than assumed: a revision whose tick starts differently gets a
+    // refusal instead of a gate that ran the wrong code. The first instruction is
+    // not checked here because the gate does not replace it -- the probe has --
+    // and the gate supplies its own copy.
     uint32_t first = 0;
-    if (!m_readWord(kTickBody, first) || first != kTickFirst) {
+    if (!m_readWord(kTickBody, first) || first != kTickSecond) {
         m_refusal = "the tick's body at " + hex(kTickBody) + " holds " + hex(first) + ", not " +
-                    hex(kTickFirst) + "; this gate is written for this title's tick";
+                    hex(kTickSecond) + "; this gate is written for this title's tick";
         return m_refusal;
     }
     m_original = first;

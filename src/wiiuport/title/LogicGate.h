@@ -39,21 +39,27 @@ namespace wiiuport::title {
 // is the only direction measured to hold.
 class LogicGate {
   public:
-    // The tick, and the instruction after the one the probe replaced -- which is
-    // where the tick's own body begins once the gate is in.
+    // The tick, and the instruction after the one the probe replaced. The gate
+    // takes *that* word for its branch, not the entry: the entry is the probe's,
+    // and the tick cannot be entered past its prologue because its epilogue reads
+    // the saved link register back out of the caller's frame and returns through
+    // it. So the gate supplies the prologue itself and branches to the body after
+    // it -- which is why kTickSecond is the word it checks for.
     static constexpr uint32_t kTick = 0x025d42ec;
-    static constexpr uint32_t kTickFirst = 0x7c0802a6;
+    static constexpr uint32_t kTickFirst = 0x7c0802a6;  // mfspr r0,LR
+    static constexpr uint32_t kTickSecond = 0x90010004; // stw  r0,0x4(r1)
     static constexpr uint32_t kTickBody = kTick + 4;
     // The per-frame entry, read so the report can name what it is gating.
     static constexpr uint32_t kFrameEntry = 0x025f172c;
     // The block's shape: the gate's own words, then the two counters it keeps.
     // Both counters are in guest memory, so the host can read the logic's rate
-    // and the call rate without a probe -- and the probe stays where it was, at
-    // the entry, still counting every call into the tick.
-    static constexpr size_t kGateWords = 14;
-    static constexpr size_t kCallsWord = 14;
-    static constexpr size_t kTicksWord = 15;
-    static constexpr size_t kBlockWords = 16;
+    // and the call rate without a probe. `kThroughWord` is where the gate's
+    // through path starts, after the skipped path's return.
+    static constexpr size_t kThroughWord = 13;
+    static constexpr size_t kGateWords = 16;
+    static constexpr size_t kCallsWord = 16;
+    static constexpr size_t kTicksWord = 17;
+    static constexpr size_t kBlockWords = 18;
 
     // The fork's seams, injected so this is testable without a guest.
     using Register = void (*)(uint32_t entry, uint32_t firstInstruction,

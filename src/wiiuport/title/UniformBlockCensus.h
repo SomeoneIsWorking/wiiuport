@@ -104,6 +104,10 @@ class UniformBlockCensus {
     struct Binding {
         bool read = false;
         uint32_t cursor = 0;
+        // The object the binder was handed. Without it the other slot cannot be
+        // read: the entries live at `object + 0x10 + cursor * 0x1c`, so the ring
+        // is only a ring from the object that owns it.
+        uint32_t object = 0;
         std::array<uint32_t, kEntryWords> entry{};
         // Which of those words, added to the entry's offset, is somewhere the
         // guest can actually read. The binder hands the GPU a *relative* offset,
@@ -112,10 +116,29 @@ class UniformBlockCensus {
         // which word it is: it reports which ones read, and what they hold is
         // then dumped and looked at.
         std::array<bool, kEntryWords> mapped{};
+        // The other of the two entries, read the same way, because the question
+        // the ring exists to answer is what the *other* slot holds: if it still
+        // holds the previous tick's pose when this tick binds, a blend has two
+        // sets of values to read and needs nothing replayed. Its cursor is the
+        // one this binding did not use.
+        bool otherRead = false;
+        uint32_t otherCursor = 0;
+        std::array<uint32_t, kEntryWords> otherEntry{};
+        std::array<bool, kEntryWords> otherMapped{};
     };
 
     // Called on the display thread, once per binding, with the object.
     void record(uint32_t object, bool second);
+
+    // One slot of the ring, read whole: the seven words of its entry, and then
+    // which of those words, added to the entry's offset, names memory the guest
+    // can read. Both are needed for *both* slots -- the bound one, to find the
+    // block the tick is drawing from, and the other, to find the block the
+    // previous tick drew from.
+    void readEntry(uint32_t object, uint32_t cursor, std::array<uint32_t, kEntryWords>& entry,
+                   bool& read) const;
+    void mapWords(uint32_t object, const std::array<uint32_t, kEntryWords>& entry,
+                  std::array<bool, kEntryWords>& mapped) const;
 
     Register m_register;
     ReadWord m_readWord;
@@ -127,6 +150,17 @@ class UniformBlockCensus {
     std::array<uint64_t, kEntries> m_cursors{};
     // And the ones that named something else, which the report carries as itself.
     uint64_t m_cursorsOutOfRange = 0;
+    // Whether the ring turns per bind or per frame, counted rather than read:
+    // a switch is a binding of an object already seen whose cursor differs from
+    // the one it used last time, and `compared` is how many bindings could have
+    // been one. A switch rate near one means the slot alternates every bind and
+    // the two are two passes; near zero means it alternates per frame, or never.
+    uint64_t m_cursorSwitches = 0;
+    uint64_t m_cursorCompared = 0;
+    // The last cursor each object used, so the next binding of the same object
+    // can be compared with it. A flat map rather than a hash table: the objects
+    // are few and the cap bounds the work.
+    std::vector<std::pair<uint32_t, uint32_t>> m_lastCursor;
     // How many distinct objects have been seen, so a histogram of one object's
     // parity is not read as the title's.
     uint64_t m_objects = 0;

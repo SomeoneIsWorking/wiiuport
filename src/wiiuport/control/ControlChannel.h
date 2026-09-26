@@ -41,7 +41,9 @@
 
 namespace lucent::http {
 class Server;
-}
+struct Request;
+struct Response;
+} // namespace lucent::http
 
 namespace wiiuport::control {
 
@@ -136,6 +138,18 @@ class ControlChannel {
     bool start(uint16_t port);
     bool running() const;
     uint16_t port() const;
+
+    // The routing table, reachable without a socket. A client sends a method
+    // and a target; this answers it exactly as the listener would, so a test
+    // can ask about every route the channel claims to serve and see whether the
+    // claim is true. It is public because that is the point: the routes are the
+    // channel's contract, not its wiring.
+    lucent::http::Response dispatch(const lucent::http::Request& request);
+
+    // The routes this channel serves, as the unknown-route refusal names them.
+    // One owner, so the refusal and the routing table cannot disagree -- which
+    // is how a route came to be advertised and unreachable.
+    static std::string_view routeList();
 
     // The bodies of the two GET routes. Pure, so a test reads exactly what a
     // client would without opening a socket.
