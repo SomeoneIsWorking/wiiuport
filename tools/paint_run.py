@@ -52,7 +52,14 @@ LOGIC_TARGET = "025d42ec:7c0802a6"
 
 # What the logic rate must stay inside, in hertz. The title runs at 30 and this
 # is the falsifier's whole claim: a doubled picture must not double this.
-LOGIC_RANGE = (28.5, 31.5)
+#
+# The bound is a shade wider than the 29.9 to 30.0 the mechanism is aimed at,
+# because this counts calls over a six-second window and the title's own pacing
+# jitters: measured windows come in between 30.00 and 30.17 a second, on both
+# sides of the change. So the check is "not doubled and not moved", which is what
+# a doubling of the simulation would break first, and every window's count and
+# rate is printed so the spread is visible rather than asserted.
+LOGIC_RANGE = (29.5, 30.5)
 
 # What each stand-in should do to the display's rate, and why. The frame waits
 # for its own flip at the end, so a paint costs a flip however many of them
@@ -260,8 +267,10 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     state = read_paint(args.port)
                 except ControlUnavailable as unavailable:
-                    print(f"the product stopped answering before the end: {unavailable}",
-                          file=sys.stderr)
+                    print(
+                        f"the product stopped answering before the end: {unavailable}",
+                        file=sys.stderr,
+                    )
             except ControlUnavailable as unavailable:
                 print(f"refused: {unavailable}", file=sys.stderr)
                 return 1
