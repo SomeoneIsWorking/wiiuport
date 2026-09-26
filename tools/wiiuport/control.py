@@ -691,6 +691,24 @@ def capture_frame(port: int, slot: int, timeout: float = 15.0) -> bytes:
     raise ControlUnavailable(f"no image reached slot {slot} within {timeout:.0f}s: {refusal}")
 
 
+def dump_guest(port: int, address: int, size: int, timeout: float = 5.0) -> bytes:
+    """A range of guest memory, as the bytes lie. Refuses by reason."""
+    return request_bytes("GET", f"/memory?address={address:x}&size={size}", port, timeout)
+
+
+def compare_bytes(first: bytes, second: bytes) -> str:
+    """How two byte ranges differ, for a range that has no image to look at."""
+    if len(first) != len(second):
+        return f"different sizes: {len(first)} and {len(second)} bytes"
+    differing = [i for i, (a, b) in enumerate(zip(first, second)) if a != b]
+    if not differing:
+        return f"identical, {len(first)} bytes"
+    return (
+        f"{len(differing)} of {len(first)} bytes differ, first at offset {differing[0]} "
+        f"({first[differing[0]]:#04x} against {second[differing[0]]:#04x})"
+    )
+
+
 def compare_images(first: bytes, second: bytes) -> str:
     """How two captured frames differ, byte by byte, in one sentence."""
     if len(first) != len(second):
