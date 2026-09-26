@@ -110,20 +110,23 @@ class WindWakerPaint {
 
     // What the stand-in does, kept separable so a failure says which part.
     enum class Mode : uint8_t {
-        // The stand-in paints once and branches back: the redirect itself,
-        // with nothing added. A run where this does not hold the title's rate
-        // says the redirect is at fault, not the second paint.
+        // One paint, reached by a plain branch at the frame, then back to the
+        // loop. The redirect itself, with nothing added: a run where this does
+        // not hold the title's rate says the redirect is at fault, not the
+        // second paint.
         PassThrough = 1,
         // Two paints, the title's own two vblanks a flip.
         Twice = 2,
         // Two paints, and one vblank a flip.
         TwiceAtSixty = 3,
-        // Not a paint count but a control: one paint, reached by branching
-        // straight at the frame instead of reading it out of the vtable and
-        // going through the count register. So a title that freezes with the
-        // other modes in place and keeps running with this one has said the
-        // stand-in's memory is fine and the indirect call in it is not.
-        Direct = 4,
+        // The variant that re-reads the frame from the title's vtable and goes
+        // through the count register, which the other modes deliberately do not
+        // do. It does not run, and it is kept because it is the falsifier for
+        // that choice: same block, same words, same one rewritten word of
+        // vtable, and the only difference from PassThrough is `mtctr`/`bctr`
+        // against `b`. A payload that re-derives the frame every pass is a
+        // nicety; one that paints nothing is not, and this is what says so.
+        IndirectOnce = 4,
     };
     // The name a refusal or a report uses for a mode.
     static std::string_view modeName(Mode mode);
@@ -161,9 +164,9 @@ class WindWakerPaint {
     }
 
     // The stand-in's words for a block at `blockAddress`, or nothing when a
-    // branch in it could not reach: the title's loop body once or twice, with
-    // or without the call that asks for one vblank a flip, then a branch back
-    // to the top of the loop.
+    // branch in it could not reach: one or two direct calls at the frame, with
+    // or without the game's own call that asks for one vblank a flip, then an
+    // absolute branch back to the top of the display thread's loop.
     static std::optional<std::vector<uint32_t>> payload(uint32_t blockAddress, Mode mode);
 
     // A PC-relative branch to `to`, standing at `from`, with the link register

@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from wiiuport.drive import press, release
-from wiiuport.headless import Display, HeadlessSession
+from wiiuport.headless import Display, HeadlessSession, LogType, log_flags
 from wiiuport.paths import find_layout
 
 from wiiuport.control import (
@@ -141,6 +141,18 @@ def main(argv: list[str] | None = None) -> int:
         choices=[display.value for display in Display],
         default=Display.GPU.value,
     )
+    parser.add_argument(
+        "--log-recompiler",
+        action="store_true",
+        help="turn on the recompiler's own log: what it translated, and what it "
+        "refused to. Very large, so a diagnostic asks for it rather than a run",
+    )
+    parser.add_argument(
+        "--windows",
+        type=int,
+        default=3,
+        help="how many alternating windows; fewer makes a diagnostic quicker",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -157,11 +169,13 @@ def main(argv: list[str] | None = None) -> int:
 
     env = runtime_env(args.port, continuous=False)
     env["WIIUPORT_CALLER_CENSUS"] = LOGIC_TARGET
+    logflag = log_flags(LogType.RECOMPILER) if args.log_recompiler else 0
     session = HeadlessSession(
         layout=layout,
         activity="paint-run",
         runtime_env=env,
         display_server=Display(args.display),
+        logflag=logflag,
     )
     windows: list[Window] = []
     state = None
@@ -196,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
                 except ControlUnavailable:
                     continue
             try:
-                for name in ("off", "on", "off"):
+                for name in ("off", "on", "off")[: max(args.windows, 1)]:
                     if running.poll() is not None:
                         # The product died between windows. Said plainly, with
                         # what its own log last said, because "the channel did

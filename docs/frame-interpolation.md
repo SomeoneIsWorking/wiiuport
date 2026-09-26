@@ -197,8 +197,11 @@ a loop, and the only thing between two iterations is a wait for the flip. So:
   reads flags and pointers and writes nothing, so running it again in the same
   tick is running the same function again.
 - **The frame is reached through an indirect branch**, so a stand-in can go
-  anywhere executable, and re-reading the frame from the title's vtable on each
-  pass means it follows whichever display class the title installed.
+  anywhere executable. What a stand-in does *inside* that memory is a separate
+  question, and the answer here is direct branches only: the payload calls the
+  frame the install check verified, rather than re-deriving it from the vtable
+  on every pass. The cost is real and is stated below; the price of the
+  alternative was a title that stopped painting.
 
 ### Two things that are reserved and discovered before anything is written
 
@@ -248,19 +251,38 @@ the interval rather than by reading the code:
    words are checked against reach before anything is written, and the branch
    encoding is unit-tested against a real instruction from the title's image.
 
-4. **"May execute from" is half a contract.** The stand-in reached through the
-   display vtable -- the title's own loop body, word for word -- froze the whole
-   emulated system for exactly as long as it was installed. No paints, no logic
-   ticks, no error logged anywhere, and 30 a second the moment it came out. The
-   same block reached by a plain branch instead of through the count register
-   runs the title at 30 paints and 30 logic ticks a second with the stand-in
-   installed, so the memory is sound, the redirect is sound, and the difference
-   is one instruction pair: `mtctr`/`bctr` against `b`. A direct branch
-   translates at the address it lands on; an indirect one looks the target up in
-   the recompiler's jump table, and a block allocated out of the loader's
-   trampoline arena was never in it. `AllocateCode` registers the block now, and
-   that control -- mode 4, two branches and nothing else -- is what turned a
-   freeze into a cause rather than a fourth guess.
+4. **An indirect call out of the stand-in stops the title; a direct one does
+   not.** The stand-in reached through the display vtable -- the title's own loop
+   body, word for word, re-reading the frame and going through the count
+   register -- froze the whole emulated system for exactly as long as it was
+   installed. No paints, no logic ticks, no error logged anywhere, and 30 a
+   second the moment it came out. The same block with the same words and the
+   same one rewritten word of vtable, branching straight at the frame instead,
+   runs the title at 30.00 paints and 30.00 logic ticks a second with the
+   stand-in installed. So the memory is sound, the redirect is sound, and the
+   difference is one instruction pair: `mtctr`/`bctr` against `b`.
+
+   **What did not explain it, and is recorded because it was believed for a
+   while.** An indirect branch jumps through the recompiler's jump table, indexed
+   by the target address, and a block allocated out of the loader's trampoline
+   arena had never been registered in it -- so `AllocateCode` registers a block
+   as it allocates it, and that is right on its own terms. It changed nothing:
+   the freeze was identical with the block registered, over four runs. The
+   recompiler's own log (bit 60) was turned on for a fifth and says nothing
+   about the block, so the block compiled. What the indirect form does that the
+   direct one does not is still not established, and the honest position is
+   that the payload avoids it rather than that it is fixed.
+
+   The payload is therefore direct branches only: `bl` at the frame the install
+   check verified, and an absolute branch back to the top of the loop, because a
+   `bl` sets the link register and the `blr` the game's own call would have
+   provided is no longer available. The price is that the frame is not re-read
+   from the vtable each pass, so a title that swapped that slot at runtime would
+   keep painting the frame the mod verified. The install check is what stands in
+   for it: it refuses by name over any slot that does not hold this title's
+   frame. The variant that re-reads it is kept as mode 4, because it is the
+   falsifier for this decision -- same block, same words, one instruction pair
+   apart, and it does not run.
 5. **The loop's top is not the thread's entry.** The display thread's entry at
    `0x0274c00c` is a prologue -- `mfspr r0,LR`, a new stack frame, `or r31,r3,r3`
    -- and the loop proper starts four instructions later at `0x0274c020`. A
