@@ -31,6 +31,7 @@
 #include "wiiuport/interp/TransformSubstitution.h"
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
+#include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
@@ -134,6 +135,8 @@ class Runtime {
     guest::EnvironmentProbe m_environmentProbe{m_writers};
     guest::LineProbe m_lineProbe{m_writers};
     guest::CallerCensus m_callers{&GuestCallProbes::Register};
+    title::LogicGate m_logic{&GuestCallProbes::Register, &GuestPatching::AllocateCode,
+                            &GuestPatching::WriteWord, &GuestPatching::ReadWord};
     title::UniformBlockCensus m_blocks{&GuestCallProbes::Register, &GuestPatching::ReadWord};
     title::WindWakerPaint m_paint{&GuestCallProbes::Register, &GuestPatching::AllocateCode,
                                   &GuestPatching::WriteWord, &GuestPatching::ReadWord,
@@ -172,6 +175,7 @@ class Runtime {
         .callers = m_callers,
         .paint = m_paint,
         .blocks = m_blocks,
+        .logic = m_logic,
         .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,
         .pacing = m_pacing,

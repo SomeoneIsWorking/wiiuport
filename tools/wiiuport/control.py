@@ -638,6 +638,56 @@ class BlockCensus:
         return f"the two entries unevenly ({counts[0]} and {counts[1]}): they do alternate"
 
 
+@dataclass(frozen=True)
+class GateState:
+    """What the logic gate is doing, and the two counts it keeps in guest memory."""
+
+    tick: int
+    enabled: bool
+    calls: int | None
+    ticks: int | None
+    refusal: str
+
+    def render(self) -> str:
+        return (
+            f"logic gate: {'in' if self.enabled else 'out'} at {self.tick:#010x}, "
+            f"{self.calls} calls, {self.ticks} ticks through it"
+        )
+
+
+def read_gate(port: int = DEFAULT_PORT, timeout: float = 2.0) -> GateState:
+    payload = _get("/gate", port, timeout)
+    require_fields(
+        "GET /gate", payload, ("tick", "enabled", "callsCount", "ticksCount"), "the logic gate"
+    )
+    return GateState(
+        tick=int(payload["tick"], 16),
+        enabled=bool(payload["enabled"]),
+        calls=None if payload["callsCount"] is None else int(payload["callsCount"]),
+        ticks=None if payload["ticksCount"] is None else int(payload["ticksCount"]),
+        refusal=str(payload.get("refusal", "")),
+    )
+
+
+def set_gate(on: bool, port: int = DEFAULT_PORT, timeout: float = 5.0) -> GateState:
+    body = request_bytes("POST", f"/gate?on={1 if on else 0}", port, timeout)
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError as malformed:
+        raise ControlUnavailable(f"POST /gate answered something that is not JSON: {malformed}")
+    return (
+        read_gate(port, timeout)
+        if "tick" not in payload
+        else GateState(
+            tick=int(payload["tick"], 16),
+            enabled=bool(payload["enabled"]),
+            calls=None if payload["callsCount"] is None else int(payload["callsCount"]),
+            ticks=None if payload["ticksCount"] is None else int(payload["ticksCount"]),
+            refusal=str(payload.get("refusal", "")),
+        )
+    )
+
+
 def read_blocks(port: int = DEFAULT_PORT, timeout: float = 2.0) -> BlockCensus:
     payload = _get("/blocks", port, timeout)
     require_fields(

@@ -22,13 +22,14 @@ lucent::http::Response notFound() {
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
         "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
         "GET /recordings, GET /objects, GET /draws, GET /vertices, GET /memory, GET /callers, "
-        "GET /paint, GET /blocks, POST "
+        "GET /paint, GET /blocks, GET /gate, POST "
         "/replay, POST /capture, "
         "POST /present, "
         "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, "
         "POST /shadowcheck, "
         "POST /neighbourcheck, POST /blends, POST /pacing, "
-        "POST /objects, POST /draws, POST /recordings, POST /paint, POST /input and POST /quit.\n");
+        "POST /objects, POST /draws, POST /recordings, POST /paint, POST /gate, POST /input "
+        "and POST /quit.\n");
 }
 
 // The one-shot routes each own a frame boundary, and so does continuous
@@ -162,7 +163,7 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
       m_neighbourCheck(sources.neighbourCheck), m_objects(sources.objects),
       m_vertices(sources.vertices), m_writers(sources.writers), m_callers(sources.callers),
-      m_paint(sources.paint), m_blocks(sources.blocks),
+      m_paint(sources.paint), m_blocks(sources.blocks), m_logic(sources.logic),
       m_guestBytes(sources.guestBytes), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
       m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate),
       m_shadowCheck(sources.shadowCheck) {
@@ -1098,6 +1099,23 @@ bool ControlChannel::start(uint16_t port) {
             }
             if (request.path() == "/blocks") {
                 return lucent::http::Response::json(200, "OK", m_blocks.json());
+            }
+            if (request.method == "GET" && request.path() == "/gate") {
+                return lucent::http::Response::json(200, "OK", m_logic.json());
+            }
+            if (request.method == "POST" && request.path() == "/gate") {
+                if (!requestedFlag(std::string(request.query()), "on", true)) {
+                    const std::string refusal = m_logic.disable();
+                    if (!refusal.empty()) {
+                        return lucent::http::Response::text(409, "Conflict", refusal + "\n");
+                    }
+                    return lucent::http::Response::json(200, "OK", m_logic.json());
+                }
+                const std::string refusal = m_logic.enable();
+                if (!refusal.empty()) {
+                    return lucent::http::Response::text(409, "Conflict", refusal + "\n");
+                }
+                return lucent::http::Response::json(200, "OK", m_logic.json());
             }
             if (request.path() == "/memory") {
                 std::string refusal;
