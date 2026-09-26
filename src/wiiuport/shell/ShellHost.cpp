@@ -49,6 +49,19 @@ int ShellHost::run(const Options& options) {
         shutdown();
         return 0;
     }
+    // Checked here as well as at launch, and before any graphics exist. The
+    // check is pure -- a regular file, and the metadata inside it -- and
+    // building the renderer first meant that a refused disc unwound a
+    // half-started Vulkan device, whose teardown faults inside the driver and
+    // buries the refusal under a crash report that points at graphics init
+    // instead. The check at launch stays: the disc can change between here and
+    // there, and that is the one that decides what actually runs.
+    const std::string early = titleProblem(title);
+    if (!early.empty()) {
+        lucent::error("shell", "{}", early);
+        shutdown();
+        return 1;
+    }
     if (!m_window.open(options.window)) {
         lucent::error("shell", "{}", m_window.lastError());
         shutdown();

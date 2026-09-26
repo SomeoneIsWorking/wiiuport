@@ -8,6 +8,7 @@ progress.
 
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -200,16 +201,32 @@ class TransformReport:
         return "\n".join(lines)
 
 
+def _unreachable(url: str, dropped: BaseException) -> ControlUnavailable:
+    """A channel that stopped answering, in the words a tool can report.
+
+    A refused connection and a connection dropped mid-request are the same fact
+    for anything that polls the channel -- the runtime is not there any more --
+    and they used to read differently: the first became ControlUnavailable and
+    the second escaped as http.client's own exception, so a tool died on the very
+    run whose failure it was meant to report. RemoteDisconnected is a subclass of
+    both BadStatusLine (an HTTPException) and ConnectionResetError (an OSError);
+    both are caught, and so is anything else the socket layer raises.
+    """
+    return ControlUnavailable(
+        f"{url} did not answer ({type(dropped).__name__}: {dropped}). The runtime is not "
+        "running, stopped while answering, or listens on another WIIUPORT_CONTROL_PORT."
+    )
+
+
 def _get(path: str, port: int, timeout: float) -> dict:
     url = f"http://127.0.0.1:{port}{path}"
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.URLError as unreachable:
-        raise ControlUnavailable(
-            f"{url} did not answer ({unreachable.reason}). The runtime is not running, "
-            "or listens on another WIIUPORT_CONTROL_PORT."
-        ) from unreachable
+        raise _unreachable(url, unreachable.reason) from unreachable
+    except (http.client.HTTPException, OSError) as dropped:
+        raise _unreachable(url, dropped) from dropped
     except json.JSONDecodeError as malformed:
         raise ControlUnavailable(f"{url} answered something that is not JSON: {malformed}") from (
             malformed
@@ -228,10 +245,9 @@ def request_bytes(method: str, path: str, port: int, timeout: float) -> bytes:
         body = refused.read().decode("utf-8", "replace").strip()
         raise ControlUnavailable(f"{url} was refused ({refused.code}): {body}") from refused
     except urllib.error.URLError as unreachable:
-        raise ControlUnavailable(
-            f"{url} did not answer ({unreachable.reason}). The runtime is not running, "
-            "or listens on another WIIUPORT_CONTROL_PORT."
-        ) from unreachable
+        raise _unreachable(url, unreachable.reason) from unreachable
+    except (http.client.HTTPException, OSError) as dropped:
+        raise _unreachable(url, dropped) from dropped
 
 
 def require_fields(url: str, payload: dict, fields: object, what: str) -> None:

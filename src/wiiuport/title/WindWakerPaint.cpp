@@ -1,5 +1,7 @@
 #include "wiiuport/title/WindWakerPaint.h"
 
+#include "Cafe/HW/Espresso/GuestPatching.h"
+
 #include <lucent/log.h>
 
 #include <array>
@@ -521,7 +523,18 @@ std::string WindWakerPaint::json() const {
     body.string("mode", std::string(modeName(m_mode)));
     body.string("block", hex(m_block));
     body.number("swapIntervalAsked", kSwapInterval);
-    body.number("pacing", m_swapInterval());
+    // The pacing, or the fact that there is none yet: the emulator's shared area
+    // is created during the graphics bring-up, and a channel asked before that
+    // gets a value that is not an interval. Printing the number would be a
+    // reading nobody could interpret, and 0xffffffff in a report reads as a bug
+    // rather than as "the title has no surface yet".
+    const uint32_t pacing = m_swapInterval();
+    if (pacing == GuestPatching::kSwapIntervalUnknown) {
+        body.raw("pacing", "null");
+        body.string("pacingWhy", "the graphics bring-up has not created its shared area yet");
+    } else {
+        body.number("pacing", pacing);
+    }
     body.number("titleSwapInterval", kTitleSwapInterval);
     body.number("paints", m_paints.load());
     body.string("probe", probeName());
