@@ -11,6 +11,7 @@ void runTransformTests();
 void runFrameTests();
 void runControlTests();
 void runPaintTests();
+void runBlockCensusTests();
 void runReplayTests();
 void runSearchTests();
 void runInputTests();

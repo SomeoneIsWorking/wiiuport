@@ -81,6 +81,7 @@ struct Fixture {
     wiiuport::interp::ObjectBlend objects{wiiuport::interp::ContinuousInterpolator::kBlendPoint};
     wiiuport::guest::BufferWriters writers;
     wiiuport::guest::CallerCensus callers{&noRegistration};
+    wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord};
     wiiuport::title::WindWakerPaint paint{&noRegistration, &noCodeSpace, &noWriteWord,
                                            &noReadWord};
     wiiuport::interp::VertexBlend vertices{objects, writers,
@@ -126,6 +127,7 @@ struct Fixture {
         .writers = writers,
         .callers = callers,
         .paint = paint,
+        .blocks = blocks,
         .guestBytes = &noGuestBytes,
         .snapshot = snapshot,
         .pacing = pacing,

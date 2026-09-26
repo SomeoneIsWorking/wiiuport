@@ -26,6 +26,7 @@
 #include "wiiuport/interp/TransformSearch.h"
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
+#include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
 #include <atomic>
@@ -87,6 +88,7 @@ class ControlChannel {
         const guest::BufferWriters& writers;
         const guest::CallerCensus& callers;
         title::WindWakerPaint& paint;
+        const title::UniformBlockCensus& blocks;
         GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
         frame::PresentPacing& pacing;
@@ -213,6 +215,7 @@ class ControlChannel {
     const guest::BufferWriters& m_writers;
     const guest::CallerCensus& m_callers;
     title::WindWakerPaint& m_paint;
+    const title::UniformBlockCensus& m_blocks;
     GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;
     frame::PresentPacing& m_pacing;

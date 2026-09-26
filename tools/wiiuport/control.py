@@ -579,6 +579,66 @@ class PaintState:
         return body
 
 
+@dataclass(frozen=True)
+class BlockCensus:
+    """What the title's own uniform block binder did, counted."""
+
+    binder: int
+    probe: str
+    entries: int
+    bindings: int
+    objects: int
+    cursors: dict[int, int]
+    cursors_out_of_range: int
+    examples: tuple[tuple[int, int, int], ...]
+
+    def render(self) -> str:
+        spread = ", ".join(
+            f"entry {entry}: {count}" for entry, count in sorted(self.cursors.items())
+        )
+        return (
+            f"uniform blocks: {self.bindings} bindings over {self.objects} objects, "
+            f"probe {self.probe}; cursor {spread}"
+            f"{f', {self.cursors_out_of_range} out of range' if self.cursors_out_of_range else ''}"
+        )
+
+    def parity(self) -> str:
+        """What the cursor did, in words, from the two entries the list holds."""
+        counts = sorted(self.cursors.values(), reverse=True)
+        if not self.bindings:
+            return "the binder was never called, so nothing is known"
+        if len(counts) < 2:
+            return "only one of the two entries was ever read"
+        if counts[0] == 0:
+            return "no entry was read at all"
+        if counts[0] == counts[1]:
+            return f"both entries equally ({counts[0]} each): no alternation"
+        return f"the two entries unevenly ({counts[0]} and {counts[1]}): they do alternate"
+
+
+def read_blocks(port: int = DEFAULT_PORT, timeout: float = 2.0) -> BlockCensus:
+    payload = _get("/blocks", port, timeout)
+    require_fields(
+        "GET /blocks",
+        payload,
+        ("binder", "probe", "entries", "bindings", "objects", "cursors", "cursorsOutOfRange"),
+        "the uniform block census",
+    )
+    return BlockCensus(
+        binder=int(payload["binder"], 16),
+        probe=str(payload["probe"]),
+        entries=int(payload["entries"]),
+        bindings=int(payload["bindings"]),
+        objects=int(payload["objects"]),
+        cursors={int(k): int(v) for k, v in payload["cursors"].items()},
+        cursors_out_of_range=int(payload["cursorsOutOfRange"]),
+        examples=tuple(
+            (int(one["cursor"]), int(one["offset"]), int(one["size"]))
+            for one in payload.get("examples", {}).values()
+        ),
+    )
+
+
 def read_paint(port: int = DEFAULT_PORT, timeout: float = 2.0) -> PaintState:
     return _paint_state(_get("/paint", port, timeout), "GET /paint")
 
