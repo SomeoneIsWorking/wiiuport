@@ -25,35 +25,45 @@ per-cause. No game files, keys, or derived title data enter this repository.
 **Non-goals.** Reimplementing a Wii U emulator from scratch. Owning any title's
 addresses, identity, transform layout, or gameplay policy.
 
-## GOAL-INTERP — A title-neutral render-state interpolation mechanism
+## GOAL-INTERP — A title presents at its display's rate, with its own logic rate
 
-**Outcome.** The runtime can present N intermediate frames between two guest simulation
-ticks by re-issuing a recorded frame's draw stream with substituted transform state,
-where the substituted values are produced by a consumer-supplied blend over the previous
-and current tick's state. The mechanism owns recording, replay, shadowing of guest
-uniform storage, and presentation pacing. It does not know what any particular value
-means.
+**Outcome.** The runtime presents N intermediate frames between two guest simulation
+ticks, and the intermediate frames are drawn by the title's own render path at a
+substituted pose rather than by the host re-issuing what the title submitted. The
+mechanism owns the substitution, the pacing, and the evidence; it does not know what
+any particular value means. Two routes exist and one is being retired: a title-side
+mod of the display thread's paint path, and a host-side replay of a recorded draw
+stream.
 
-**Why.** Wii U titles commonly lock simulation to 30 Hz. Raising presentation rate by
-interpolating the transforms the game already submits preserves simulation semantics,
-unlike patching the game's tick rate.
+**Why.** Wii U titles commonly lock simulation to 30 Hz. Raising the *presentation*
+rate preserves simulation semantics, unlike patching the game's tick rate. And a frame
+the title draws itself carries the title's own identity and the title's own pose, so
+nothing has to be guessed about which submitted value is which object's transform.
 
 **Success conditions.**
-- A frame's draw stream can be replayed, with the blend the identity at t=1, to output no
-  further from the title's frame than the renderer's own replay of that stream is from
-  itself (the null-interpolation discriminator; the renderer does not draw the same
-  commands identically twice, so byte-identical is not a bar any replay can meet).
-- Substituted transform storage never writes back into guest memory.
-- The runtime reports, with denominators: frames recorded, frames replayed, replay
-  bailouts by reason, and substituted transform slots per frame.
+- The title presents at the display's rate with its logic rate unchanged, measured on
+  the real title in a headless driven run, with denominators: paints per second, logic
+  ticks per second, and two consecutive paints compared byte by byte.
+- An intermediate frame is the blend of the previous and current tick's pose, nearer
+  each than they are to each other, and differs from both — with the null case measured
+  too: two paints with no substitution are byte-identical.
+- Nothing is inferred from rendered pixels, and geometry is never sampled from an
+  adjacent frame.
+- The runtime reports, with denominators: paints, logic ticks, per-binding block
+  descriptors, and every refusal by cause.
 
-**Constraints.** Interpolation is deterministic and source-state-driven. It never
-inspects rendered pixels, infers motion from image content, or samples adjacent frames
-to decide geometry. Blending only ever combines matching source state with explicit
-provenance.
+**Constraints.** Interpolation is deterministic and source-state-driven. Blending only
+ever combines matching source state with explicit provenance. The title's own disc
+image is never modified, copied or committed: any change is applied in memory, as the
+title's modules are linked.
 
 **Non-goals.** Image-space frame generation, optical flow, or an external presentation
-layer. Changing the guest's simulation rate.
+layer. **Changing the guest's simulation rate** — which is not what this does: the logic
+keeps its own rate, and the picture's rate comes from the flip. What it does change, and
+says so here rather than leaving it to be discovered: one word of a vtable the display
+thread already calls, the title's own record of the interval it asked for, and the
+emulator's flip pacing. Which of those a given title needs is the title project's
+decision, and the title-neutral capability that offers them says what each one is.
 
 ## GOAL-DRIVE — The runtime is drivable and measurable by an agent
 
