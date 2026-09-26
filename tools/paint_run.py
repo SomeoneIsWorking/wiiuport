@@ -25,6 +25,7 @@ import argparse
 import sys
 import time
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 
 from wiiuport.drive import press, release
@@ -101,6 +102,56 @@ class Window:
             f"{self.paints_per_second:6.2f} paints/s, {self.logic_per_second:6.2f} logic/s "
             f"over {self.seconds:4.1f}s ({self.paints} paints, {self.logic_calls} ticks)"
         )
+
+
+@dataclass(frozen=True)
+class Capture:
+    """One paint's bytes, and the two counters that say when it was taken.
+
+    The tick is what makes the comparison a discriminator rather than a
+    coincidence: two captures of one tick have to be identical, and a capture of
+    the next tick has to differ. A difference with no tick label could be either.
+    """
+
+    slot: int
+    paints: int
+    tick: int
+    image: bytes
+
+
+def render_captures(shots: list[Capture]) -> str:
+    """What the captures say, compared both ways round.
+
+    Every adjacent pair is reported with whether the tick moved between them, so
+    the reading is: same tick and identical bytes is the null case holding, and a
+    moved tick with identical bytes is a capture path that cannot see the world
+    move -- which is a failure, and is reported as one.
+    """
+    if len(shots) < 2:
+        return f"only {len(shots)} capture, so nothing was compared"
+    parts = []
+    for earlier, later in pairwise(shots):
+        same_tick = earlier.tick == later.tick
+        verdict = compare_images(earlier.image, later.image)
+        verdict = verdict.split(",")[0].strip()
+        identical = "identical" in verdict
+        if same_tick and not identical:
+            parts.append(
+                f"captures {earlier.slot} and {later.slot} share tick {earlier.tick} "
+                f"but differ: the same world painted twice is not the same picture"
+            )
+        elif not same_tick and identical:
+            parts.append(
+                f"captures {earlier.slot} and {later.slot} are a tick apart "
+                f"({earlier.tick} then {later.tick}) and identical: the capture path "
+                f"cannot see the world move"
+            )
+        else:
+            parts.append(
+                f"captures {earlier.slot} and {later.slot} "
+                f"({'the same tick ' + str(earlier.tick) if same_tick else 'ticks ' + str(earlier.tick) + ' then ' + str(later.tick)}): {verdict}"
+            )
+    return "; ".join(parts)
 
 
 def _last_log_lines(session: HeadlessSession, count: int) -> list[str]:
@@ -318,13 +369,27 @@ def main(argv: list[str] | None = None) -> int:
                     # otherwise throw away the numbers it had already taken.
                     print(window.render(), flush=True)
                     if name == "on" and args.captures >= 2:
-                        # Two paints in a row, compared byte by byte. With the
-                        # logic at 30 and the picture at 60 the two are the same
-                        # world twice, which is the null case a blend has to beat
-                        # -- and the one thing a rate alone cannot show.
-                        first = capture_frame(args.port, 0)
-                        second = capture_frame(args.port, 1)
-                        comparison = compare_images(first, second)
+                        # Consecutive paints, each labelled with the tick it was
+                        # taken in, and compared byte by byte. The label is what
+                        # makes the null case mean something: two paints of the
+                        # *same* tick must be identical, and a paint of the *next*
+                        # tick must differ, and saying so needs the tick each one
+                        # belongs to. Without it, "two frames are identical" is
+                        # equally consistent with a still scene and with a capture
+                        # path that is not reading the screen.
+                        shots = []
+                        for slot in range(args.captures):
+                            images_bytes = capture_frame(args.port, slot)
+                            paints, ticks = (
+                                read_paint(args.port).paints,
+                                _logic_source(args.port)[0],
+                            )
+                            shots.append(Capture(slot, paints, ticks, images_bytes))
+                            print(
+                                f"    capture {slot}: {len(images_bytes)} bytes, "
+                                f"paint {paints}, tick {ticks} ({window.source})"
+                            )
+                        comparison = render_captures(shots)
                 try:
                     state = read_paint(args.port)
                 except ControlUnavailable as unavailable:
