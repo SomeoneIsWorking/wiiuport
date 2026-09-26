@@ -303,7 +303,26 @@ the interval rather than by reading the code:
    paints the tick's own frame, chosen by a counter in the stand-in's own
    memory, with each iteration still leaving by a branch into the title's code.
 
-6. **The loop's top is not the thread's entry.** The display thread's entry at
+6. **The title's own `GX2SetSwapInterval` cannot be called from here.** The
+   one-vblank payload did exactly what the title does -- `li r3,1` and
+   `bl 0x028fad2c`, the same call site word for word, `lwz r3,0x50(r26)` and
+   `bl` -- and the emulator died with signal 11. The dump named `IP 0x02c1295c`,
+   an address in no function, with `LR 0x00e05858`, which is the stand-in's third
+   word: exactly where the `bl` had put it. So the call reached the import and did
+   not come back.
+
+   And that export does one thing with its argument: it stores it in Latte's
+   shared area. So the pacing is the emulator's, not the title's, and the fork
+   says how many vblanks a flip takes -- with the export's own bound, and the
+   previous value returned so a caller can put it back. The mod writes the
+   title's own field at `display+0x50` beside it, so the title's record and the
+   thing it records agree, and restores both.
+
+   The payload is then a **single branch**, and a single branch is all it can be:
+   with nothing called, the display register the loop's call set up arrives at
+   the frame untouched, and the frame's return goes to the title's loop.
+
+7. **The loop's top is not the thread's entry.** The display thread's entry at
    `0x0274c00c` is a prologue -- `mfspr r0,LR`, a new stack frame, `or r31,r3,r3`
    -- and the loop proper starts four instructions later at `0x0274c020`. A
    stand-in that branches back to the entry therefore re-frames the stack on
@@ -322,12 +341,14 @@ one-vblank form -- so that a title which would not take one said which, and so
 that a freeze could be narrowed to a single instruction pair rather than to "the
 stand-in".
 
-### Three words that are lifted rather than derived
+### Three words that were lifted, and are no longer needed
 
-The one-vblank payload needs `lis`, `ori` and `mtspr` to put a constant into a
-register, and none of them is in the payload for any other reason. All three are
-lifted from the title's own image, and the field that varies is checked against
-a second instruction instead of being derived:
+A seven-word payload once put the loop's return address back into the link
+register so a called frame could return to the title's code. It needed `lis`,
+`ori` and `mtspr`, and the way to be sure of them is worth keeping even though
+the payload that used them is gone -- the earlier one is what the note below
+records. All three are lifted from the title's own image, and the field that
+varies is checked against a second instruction instead of being derived:
 
 | word | instruction | where |
 |---|---|---|
@@ -338,5 +359,8 @@ a second instruction instead of being derived:
 That last pair is the check. A field position derived from one instruction is a
 guess; derived from two that differ only in that field it is a fact about this
 title's encoding, and `mtspr LR,r12` is then `0x7c0803a6 + (12 << 21)`. It is
-`0x7d8003a6` and not `0x7d8803a6` that a missing SPR field produces, and a
-unit test pins the word that works.
+`0x7d8003a6` and not `0x7d8803a6` that a missing SPR field produces, and a unit
+test pinned the word that worked. None of the three is in the payload now, and
+that is the finding: **the cheaper the payload, the fewer words have to be
+right.** The words that remain are one branch, and its displacement is checked
+against a real instruction from the title's image.
