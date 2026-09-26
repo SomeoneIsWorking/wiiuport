@@ -34,7 +34,6 @@ from wiiuport.interpolation import (
 )
 from wiiuport.paired import PairedRates
 from wiiuport.paths import find_layout
-from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
 from wiiuport import neighbour_check, restore_check
 from wiiuport.control import (
@@ -44,6 +43,7 @@ from wiiuport.control import (
     wait_for,
     wait_for_channel,
 )
+from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
 # Where the stick points while walking, in turn: a camera that only ever moves
 # one way is a narrower test of the blend than one that turns and reverses.

@@ -1,6 +1,7 @@
 add_executable(wiiuport_tests
   main.cpp
   control_tests.cpp
+  paint_tests.cpp
   frame_tests.cpp
   replay_tests.cpp
   search_tests.cpp

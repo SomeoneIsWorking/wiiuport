@@ -20,9 +20,9 @@ from pathlib import Path
 
 from wiiuport.headless import HeadlessSession
 from wiiuport.paths import find_layout
-from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
 from wiiuport.control import DEFAULT_PORT, ControlUnavailable, read_counters, runtime_env
+from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
 
 def arm_replay(port: int, timeout: float = 5.0) -> str:

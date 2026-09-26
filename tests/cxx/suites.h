@@ -10,6 +10,7 @@ namespace wiiuport::tests {
 void runTransformTests();
 void runFrameTests();
 void runControlTests();
+void runPaintTests();
 void runReplayTests();
 void runSearchTests();
 void runInputTests();

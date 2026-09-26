@@ -18,7 +18,6 @@ from pathlib import Path
 from wiiuport.drive import press, release
 from wiiuport.headless import Display, HeadlessSession
 from wiiuport.paths import find_layout
-from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
 from wiiuport.control import (
     DEFAULT_PORT,
@@ -28,6 +27,7 @@ from wiiuport.control import (
     runtime_env,
     wait_for_channel,
 )
+from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
 
 def main(argv: list[str] | None = None) -> int:
