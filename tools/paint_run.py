@@ -34,6 +34,7 @@ from wiiuport.paths import find_layout
 from wiiuport.control import (
     DEFAULT_PORT,
     ControlUnavailable,
+    read_blocks,
     read_callers,
     read_paint,
     runtime_env,
@@ -249,6 +250,19 @@ def main(argv: list[str] | None = None) -> int:
     device = session.rendered_on()
     print(f"rendered on: {device}")
     print(f"stand-in mode {args.mode} requested")
+    # The title's own uniform block binder, counted over the whole run: whether
+    # the per-object descriptor's cursor alternates decides if the previous
+    # tick's block is still there to read when this tick paints, which is what a
+    # blend is built on. Measured on the same run, not a separate one.
+    try:
+        census = read_blocks(args.port)
+        print(census.render())
+        print(f"  its two entries: {census.parity()}")
+        if census.examples:
+            first = census.examples[0]
+            print(f"  a binding read cursor {first[0]}, block offset {first[1]}, size {first[2]}")
+    except ControlUnavailable as unavailable:
+        print(f"refused: {unavailable}", file=sys.stderr)
     print(state.render())
     for window in windows:
         print(window.render())

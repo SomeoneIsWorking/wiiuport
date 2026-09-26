@@ -22,7 +22,7 @@ lucent::http::Response notFound() {
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
         "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
         "GET /recordings, GET /objects, GET /draws, GET /vertices, GET /memory, GET /callers, "
-        "GET /paint, POST "
+        "GET /paint, GET /blocks, POST "
         "/replay, POST /capture, "
         "POST /present, "
         "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, "
@@ -162,7 +162,7 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
       m_neighbourCheck(sources.neighbourCheck), m_objects(sources.objects),
       m_vertices(sources.vertices), m_writers(sources.writers), m_callers(sources.callers),
-      m_paint(sources.paint),
+      m_paint(sources.paint), m_blocks(sources.blocks),
       m_guestBytes(sources.guestBytes), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
       m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate),
       m_shadowCheck(sources.shadowCheck) {
@@ -1095,6 +1095,9 @@ bool ControlChannel::start(uint16_t port) {
             }
             if (request.method == "GET" && request.path() == "/paint") {
                 return lucent::http::Response::json(200, "OK", m_paint.json());
+            }
+            if (request.path() == "/blocks") {
+                return lucent::http::Response::json(200, "OK", m_blocks.json());
             }
             if (request.path() == "/memory") {
                 std::string refusal;

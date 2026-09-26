@@ -31,6 +31,7 @@
 #include "wiiuport/interp/TransformSubstitution.h"
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
+#include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
 namespace wiiuport {
@@ -133,6 +134,7 @@ class Runtime {
     guest::EnvironmentProbe m_environmentProbe{m_writers};
     guest::LineProbe m_lineProbe{m_writers};
     guest::CallerCensus m_callers{&GuestCallProbes::Register};
+    title::UniformBlockCensus m_blocks{&GuestCallProbes::Register, &GuestPatching::ReadWord};
     title::WindWakerPaint m_paint{&GuestCallProbes::Register, &GuestPatching::AllocateCode,
                                   &GuestPatching::WriteWord, &GuestPatching::ReadWord};
     interp::VertexBlend m_vertexBlend{m_objectBlend, m_writers,
@@ -168,6 +170,7 @@ class Runtime {
         .writers = m_writers,
         .callers = m_callers,
         .paint = m_paint,
+        .blocks = m_blocks,
         .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,
         .pacing = m_pacing,
