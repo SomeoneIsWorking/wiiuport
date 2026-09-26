@@ -200,6 +200,24 @@ a loop, and the only thing between two iterations is a wait for the flip. So:
   anywhere executable, and re-reading the frame from the title's vtable on each
   pass means it follows whichever display class the title installed.
 
+### Two things that are reserved and discovered before anything is written
+
+**The vtable is discovered, not assumed.** The address is in the image, but the
+object that matters is the one the title built, and its vtable is a word at
+`display+0x24` that a probe on the frame hands over in `r3` on every paint.
+Patching the image's address would rewrite a word of whatever object *does* own
+it, and slot `0xcc` of an unrelated class is not a frame. So the live vtable is
+read, its slot `0xcc` is required to hold this title's frame, and that word is
+what gets written. Before the display thread has painted there is no live
+vtable, and the mod refuses rather than falling back to the address.
+
+**The memory is reserved at startup.** Allocating executable guest memory out of
+the loader's arena is a thing the loader expects to be asked for while it is
+linking. So the block is taken when the mod is installed, before the title runs,
+and enabling the stand-in is then a single word written to a data word the
+display thread already re-reads every iteration. Nothing else about the guest
+changes at the moment of enabling, which is what makes it removable.
+
 ### Three ways to get it wrong, all of them measured
 
 The first run of the falsifier killed the title outright, and each of these was

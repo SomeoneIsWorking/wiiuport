@@ -22,6 +22,10 @@ constexpr std::array<uint32_t, 5> kLoopBody = {
 };
 constexpr uint32_t kLoadOne = 0x38600001; // li r3,1          from 0x025f094c
 
+// The most words any stand-in is: the swap-interval call, two loop bodies, and
+// the branch back. The block is reserved once, at startup, for this many.
+constexpr size_t kMaxWords = 2 + 5 * 2 + 1;
+
 // A relative branch reaches 32 MiB either side of where it stands, which is
 // the fork's own rule for the same instruction.
 constexpr int64_t kRelativeBranchReach = 0x02000000;
@@ -169,6 +173,14 @@ WindWakerPaint::WindWakerPaint(Register registerProbe, AllocateCode allocateCode
 
 void WindWakerPaint::install() {
     m_register(kDisplayFrame, kDisplayFrameFirst, m_frame);
+    // Taken now, not when the stand-in is asked for. Reserving executable guest
+    // memory while the title is running is a thing the loader's arena does not
+    // expect to be asked for, and the one thing this mod does not need to do
+    // while the title is running is allocate.
+    m_block = m_allocateCode(4 * kMaxWords);
+    if (m_block == 0) {
+        m_reservationRefusal = "no executable guest memory for the stand-in";
+    }
 }
 
 void WindWakerPaint::Frame::OnInstall(GuestCallProbes::Installation result) {
@@ -201,18 +213,45 @@ std::string WindWakerPaint::enable(Mode mode) {
         }
     }
     m_mode = mode;
-    const uint32_t slot = kDisplayVTable + kFrameSlot;
+    // The vtable to patch is the one the running display holds, read from the
+    // display object the probe hands over on every paint. The address out of
+    // the image is a check and not the source: a title that put its display
+    // somewhere else would otherwise have a word of its own image rewritten on
+    // the strength of a note in a document, which is a change to an object
+    // whose slot 0xcc may mean something else entirely.
+    uint32_t vtable = 0;
+    {
+        std::scoped_lock frameLock(m_frame.mutex);
+        if (m_frame.display == 0) {
+            m_refusal = "the display thread has not painted yet, so which vtable it calls "
+                        "is not known";
+            return m_refusal;
+        }
+        if (!m_readWord(m_frame.display + kVTableOffset, vtable) || vtable == 0) {
+            m_refusal =
+                "the display object at " + hex(m_frame.display) + " would not give up its vtable";
+            return m_refusal;
+        }
+    }
+    const uint32_t slot = vtable + kFrameSlot;
     uint32_t frame = 0;
     if (!m_readWord(slot, frame)) {
-        m_refusal = "the display vtable at " + hex(kDisplayVTable) + " is not guest memory yet";
+        m_refusal =
+            "vtable slot " + hexField(kFrameSlot) + " of " + hex(vtable) + " is not guest memory";
         return m_refusal;
     }
     if (frame != kDisplayFrame) {
         // Named, because a stand-in written for one frame and pointed at
         // another is a crash with nothing to read.
-        m_refusal = "vtable slot " + hexField(kFrameSlot) + " holds " + hex(frame) +
-                    ", not this title's display frame " + hex(kDisplayFrame);
+        m_refusal = "vtable slot " + hexField(kFrameSlot) + " of " + hex(vtable) + " holds " +
+                    hex(frame) + ", not this title's display frame " + hex(kDisplayFrame);
         return m_refusal;
+    }
+    if (vtable != kDisplayVTable) {
+        // Not a refusal: the stand-in works on whatever vtable the display
+        // calls, and this says which one that turned out to be.
+        lucent::info("paint", "the display's vtable is {}, not the {} out of the image",
+                     hex(vtable), hex(kDisplayVTable));
     }
     // The stand-in branches back to the top of the display thread's loop, so
     // that address is read and checked rather than assumed: a revision whose
@@ -224,9 +263,8 @@ std::string WindWakerPaint::enable(Mode mode) {
         return m_refusal;
     }
     m_original = frame;
-    m_block = m_allocateCode(4 * (2 + kLoopBody.size() * 2 + 1));
     if (m_block == 0) {
-        m_refusal = "no executable guest memory for the stand-in";
+        m_refusal = "no executable guest memory was reserved: " + m_reservationRefusal;
         return m_refusal;
     }
     const std::optional<std::vector<uint32_t>> at = payload(m_block, mode);
@@ -283,8 +321,9 @@ std::string WindWakerPaint::disableLocked() {
     }
     m_installed = false;
     m_refusal.clear();
-    lucent::info("paint", "vtable slot {:#04x} back to the title's own {}", kFrameSlot,
-                 hex(m_original));
+    lucent::info("paint", "{} slot {:#04x} back to the title's own {}", hex(kDisplayVTable),
+                 kFrameSlot, hex(m_original));
+    m_patched = 0;
     return {};
 }
 
@@ -292,7 +331,9 @@ std::string WindWakerPaint::json() const {
     std::scoped_lock lock(m_mutex);
     JsonBody body;
     body.string("frame", hex(kDisplayFrame));
-    body.string("vtable", hex(kDisplayVTable));
+    body.string("vtable",
+                hex(m_installed && m_patched != 0 ? m_patched - kFrameSlot : kDisplayVTable));
+    body.string("patchedSlot", hex(m_patched));
     body.string("slot", hexField(kFrameSlot));
     body.raw("installed", m_installed ? "true" : "false");
     body.string("mode", std::string(modeName(m_mode)));
@@ -301,21 +342,29 @@ std::string WindWakerPaint::json() const {
     body.number("titleSwapInterval", kTitleSwapInterval);
     body.number("paints", m_paints.load());
     body.string("probe", probeName());
-    body.string("display", hex(m_frame.display));
-    body.object("fields", displayFields());
+    // The display pointer, the vtable it holds and its fields are one reading
+    // of the probe's state under its lock, not three unlocked ones.
+    const DisplayFacts facts = displayFacts();
+    body.string("display", hex(facts.display));
+    body.string("liveVTable", hex(facts.vtable));
+    body.object("fields", facts.fields);
     if (!m_refusal.empty()) {
         body.string("refusal", m_refusal);
     }
     return body.finish();
 }
 
-// The display object's own fields, or an empty object before the display thread
-// has been seen: a value read as a number or not read at all, never a guess.
-std::string WindWakerPaint::displayFields() const {
+// What the display object holds, read once under the probe's lock: which
+// vtable, and its four fields as a JSON object of their own. Before the display
+// thread has been seen every value is zero, which is a reading and not a guess.
+WindWakerPaint::DisplayFacts WindWakerPaint::displayFacts() const {
     std::scoped_lock frameLock(m_frame.mutex);
-    if (m_frame.display == 0) {
-        return JsonBody().text();
+    DisplayFacts facts{.display = m_frame.display};
+    if (facts.display == 0) {
+        facts.fields = JsonBody().text();
+        return facts;
     }
+    (void)m_readWord(facts.display + kVTableOffset, facts.vtable);
 
     struct Field {
         uint32_t offset;
@@ -331,12 +380,13 @@ std::string WindWakerPaint::displayFields() const {
     JsonBody fields;
     for (const Field& field : kFields) {
         uint32_t value = 0;
-        if (!m_readWord(m_frame.display + field.offset, value)) {
+        if (!m_readWord(facts.display + field.offset, value)) {
             continue;
         }
         fields.number(field.name, value);
     }
-    return fields.text();
+    facts.fields = fields.text();
+    return facts;
 }
 
 std::string WindWakerPaint::probeName() const {
