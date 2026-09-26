@@ -211,12 +211,20 @@ read, its slot `0xcc` is required to hold this title's frame, and that word is
 what gets written. Before the display thread has painted there is no live
 vtable, and the mod refuses rather than falling back to the address.
 
-**The memory is reserved at startup.** Allocating executable guest memory out of
-the loader's arena is a thing the loader expects to be asked for while it is
-linking. So the block is taken when the mod is installed, before the title runs,
-and enabling the stand-in is then a single word written to a data word the
-display thread already re-reads every iteration. Nothing else about the guest
-changes at the moment of enabling, which is what makes it removable.
+**The memory is reserved when the title is linked, not when the mod loads.**
+Allocating executable guest memory out of the loader's arena is a request the
+loader expects while it is linking. So the block is taken from the frame probe's
+own install report, which the fork raises once the title's modules are linked.
+Enabling the stand-in is then a single word written to a data word the display
+thread already re-reads every iteration; nothing else about the guest changes at
+the moment of enabling, which is what makes it removable.
+
+Reserved at *load* time instead -- which is where it went first -- the product
+died before printing a line, because the loader's arena had no memory to hand out
+before the emulator's memory was up. Measured: a run whose log held sixty lines
+of gamescope and none of the runtime's. The distinction is worth keeping for
+anything else that reaches into the guest: there is a moment when the guest's
+address space exists, and it is not process start.
 
 ### Three ways to get it wrong, all of them measured
 

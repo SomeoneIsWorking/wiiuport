@@ -4,11 +4,13 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace wiiuport::title {
@@ -98,9 +100,12 @@ class WindWakerPaint {
     WindWakerPaint(Register registerProbe, AllocateCode allocateCode, WriteWord writeWord,
                    ReadWord readWord);
 
-    // Registers the frame probe and takes the stand-in's memory, before the
-    // title is linked and before anything has run. Everything that changes the
-    // guest is then a single word: the vtable slot.
+    // Registers the frame probe. Everything that changes the guest is then a
+    // single word: the vtable slot. The stand-in's memory is taken when the
+    // fork reports the probe installed, which is once the title's modules are
+    // linked and the emulator's memory is up -- not here, which is before
+    // either, and asking the loader's arena for guest memory that early takes
+    // the product down before it has printed a line.
     void install();
 
     // What the stand-in does, kept separable so a failure says which part.
@@ -128,6 +133,11 @@ class WindWakerPaint {
     const std::string& reservationRefusal() const {
         return m_reservationRefusal;
     }
+
+    // Takes the stand-in's memory, at the moment the fork says the title is
+    // linked. Called by the frame probe; public so the reservation is one
+    // named thing rather than a lambda the probe holds.
+    void reserve(std::string& refusal);
 
     // Puts the title's own frame pointer back. Empty on success, otherwise
     // the refusal.
@@ -180,7 +190,15 @@ class WindWakerPaint {
         explicit Frame(std::atomic<uint64_t>& paints) : m_paints(paints) {
         }
 
+        // Also where the stand-in's memory is reserved, through the reservation
+        // its owner hands it -- an enclosing class has no access to a nested
+        // class's private members, so it is set rather than assigned.
         void OnInstall(GuestCallProbes::Installation installation) override;
+
+        void setReservation(std::function<void(std::string&)> reserve) {
+            m_reserve = std::move(reserve);
+        }
+
         void OnCall(std::span<const uint32_t, 32> gpr, uint32_t returnAddress) override;
         mutable std::mutex mutex;
         std::optional<GuestCallProbes::Installation> installation;
@@ -188,6 +206,8 @@ class WindWakerPaint {
 
       private:
         std::atomic<uint64_t>& m_paints;
+        // Called once, at link time, to take the stand-in's memory.
+        std::function<void(std::string&)> m_reserve;
     };
 
     Register m_register;
