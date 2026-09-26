@@ -118,6 +118,12 @@ class WindWakerPaint {
         Twice = 2,
         // Two paints, and one vblank a flip.
         TwiceAtSixty = 3,
+        // Not a paint count but a control: one paint, reached by branching
+        // straight at the frame instead of reading it out of the vtable and
+        // going through the count register. So a title that freezes with the
+        // other modes in place and keeps running with this one has said the
+        // stand-in's memory is fine and the indirect call in it is not.
+        Direct = 4,
     };
     // The name a refusal or a report uses for a mode.
     static std::string_view modeName(Mode mode);

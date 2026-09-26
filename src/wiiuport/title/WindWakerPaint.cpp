@@ -118,6 +118,8 @@ std::string_view WindWakerPaint::modeName(Mode mode) {
         return "twice";
     case Mode::TwiceAtSixty:
         return "twiceAtSixty";
+    case Mode::Direct:
+        return "direct";
     }
     return "unknown";
 }
@@ -130,12 +132,23 @@ std::optional<WindWakerPaint::Mode> WindWakerPaint::modeFrom(long long number) {
         return Mode::Twice;
     case 3:
         return Mode::TwiceAtSixty;
+    case 4:
+        return Mode::Direct;
     default:
         return std::nullopt;
     }
 }
 
 std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddress, Mode mode) {
+    if (mode == Mode::Direct) {
+        // Two branches and nothing else: at the frame, and back to the loop.
+        if (!withinReach(blockAddress, kDisplayFrame) ||
+            !withinReach(blockAddress + 4, kDisplayLoopTop)) {
+            return std::nullopt;
+        }
+        return std::vector<uint32_t>{branchTo(blockAddress, kDisplayFrame, false),
+                                     branchTo(blockAddress + 4, kDisplayLoopTop, false)};
+    }
     const bool twice = mode != Mode::PassThrough;
     const bool interval = mode == Mode::TwiceAtSixty;
     // The call, when there is one, sits at the second word; the branch back is
@@ -235,7 +248,6 @@ std::string WindWakerPaint::enable(Mode mode) {
             return refusal;
         }
     }
-    m_mode = mode;
     // The vtable to patch is the one the running display holds, read from the
     // display object the probe hands over on every paint. The address out of
     // the image is a check and not the source: a title that put its display
@@ -294,9 +306,11 @@ std::string WindWakerPaint::enable(Mode mode) {
     }
     const std::optional<std::vector<uint32_t>> at = payload(m_block, mode);
     if (!at.has_value()) {
+        // The reservation stands: it is still the loader's memory and still
+        // empty, and a refusal here says nothing about it. Zeroing the block
+        // would turn one refusal into a mod that can never be enabled.
         m_refusal = "the stand-in at " + hex(m_block) +
                     " cannot reach the swap-interval call or the loop it returns to";
-        m_block = 0;
         return m_refusal;
     }
     lucent::info("paint", "stand-in {} at {}: {} words", modeName(mode), hex(m_block),
@@ -309,19 +323,19 @@ std::string WindWakerPaint::enable(Mode mode) {
         if (!m_writeWord(m_block + 4 * static_cast<uint32_t>(word), (*at)[word])) {
             m_refusal = "the stand-in's block at " + hex(m_block) + " would not take word " +
                         std::to_string(word);
-            m_block = 0;
             return m_refusal;
         }
     }
     if (!m_writeWord(slot, m_block)) {
         m_refusal = "vtable slot " + hexField(kFrameSlot) + " would not take the write";
-        m_block = 0;
         return m_refusal;
     }
     m_installed = true;
+    m_mode = mode;
+    m_patched = slot;
     m_refusal.clear();
-    lucent::info("paint", "vtable slot {:#04x} now {}; the display thread paints {}", kFrameSlot,
-                 hex(m_block), modeName(mode));
+    lucent::info("paint", "{} slot {:#04x} now {}; the display thread paints {}", hex(vtable),
+                 kFrameSlot, hex(m_block), modeName(mode));
     return {};
 }
 
@@ -339,15 +353,20 @@ std::string WindWakerPaint::disableLocked() {
         // every comparison is made against -- unmeasurable.
         return {};
     }
-    const uint32_t slot = kDisplayVTable + kFrameSlot;
-    if (!m_writeWord(slot, m_original)) {
-        m_refusal = "vtable slot " + hexField(kFrameSlot) + " would not take the write back";
+    // The word that was written, which is the live vtable's slot. Not the
+    // address out of the image: enable() patches whatever vtable the display
+    // holds, so restoring to the image's address would rewrite a word nothing
+    // patched and leave the patch in place -- the mod installed with no way out
+    // and a second vtable damaged.
+    if (m_patched == 0 || !m_writeWord(m_patched, m_original)) {
+        m_refusal = "vtable slot " + hexField(kFrameSlot) + " at " + hex(m_patched) +
+                    " would not take the title's own " + hex(kDisplayFrame) + " back";
         return m_refusal;
     }
     m_installed = false;
     m_refusal.clear();
-    lucent::info("paint", "{} slot {:#04x} back to the title's own {}", hex(kDisplayVTable),
-                 kFrameSlot, hex(m_original));
+    lucent::info("paint", "vtable slot {:#04x} back to the title's own {}", kFrameSlot,
+                 hex(m_original));
     m_patched = 0;
     return {};
 }

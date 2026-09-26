@@ -151,10 +151,20 @@ void wiiuport::tests::runPaintTests() {
                       "a block 32 MiB away does not");
         const auto far = WindWakerPaint::payload(0x40000000, WindWakerPaint::Mode::PassThrough);
         check::isTrue(!far.has_value(), "and a payload that cannot branch back is refused");
+        // The control mode reaches the frame by a plain branch, so its refusal
+        // is about that one distance and nothing else.
+        const auto direct = WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::Direct);
+        check::isTrue(direct.has_value() && direct->size() == 2,
+                      "the control payload is two branches");
+        check::isTrue(
+            !WindWakerPaint::payload(0x40000000, WindWakerPaint::Mode::Direct).has_value(),
+            "and it is refused when the frame is out of reach");
     }
     {
         check::isTrue(!WindWakerPaint::modeFrom(0).has_value(), "mode 0 names no stand-in");
-        check::isTrue(!WindWakerPaint::modeFrom(4).has_value(), "mode 4 names no stand-in");
+        check::isTrue(!WindWakerPaint::modeFrom(5).has_value(), "mode 5 names no stand-in");
+        check::isTrue(WindWakerPaint::modeFrom(4) == WindWakerPaint::Mode::Direct,
+                      "mode 4 is the control that branches straight at the frame");
         check::isTrue(WindWakerPaint::modeFrom(1) == WindWakerPaint::Mode::PassThrough,
                       "mode 1 is the redirect alone");
         check::isTrue(WindWakerPaint::modeFrom(3) == WindWakerPaint::Mode::TwiceAtSixty,
@@ -219,6 +229,36 @@ void wiiuport::tests::runPaintTests() {
                       "a foreign frame is refused by what the slot holds");
         check::isTrue(mod.json().find("\"installed\":false") != std::string::npos,
                       "and nothing is installed");
+    }
+    {
+        // A display on a vtable of its own -- the title's other display class --
+        // so the word patched and the word restored are both the live one's.
+        // Restoring to the address out of the image instead would rewrite a word
+        // nothing patched and leave the stand-in installed, which is the kind of
+        // failure that only shows up as "the mod cannot be turned off".
+        FakeGuest guest = loadedTitle();
+        constexpr uint32_t otherVTable = 0x10145000;
+        guest.writeWord(kDisplay + WindWakerPaint::kVTableOffset, otherVTable);
+        guest.writeWord(otherVTable + WindWakerPaint::kFrameSlot, WindWakerPaint::kDisplayFrame);
+        WindWakerPaint mod = makeMod(guest);
+        mod.install();
+        linked();
+        paintOnce(kDisplay);
+        check::isTrue(mod.enable(WindWakerPaint::Mode::PassThrough).empty(),
+                      "a display on another vtable installs against the one it holds");
+        uint32_t live = 0;
+        uint32_t image = 0;
+        check::isTrue(readWord(otherVTable + WindWakerPaint::kFrameSlot, live) &&
+                          live == g_lastBlock,
+                      "and the vtable it holds is the one patched");
+        check::isTrue(
+            readWord(WindWakerPaint::kDisplayVTable + WindWakerPaint::kFrameSlot, image) &&
+                image == WindWakerPaint::kDisplayFrame,
+            "while the address out of the image is left alone");
+        check::isTrue(mod.disable().empty(), "and it comes back out");
+        check::isTrue(readWord(otherVTable + WindWakerPaint::kFrameSlot, live) &&
+                          live == WindWakerPaint::kDisplayFrame,
+                      "restoring the word it actually wrote");
     }
     {
         // The loop the stand-in branches back to is read and checked, not
