@@ -118,8 +118,8 @@ std::string_view WindWakerPaint::modeName(Mode mode) {
         return "twice";
     case Mode::TwiceAtSixty:
         return "twiceAtSixty";
-    case Mode::Direct:
-        return "direct";
+    case Mode::IndirectOnce:
+        return "indirectOnce";
     }
     return "unknown";
 }
@@ -133,46 +133,76 @@ std::optional<WindWakerPaint::Mode> WindWakerPaint::modeFrom(long long number) {
     case 3:
         return Mode::TwiceAtSixty;
     case 4:
-        return Mode::Direct;
+        return Mode::IndirectOnce;
     default:
         return std::nullopt;
     }
 }
 
 std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddress, Mode mode) {
-    if (mode == Mode::Direct) {
-        // Two branches and nothing else: at the frame, and back to the loop.
-        if (!withinReach(blockAddress, kDisplayFrame) ||
-            !withinReach(blockAddress + 4, kDisplayLoopTop)) {
+    // The one word every stand-in ends with: back to the top of the display
+    // thread's loop, by an absolute branch rather than by `blr`. `blr` is not
+    // available because a `bl` in the payload sets the link register and the
+    // only thing that set it before was the game's own call -- so a payload
+    // that calls anything cannot return through it.
+    if (mode == Mode::IndirectOnce) {
+        // The variant that reads the frame out of the vtable and goes through
+        // the count register, kept because it is the falsifier for the choice
+        // the other modes make. Measured: it does not run. Same block, same
+        // words, same one rewritten word of vtable, reached by a plain branch
+        // instead -- and the title runs at 30 paints and 30 logic ticks a
+        // second. The difference is `mtctr`/`bctr` against `b`, and it is the
+        // recompiler's jump table. Re-deriving the frame from the vtable on
+        // every pass is a nicety; a stand-in that paints nothing is not.
+        const std::vector<uint32_t> words{kLoopBody[0], kLoopBody[1], kLoopBody[2], kLoopBody[3],
+                                          kLoopBody[4]};
+        const uint32_t backAt = blockAddress + 4 * (words.size() + 1);
+        if (!withinReach(backAt, kDisplayLoopTop)) {
             return std::nullopt;
         }
-        return std::vector<uint32_t>{branchTo(blockAddress, kDisplayFrame, false),
-                                     branchTo(blockAddress + 4, kDisplayLoopTop, false)};
+        std::vector<uint32_t> all = words;
+        all.push_back(branchTo(backAt, kDisplayLoopTop, false));
+        return all;
     }
-    const bool twice = mode != Mode::PassThrough;
-    const bool interval = mode == Mode::TwiceAtSixty;
-    // The call, when there is one, sits at the second word; the branch back is
-    // last. Each displacement is measured from where its own word stands.
-    const uint32_t callAt = blockAddress + 4;
-    const uint32_t bodies = twice ? 2 : 1;
-    // The branch back is the last word, so it stands after everything before
-    // it and nothing else: measuring from one word further sends the display
-    // thread wherever that lands.
-    const uint32_t backAt = blockAddress + 4 * ((interval ? 2u : 0u) + kLoopBody.size() * bodies);
-    if (interval && !withinReach(callAt, kSetSwapInterval)) {
-        return std::nullopt;
+
+    // Everything else is a list of direct branches. The frame is reached by
+    // `bl` rather than by the loop's own `bctrl`, so it can be reached more
+    // than once in an iteration, and each call returns to the next word of the
+    // payload. Displacements are measured from where each word stands, and a
+    // branch that could not reach refuses the whole payload rather than being
+    // written wrong.
+    struct Step {
+        bool call;
+        uint32_t target;
+    };
+
+    std::vector<Step> steps;
+    if (mode == Mode::TwiceAtSixty) {
+        steps.push_back({false, 0});               // li r3,1
+        steps.push_back({true, kSetSwapInterval}); // the game's own setter
     }
+    const uint32_t paints = mode == Mode::PassThrough ? 1 : 2;
+    for (uint32_t paint = 0; paint < paints; paint++) {
+        steps.push_back({mode == Mode::PassThrough ? false : true, kDisplayFrame});
+    }
+
+    std::vector<uint32_t> words;
+    words.reserve(steps.size() + 1);
+    for (size_t index = 0; index < steps.size(); index++) {
+        const Step& step = steps[index];
+        const uint32_t at = blockAddress + 4 * static_cast<uint32_t>(index);
+        if (step.target == 0) {
+            words.push_back(kLoadOne);
+            continue;
+        }
+        if (!withinReach(at, step.target)) {
+            return std::nullopt;
+        }
+        words.push_back(branchTo(at, step.target, step.call));
+    }
+    const uint32_t backAt = blockAddress + 4 * static_cast<uint32_t>(words.size());
     if (!withinReach(backAt, kDisplayLoopTop)) {
         return std::nullopt;
-    }
-    std::vector<uint32_t> words;
-    words.reserve(backAt / 4 - blockAddress / 4);
-    if (interval) {
-        words.push_back(kLoadOne);
-        words.push_back(branchTo(callAt, kSetSwapInterval, true));
-    }
-    for (uint32_t body = 0; body < bodies; body++) {
-        words.insert(words.end(), kLoopBody.begin(), kLoopBody.end());
     }
     words.push_back(branchTo(backAt, kDisplayLoopTop, false));
     return words;

@@ -123,15 +123,18 @@ FakeGuest loadedTitle() {
 
 void wiiuport::tests::runPaintTests() {
     // The words of the payload, checked against the title's own image: the
-    // loop body lifted from 0x0274c020, and the two branches, whose only
-    // difference from those words is a displacement.
+    // The payload, and the branch encoding its computed words depend on. The
+    // only word not lifted from the title is `li r3,1`; every other word is a
+    // branch, and a branch's displacement is worked out from where it lands.
     {
         const auto words = WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::PassThrough);
         check::isTrue(words.has_value(), "a pass-through payload is built");
-        if (words.has_value() && words->size() == 6) {
-            check::isTrue(words->size() == 6, "a pass-through payload is six words");
-            check::isTrue((*words)[0] == 0x819f0024, "it starts with the title's lwz r12");
-            check::isTrue((*words)[4] == 0x4e800421, "it ends its body with the title's bctr");
+        if (words.has_value() && words->size() == 2) {
+            check::isTrue(words->size() == 2, "a pass-through payload is two branches");
+            check::isTrue((*words)[0] == WindWakerPaint::branchTo(0x00e07000, 0x0274c264, false),
+                          "the first branches at the frame");
+            check::isTrue((*words)[1] == WindWakerPaint::branchTo(0x00e07004, 0x0274c020, false),
+                          "and the second back to the top of the display thread's loop");
         }
     }
     {
@@ -151,20 +154,33 @@ void wiiuport::tests::runPaintTests() {
                       "a block 32 MiB away does not");
         const auto far = WindWakerPaint::payload(0x40000000, WindWakerPaint::Mode::PassThrough);
         check::isTrue(!far.has_value(), "and a payload that cannot branch back is refused");
-        // The control mode reaches the frame by a plain branch, so its refusal
-        // is about that one distance and nothing else.
-        const auto direct = WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::Direct);
-        check::isTrue(direct.has_value() && direct->size() == 2,
-                      "the control payload is two branches");
-        check::isTrue(
-            !WindWakerPaint::payload(0x40000000, WindWakerPaint::Mode::Direct).has_value(),
-            "and it is refused when the frame is out of reach");
+        // The variant kept as the falsifier: the title's own loop body, which
+        // is the re-read and the indirect call this design gave up.
+        const auto indirect =
+            WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::IndirectOnce);
+        check::isTrue(indirect.has_value() && indirect->size() == 6,
+                      "the indirect variant is the title's own five instructions and a branch");
+        if (indirect.has_value() && indirect->size() == 6) {
+            check::isTrue((*indirect)[0] == 0x819f0024 && (*indirect)[4] == 0x4e800421,
+                          "of which the fifth is the title's bctr, which is what does not run");
+        }
+        // Every direct variant reaches the frame by a branch whose displacement
+        // is worked out, so each refuses when that frame is out of reach rather
+        // than writing a branch that lands elsewhere.
+        for (const WindWakerPaint::Mode mode :
+             {WindWakerPaint::Mode::PassThrough, WindWakerPaint::Mode::Twice,
+              WindWakerPaint::Mode::TwiceAtSixty}) {
+            check::isTrue(WindWakerPaint::payload(0x00e07000, mode).has_value(),
+                          "a direct payload is built where the frame is in reach");
+            check::isTrue(!WindWakerPaint::payload(0x40000000, mode).has_value(),
+                          "and refused where the frame is not");
+        }
     }
     {
         check::isTrue(!WindWakerPaint::modeFrom(0).has_value(), "mode 0 names no stand-in");
         check::isTrue(!WindWakerPaint::modeFrom(5).has_value(), "mode 5 names no stand-in");
-        check::isTrue(WindWakerPaint::modeFrom(4) == WindWakerPaint::Mode::Direct,
-                      "mode 4 is the control that branches straight at the frame");
+        check::isTrue(WindWakerPaint::modeFrom(4) == WindWakerPaint::Mode::IndirectOnce,
+                      "mode 4 is the variant that re-reads the frame through CTR");
         check::isTrue(WindWakerPaint::modeFrom(1) == WindWakerPaint::Mode::PassThrough,
                       "mode 1 is the redirect alone");
         check::isTrue(WindWakerPaint::modeFrom(3) == WindWakerPaint::Mode::TwiceAtSixty,
@@ -191,8 +207,8 @@ void wiiuport::tests::runPaintTests() {
                           slot == g_lastBlock,
                       "and the vtable slot points at it");
         check::isTrue(mod.paints() == 1, "one paint counted through the probe");
-        check::isTrue(guest.block().size() == 6,
-                      "the block holds exactly the stand-in's six words");
+        check::isTrue(guest.block().size() == 2,
+                      "the block holds exactly the stand-in's two branches");
         check::isTrue(mod.json().find("\"installed\":true") != std::string::npos,
                       "the report says it is installed");
         check::isTrue(mod.json().find("\"mode\":\"passThrough\"") != std::string::npos,
@@ -284,7 +300,7 @@ void wiiuport::tests::runPaintTests() {
         paintOnce(kDisplay);
         check::isTrue(mod.enable(WindWakerPaint::Mode::Twice).empty(), "two paints install");
         const auto twice = guest.block();
-        check::isTrue(twice.size() == 11, "two paints are eleven words");
+        check::isTrue(twice.size() == 3, "two paints are three words: two calls and a branch");
         mod.disable();
         check::isTrue(mod.enable(WindWakerPaint::Mode::TwiceAtSixty).empty(),
                       "two paints and one vblank install");
@@ -292,18 +308,18 @@ void wiiuport::tests::runPaintTests() {
         // Guarded: an index into a block that was never written is a crash that
         // takes the whole report with it, which is the one thing a test suite
         // must never do to the run that reads it.
-        check::isTrue(sixty.size() == 13, "and thirteen words, the interval call among them");
-        if (sixty.size() != 13) {
+        check::isTrue(sixty.size() == 5, "and five words: the interval call and two paints");
+        if (sixty.size() != 5) {
             return;
         }
         check::isTrue(sixty[0] == 0x38600001, "starting with the title's own li r3,1");
-        // The second body, and the branch back to the loop that ends it: with
-        // the interval call the words are li, bl, then two bodies of five.
-        check::isTrue(sixty[7] == 0x819f0024 && sixty[11] == 0x4e800421,
-                      "the second body is the title's again");
-        check::isTrue(sixty[12] == WindWakerPaint::branchTo(0x00e07000 + 4 * 12,
-                                                            WindWakerPaint::kDisplayLoopTop, false),
-                      "and it branches back to the top of the loop");
+        check::isTrue(sixty[1] == WindWakerPaint::branchTo(0x00e07004, 0x028fad2c, true),
+                      "then the game's own swap-interval setter");
+        check::isTrue(sixty[2] == WindWakerPaint::branchTo(0x00e07008, 0x0274c264, true) &&
+                          sixty[3] == WindWakerPaint::branchTo(0x00e0700c, 0x0274c264, true),
+                      "then the frame, called twice");
+        check::isTrue(sixty[4] == WindWakerPaint::branchTo(0x00e07010, 0x0274c020, false),
+                      "and a branch back to the top of the loop");
     }
     {
         // A stand-in already in, asked for a different one: the title's own

@@ -97,6 +97,11 @@ class LogType(IntEnum):
     GX2 = 1
     UNIFORM_CAPTURE = 27
     DISPLAY_LIST_CAPTURE = 28
+    # The recompiler's own account of what it translated and what it refused.
+    # Enormous -- a whole boot, every function -- so it is asked for by the
+    # diagnostics that need to know what the translator did with a block the
+    # guest never had, and not otherwise.
+    RECOMPILER = 60
 
 
 def log_flags(*types: LogType) -> int:
