@@ -90,6 +90,40 @@ def rigid_at(values: list[float], index: int) -> str:
     return "a rigid transform -- " + "; and also ".join(found)
 
 
+def clusters(differing: list[int], gap: int = 4) -> list[tuple[int, int]]:
+    """The differing floats, grouped into runs no more than `gap` apart.
+
+    A block holds many things that change per tick -- a pose, a colour, a counter
+    -- and they are not all one thing. Grouping them says how many separate runs
+    moved, which is what decides whether one range can be named at all. Gaps up to
+    `gap` floats are treated as one run because a matrix's rows are interleaved
+    with the bytes around them and a stride would otherwise split a transform
+    into three.
+    """
+    if not differing:
+        return []
+    runs: list[tuple[int, int]] = []
+    start = previous = differing[0]
+    for index in differing[1:]:
+        if index - previous > gap:
+            runs.append((start, previous))
+            start = index
+        previous = index
+    runs.append((start, previous))
+    return runs
+
+
+def rigid_runs(differing: list[int], values: list[float]) -> list[tuple[int, int]]:
+    """Of those runs, the ones that are a rigid transform where they start.
+
+    Where the run *starts* is the whole test. How long it is says how much of the
+    transform moved, which is usually all of it and is not what makes it one, and
+    looking for a second transform inside the run would find one only by accident
+    of its length.
+    """
+    return [run for run in clusters(differing) if rigid_at(values, run[0])]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("before", type=Path, help="the dump taken first")
@@ -99,6 +133,12 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=24,
         help="how many differing floats to print; the rest is counted, not hidden",
+    )
+    parser.add_argument(
+        "--ranges",
+        action="store_true",
+        help="report the runs of moving floats as byte ranges, and refuse to choose "
+        "between them when there is more than one",
     )
     args = parser.parse_args(argv)
 
@@ -146,6 +186,29 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         print("== no rigid transform among the floats that moved")
+
+    if args.ranges:
+        runs = clusters(differing)
+        print(f"== {len(runs)} separate runs of moving floats")
+        for first, last in runs:
+            note = "  <- a rigid transform at its start" if rigid_at(after, first) else ""
+            print(f"   floats {first}..{last} (bytes {first * 4}..{last * 4 + 3}){note}")
+        if len(runs) == 1:
+            print(
+                f"== so one range covers everything that moved: bytes {runs[0][0] * 4}.."
+                f"{runs[0][1] * 4 + 3}, {runs[0][1] - runs[0][0] + 1} floats"
+            )
+        elif not runs:
+            print("== nothing moved, so there is no range to write")
+        else:
+            # Naming the largest run and calling it the pose is the mistake the
+            # mechanism being retired made, so this refuses instead: a blend that
+            # writes one of several ranges needs to be told which, by whoever owns
+            # the title's uniform names.
+            print(
+                f"== refused: {len(runs)} ranges moved and this does not choose between "
+                "them. Each is listed above with its bytes."
+            )
     return 0
 
 

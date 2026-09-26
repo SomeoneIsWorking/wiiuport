@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -60,6 +61,9 @@ class LogicGate {
     static constexpr size_t kCallsWord = 16;
     static constexpr size_t kTicksWord = 17;
     static constexpr size_t kBlockWords = 18;
+    // How many bytes the gate asks the loader's arena for, reported so a report
+    // that says the counters are zero can be read against the space they are in.
+    static constexpr uint32_t kBlockBytes = 4 * kBlockWords;
 
     // The fork's seams, injected so this is testable without a guest.
     using Register = void (*)(uint32_t entry, uint32_t firstInstruction,
@@ -95,7 +99,7 @@ class LogicGate {
     std::string json() const;
 
   private:
-    void onInstalled();
+    void onInstalled(GuestCallProbes::Installation installation);
 
     Register m_register;
     AllocateCode m_allocateCode;
@@ -106,10 +110,13 @@ class LogicGate {
     bool m_enabled = false;
     mutable std::mutex m_mutex;
     std::string m_refusal;
-    // The probe exists only for the link-time moment, and its counter is the
-    // gate's, so the calls it saw are not a measurement worth keeping.
+    // The probe exists for the link-time moment and to hold the entry while the
+    // gate is out of it. Whether it *installed* is reported, because a gate whose
+    // probe was refused is a gate that is counting calls nobody made, and the two
+    // look the same from the outside: zeros.
     class Moment;
     Moment* m_moment = nullptr;
+    std::optional<GuestCallProbes::Installation> m_probe;
 };
 
 } // namespace wiiuport::title
