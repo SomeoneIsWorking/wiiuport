@@ -105,6 +105,13 @@ class UniformBlockCensus {
         bool read = false;
         uint32_t cursor = 0;
         std::array<uint32_t, kEntryWords> entry{};
+        // Which of those words, added to the entry's offset, is somewhere the
+        // guest can actually read. The binder hands the GPU a *relative* offset,
+        // so the block's address is a base the title set elsewhere, and the
+        // entry is the only place left to look for it. This does not decide
+        // which word it is: it reports which ones read, and what they hold is
+        // then dumped and looked at.
+        std::array<bool, kEntryWords> mapped{};
     };
 
     // Called on the display thread, once per binding, with the object.

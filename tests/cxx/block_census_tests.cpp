@@ -103,6 +103,10 @@ void wiiuport::tests::runBlockCensusTests() {
     guest.writeWord(kObject + UniformBlockCensus::kCursorOffset, 1);
     writeEntry(guest, 0, 0x1000, 0x40);
     writeEntry(guest, 1, 0x2000, 0x80);
+    // The memory a real uniform block would be in, so "does this word name
+    // somewhere readable" has a true answer to give as well as a false one.
+    guest.writeWord(0x3000, 0x3f800000);
+    guest.writeWord(0x3004, 0x40000000);
     UniformBlockCensus census = makeCensus(guest);
     census.install();
     linked();
@@ -121,6 +125,18 @@ void wiiuport::tests::runBlockCensusTests() {
     check::isTrue(body.find("\"offset\":8192") != std::string::npos,
                   "the report carries the block's offset as read");
     check::isTrue(body.find("\"size\":128") != std::string::npos, "and its size");
+    // The block's address is a base the title set elsewhere, so the entry is
+    // where it has to be looked for: which words, added to the offset, name
+    // memory the guest can read.
+    check::isTrue(body.find("\"readableAtOffset\"") != std::string::npos,
+                  "and the report says which of the entry's words read at that offset");
+    // The fake's words are 0x1000+word, and the block the entry names would sit
+    // at that plus the offset -- which only word 0's does, because the fake maps
+    // nothing else. So exactly one word reads, and the report says which.
+    check::isTrue(body.find("\"readableAtOffset\":{\"0\":true") != std::string::npos,
+                  "the one word that names a mapped block is reported as such");
+    check::isTrue(body.find("\"3\":false") != std::string::npos,
+                  "and the one that does not as not");
 
     // The other binder counts into the same census: they are the same function
     // apart from which triple of indices they read, so one report covers both.

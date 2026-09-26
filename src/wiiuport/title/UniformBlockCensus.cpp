@@ -114,6 +114,15 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
                            binding.read;
         }
     }
+    if (binding.read) {
+        // Which words, added to the offset, name memory the guest can read.
+        // One word is enough to answer that, and reading four costs nothing.
+        uint32_t probe = 0;
+        for (size_t word = 0; word < kEntryWords; word++) {
+            const uint32_t base = binding.entry[word] + binding.entry[kEntryOffsetOffset / 4];
+            binding.mapped[word] = m_readWord(base, probe) && m_readWord(base + 4, probe);
+        }
+    }
     std::scoped_lock lock(m_mutex);
     if (std::find(m_seen.begin(), m_seen.end(), object) == m_seen.end()) {
         // Capped: a list of every object in a scene is a list of everything the
@@ -165,6 +174,11 @@ std::string UniformBlockCensus::json() const {
             words.number(std::to_string(word).c_str(), binding.entry[word]);
         }
         one.raw("entry", words.text());
+        JsonBody readable;
+        for (size_t word = 0; word < kEntryWords; word++) {
+            readable.raw(std::to_string(word).c_str(), binding.mapped[word] ? "true" : "false");
+        }
+        one.raw("readableAtOffset", readable.text());
         one.raw("read", binding.read ? "true" : "false");
         examples.raw(std::to_string(index).c_str(), one.text());
     }

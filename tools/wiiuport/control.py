@@ -580,6 +580,28 @@ class PaintState:
 
 
 @dataclass(frozen=True)
+class Binding:
+    """One binding: the cursor, the descriptor entry whole, and which of its
+    words names memory the guest can read at the entry's offset."""
+
+    cursor: int
+    offset: int
+    size: int
+    entry: dict[int, int]
+    readable: dict[int, bool]
+
+    def block(self) -> int | None:
+        """The block's address, if exactly one of the entry's words reads.
+
+        Zero or several is not an answer, and this returns nothing rather than
+        picking one: a wrong base dumps another object's block and reads as a
+        pose.
+        """
+        named = [word for word, ok in self.readable.items() if ok]
+        return self.entry[named[0]] + self.offset if len(named) == 1 else None
+
+
+@dataclass(frozen=True)
 class BlockCensus:
     """What the title's own uniform block binder did, counted."""
 
@@ -590,7 +612,7 @@ class BlockCensus:
     objects: int
     cursors: dict[int, int]
     cursors_out_of_range: int
-    examples: tuple[tuple[int, int, int], ...]
+    examples: tuple[Binding, ...]
 
     def render(self) -> str:
         spread = ", ".join(
@@ -633,7 +655,13 @@ def read_blocks(port: int = DEFAULT_PORT, timeout: float = 2.0) -> BlockCensus:
         cursors={int(k): int(v) for k, v in payload["cursors"].items()},
         cursors_out_of_range=int(payload["cursorsOutOfRange"]),
         examples=tuple(
-            (int(one["cursor"]), int(one["offset"]), int(one["size"]))
+            Binding(
+                cursor=int(one["cursor"]),
+                offset=int(one["offset"]),
+                size=int(one["size"]),
+                entry={int(k): int(v) for k, v in one.get("entry", {}).items()},
+                readable={int(k): bool(v) for k, v in one.get("readableAtOffset", {}).items()},
+            )
             for one in payload.get("examples", {}).values()
         ),
     )
