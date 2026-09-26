@@ -34,6 +34,8 @@ from wiiuport.paths import find_layout
 from wiiuport.control import (
     DEFAULT_PORT,
     ControlUnavailable,
+    capture_frame,
+    compare_images,
     read_blocks,
     read_callers,
     read_paint,
@@ -151,6 +153,13 @@ def main(argv: list[str] | None = None) -> int:
         "refused to. Very large, so a diagnostic asks for it rather than a run",
     )
     parser.add_argument(
+        "--captures",
+        type=int,
+        default=0,
+        help="how many consecutive frames to capture in the on window and compare "
+        "byte by byte; 0 skips the comparison",
+    )
+    parser.add_argument(
         "--windows",
         type=int,
         default=3,
@@ -182,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     windows: list[Window] = []
     state = None
+    comparison = ""
     with session:
         session.prepare(keys_source=keys, save_source=args.save)
         with session.launch(layout.shell_command(game)) as running:
@@ -233,6 +243,14 @@ def main(argv: list[str] | None = None) -> int:
                     time.sleep(1.0)
                     start = (read_paint(args.port).paints, _logic_calls(args.port))
                     windows.append(_window(name, args.port, args.window, start))
+                    if name == "on" and args.captures >= 2:
+                        # Two paints in a row, compared byte by byte. With the
+                        # logic at 30 and the picture at 60 the two are the same
+                        # world twice, which is the null case a blend has to beat
+                        # -- and the one thing a rate alone cannot show.
+                        first = capture_frame(args.port, 0)
+                        second = capture_frame(args.port, 1)
+                        comparison = compare_images(first, second)
                 state = read_paint(args.port)
             except ControlUnavailable as unavailable:
                 print(f"refused: {unavailable}", file=sys.stderr)
@@ -268,6 +286,8 @@ def main(argv: list[str] | None = None) -> int:
     print(state.render())
     for window in windows:
         print(window.render())
+    if comparison:
+        print(f"  two consecutive paints: {comparison}")
 
     off = [w.paints_per_second for w in windows if not w.installed]
     on = [w.paints_per_second for w in windows if w.installed]
