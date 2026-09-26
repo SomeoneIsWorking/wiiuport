@@ -132,3 +132,27 @@ not as fork changes, even though the capture instruments currently live in the f
 reverse-engineering instruments that answer a question and are removed once answered; they are
 not the product mechanism and must not grow into it.
 
+
+## The title's own paint path
+
+| Responsibility | Owner | Notes |
+|---|---|---|
+| Writing the guest's own memory | `external/cemu/src/Cafe/HW/Espresso/GuestPatching.{h,cpp}` | Fork: `AllocateCode` for guest memory the guest may execute from, out of the loader's trampoline area; `ReadWord`/`WriteWord` carrying a value in the guest's big-endian order, because a word crossing the boundary is a value and not a copy; `WriteBytes` for a caller that already holds that order. A range that is not mapped is refused whole, and what is written is invalidated in the recompiler. Inert with nothing calling it. |
+| Wind Waker HD's display thread painting twice | `src/wiiuport/title/WindWakerPaint.h` | A stand-in for the display frame, written into guest code space and reached by rewriting one word of the display vtable, so the thread paints each tick's world twice and asks for one vblank a flip. The stand-in is the title's own loop body, so the frame is re-read from the title's vtable on each pass. Refuses by name over a vtable slot or a thread entry that is not this title's. Counts paints, reports the display object's own fields, and separates the redirect from the second paint from the interval so a failure says which. |
+| Measuring it | `tools/paint_run.py`, `tools/wiiuport/control.py` | Alternating off/on/off windows in one run, the off windows being the control: the display's paint rate from a probe on the frame, the logic's rate from the caller census on `fapGm_Execute`, which the flip does not move. Fails when the on window did not paint more than its neighbours, when the off windows were too quiet to be a control, or when the logic rate left 28.5-31.5 Hz. |
+
+**Where the boundary is now, honestly.** This codemap's dependency direction says `wiiuport`
+never contains a title's addresses, and `src/wiiuport/title/WindWakerPaint.h` does: the
+display vtable, the frame it holds, the thread entry it returns to, the `gx2` import it calls,
+and every word of the stand-in are Wind Waker HD's, read out of its executable. That is a
+deliberate move and not an accident of placement:
+
+- The mechanism (`GuestPatching`) is title-neutral and belongs here. The title's addresses and
+  payload are the title's, and belong to the title project.
+- They are here because `setsail` has no C++ build of its own: it provisions this runtime and
+  launches it. Giving the title project a compiled payload means it compiles C++, which is a
+  larger change than the mod is, and until then the alternative is a mod that cannot be built
+  or measured at all.
+- So the split is by concept, not by repository: `guest/` and the fork own *how* to change the
+  guest, `title/` owns *what* to change in this title, and the day the title project compiles,
+  `title/` moves across wholesale rather than being reimplemented.

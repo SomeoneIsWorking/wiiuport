@@ -160,3 +160,81 @@ The assembly site above is the Vulkan renderer's. The runtime's interpolation is
 therefore Vulkan-only, which is the backend the first consumer targets. The OpenGL
 renderer keeps its ordinary behaviour and presents at the guest's rate; that is an
 explicit limitation, not an oversight, and it is recorded as such in project state.
+
+## The other mechanism: the title's own paint path
+
+Everything above is the runtime re-issuing a frame it recorded. This is the
+other way to present at the display's rate: change the title's own paint, in
+the title's own memory, and let it draw the frame twice itself.
+
+They are not variations on one idea. The one above has to work out *which
+submitted value is which object's transform*, because nothing in the recorded
+stream says so: it matches draws across ticks by the uniform blocks they source
+and their occurrence among identical draws, finds the view by watching which
+shaders share a matrix that moves like a camera, and guesses which vertex
+buffers belong together for anything the CPU rewrote. A paint the title performs
+itself needs none of that. The node *is* the identity, the node's own draw
+regenerates its attributes, skinning and display list at whatever pose it is
+handed, and the title already names its view matrix (`cWorldViewMatrix`) in its
+own rodata. What the title cannot do is blend, because it has no notion of a
+halfway pose — which is the one thing this mechanism still has to supply, and
+where it has to be careful.
+
+The fork's `GuestPatching` is the seam (`external/cemu/src/Cafe/HW/Espresso/`):
+guest memory the guest may execute from, and words across the boundary in the
+guest's big-endian order. The mod is `src/wiiuport/title/WindWakerPaint.h`, and
+what it does to Wind Waker HD is in the title project's `docs/render-state.md`,
+which owns the addresses.
+
+### What the display thread's shape makes possible
+
+The display thread's entry is eleven instructions that call one vtable slot in
+a loop, and the only thing between two iterations is a wait for the flip. So:
+
+- **The picture's rate is this thread's swap interval and its paint count.**
+  Nothing in the frame function asks the logic thread for anything.
+- **A second paint is not fighting a consumed stream.** The render tree walk
+  reads flags and pointers and writes nothing, so running it again in the same
+  tick is running the same function again.
+- **The frame is reached through an indirect branch**, so a stand-in can go
+  anywhere executable, and re-reading the frame from the title's vtable on each
+  pass means it follows whichever display class the title installed.
+
+### Three ways to get it wrong, all of them measured
+
+The first run of the falsifier killed the title outright, and each of these was
+a separate cause, found by separating the redirect from the second paint from
+the interval rather than by reading the code:
+
+1. **A call in the stand-in destroys the way back.** The game's only call to
+   the frame is what set the link register, and a stand-in that calls the
+   title's own `GX2SetSwapInterval` overwrites it — so the `blr` at the end
+   returns into the middle of the stand-in and repaints for ever. It branches
+   back to the top of the loop instead, and the loop's address is read and
+   checked before anything is written.
+2. **A word is a value, not a copy.** Writing the stand-in as a block of host
+   words byte-copied into the guest put every instruction there with its halves
+   exchanged, and the display thread branched into noise. The order belongs to
+   the seam and nowhere else; the stand-in is written a word at a time through
+   it.
+3. **A branch's displacement is measured from the branch.** An off-by-one-word
+   in the last one sends the thread somewhere else entirely. Both computed
+   words are checked against reach before anything is written, and the branch
+   encoding is unit-tested against a real instruction from the title's image.
+
+4. **The loop's top is not the thread's entry.** The display thread's entry at
+   `0x0274c00c` is a prologue -- `mfspr r0,LR`, a new stack frame, `or r31,r3,r3`
+   -- and the loop proper starts four instructions later at `0x0274c020`. A
+   stand-in that branches back to the entry therefore re-frames the stack on
+   every paint and reads the display pointer out of whatever the frame left in
+   `r3`. Measured: it ran for seven seconds and then faulted at `0x0274c020` with
+   `r31` zero, which is `lwz r12,0x24(r31)` on no display at all. The emulator's
+   own crash dump named both the address and the register; nothing in the
+   stand-in's source did.
+
+The second and third were found by a unit test and the first and fourth by the
+run, which is the order they should have been found in: none of the four is
+visible by reading the payload, and every one of them is silent until the guest
+executes it. The separation is what found them -- one stand-in with a mode for
+the redirect, for the second paint, and for the interval, so that a title which
+died said which of the three it would not take.
