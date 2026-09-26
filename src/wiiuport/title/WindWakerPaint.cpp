@@ -24,12 +24,32 @@ constexpr uint32_t kLoadOne = 0x38600001; // li r3,1          from 0x025f094c
 
 // The most words any stand-in is: the swap-interval call, two loop bodies, and
 // the branch back. The block is reserved once, at startup, for this many.
-constexpr size_t kMaxWords = 2 + 5 * 2 + 1;
+// The most words any stand-in is: the seven of the one-vblank form, one more
+// than the rest need. The block is reserved once, at link time.
+constexpr size_t kMaxWords = 7;
 
 // A relative branch reaches 32 MiB either side of where it stands, which is
 // the fork's own rule for the same instruction.
 constexpr int64_t kRelativeBranchReach = 0x02000000;
 constexpr uint32_t kPrimaryBranch = 18;
+
+// Three words the payload needs that the title spells the same way. Each is
+// lifted from a real instruction in the title's own image, with the field that
+// varies verified against a second instruction rather than derived:
+//   `lis r12,0x1019` is 0x3d801019 and `mtcr r0` is 0x7c0903a6, so with the
+//   register in bits 21-25 the operands below are the same two instructions
+//   with a different register and immediate.
+constexpr uint32_t kLoadUpper = 0x3d800000;   // lis r12, 0x0275
+constexpr uint32_t kOrImmediate = 0x60000000; // ori r12, r12, 0xc034
+constexpr uint32_t kMoveToLink = 0x7c0803a6;  // mtspr LR, r0; r12 is that plus 12 << 21
+
+// The address the display thread's loop returns to: the instruction after its
+// `bctrl`, which is the loop's own branch back to its top. Read and checked at
+// install time, so a stand-in that puts the link register somewhere else cannot
+// send the frame's own return into memory the emulator will not branch back
+// from.
+constexpr uint32_t kLoopReturn = 0x0274c034;
+constexpr uint32_t kLoopTail = 0x48000000 | ((kLoopReturn & 0x03fffffc) - 0x48000000);
 
 std::string hex(uint32_t value) {
     std::array<char, 11> text{};
@@ -120,6 +140,10 @@ std::string_view WindWakerPaint::modeName(Mode mode) {
         return "twiceAtSixty";
     case Mode::IndirectOnce:
         return "indirectOnce";
+    case Mode::IntervalField:
+        return "intervalField";
+    case Mode::OneAtSixty:
+        return "oneAtSixty";
     }
     return "unknown";
 }
@@ -134,6 +158,10 @@ std::optional<WindWakerPaint::Mode> WindWakerPaint::modeFrom(long long number) {
         return Mode::TwiceAtSixty;
     case 4:
         return Mode::IndirectOnce;
+    case 5:
+        return Mode::IntervalField;
+    case 6:
+        return Mode::OneAtSixty;
     default:
         return std::nullopt;
     }
@@ -165,6 +193,35 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
         return all;
     }
 
+    if (mode == Mode::OneAtSixty) {
+        // One paint, at one vblank a flip. Seven words, and each earns its
+        // place:
+        //   li r3,1                  the title's own word, for the setter
+        //   bl  <swap interval>      the game's own API, so the interval is the
+        //                            game's change and not the host's
+        //   lis r12 / ori r12        the loop's return address, which the call
+        //                            above has just overwritten
+        //   mtspr LR,r12             put it back where the loop's call left it
+        //   or  r3,r31,r31           the display, as the loop's call passed it,
+        //                            which the setter has just clobbered
+        //   b   <frame>              and hand the frame to the title's own
+        //                            return, so nothing branches back into the
+        //                            stand-in's memory
+        std::vector<uint32_t> words{kLoadOne, 0, 0, 0, 0, 0, 0};
+        const uint32_t callAt = blockAddress + 4;
+        if (!withinReach(callAt, kSetSwapInterval) ||
+            !withinReach(blockAddress + 24, kDisplayFrame)) {
+            return std::nullopt;
+        }
+        words[1] = branchTo(callAt, kSetSwapInterval, true);
+        words[2] = kLoadUpper | ((kLoopReturn >> 16) & 0xffff);
+        words[3] = kOrImmediate | (12 << 21) | (12 << 21) | (kLoopReturn & 0xffff);
+        words[4] = kMoveToLink | (12 << 21);
+        words[5] = kLoopBody[3];
+        words[6] = branchTo(blockAddress + 24, kDisplayFrame, false);
+        return words;
+    }
+
     // Everything else is a list of direct branches. The frame is reached by
     // `bl` rather than by the loop's own `bctrl`, so it can be reached more
     // than once in an iteration, and each call returns to the next word of the
@@ -181,9 +238,12 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
         steps.push_back({false, 0});               // li r3,1
         steps.push_back({true, kSetSwapInterval}); // the game's own setter
     }
-    const uint32_t paints = mode == Mode::PassThrough ? 1 : 2;
-    for (uint32_t paint = 0; paint < paints; paint++) {
-        steps.push_back({mode == Mode::PassThrough ? false : true, kDisplayFrame});
+    // Two of the modes call the frame and so can paint twice in an iteration.
+    // The rest stand in for it, tail-branching at it once, which is what the
+    // game's own `bctrl` was about to do anyway.
+    const bool calls = mode == Mode::Twice || mode == Mode::TwiceAtSixty;
+    for (uint32_t paint = 0; paint < (calls ? 2u : 1u); paint++) {
+        steps.push_back({calls, kDisplayFrame});
     }
 
     std::vector<uint32_t> words;
@@ -328,6 +388,45 @@ std::string WindWakerPaint::enable(Mode mode) {
         return m_refusal;
     }
     m_original = frame;
+    if (mode == Mode::OneAtSixty) {
+        // The payload puts the link register back where the loop's own call put
+        // it, and hands the frame to that address. So that word has to be what
+        // this document says it is: the loop's branch back to its top. Checked
+        // rather than assumed, because a frame returning somewhere else is a
+        // jump with nothing readable at the far end.
+        uint32_t tail = 0;
+        const uint32_t reachable = branchTo(kLoopReturn, kDisplayLoopTop, false);
+        if (!m_readWord(kLoopReturn, tail) || tail != reachable) {
+            m_refusal = "the loop's return at " + hex(kLoopReturn) + " holds " + hex(tail) +
+                        ", not the branch back to " + hex(kDisplayLoopTop);
+            return m_refusal;
+        }
+    }
+    if (mode == Mode::IntervalField) {
+        // The field the title's own `GX2SetSwapInterval` call was handed, written
+        // to one. Recorded and restored on the way out, because it is the
+        // title's state and not the mod's.
+        uint32_t field = 0;
+        uint32_t display = 0;
+        {
+            std::scoped_lock frameLock(m_frame.mutex);
+            display = m_frame.display;
+        }
+        if (display == 0 || !m_readWord(display + kIntervalOffset, field)) {
+            m_refusal = "the display's interval field at " + hex(kIntervalOffset) +
+                        " would not give up its value";
+            return m_refusal;
+        }
+        m_savedInterval = field;
+        if (!m_writeWord(display + kIntervalOffset, kSwapInterval)) {
+            m_refusal =
+                "the display's interval field at " + hex(kIntervalOffset) + " would not take one";
+            m_savedInterval = 0;
+            return m_refusal;
+        }
+        m_wroteInterval = true;
+        lucent::info("paint", "display interval field {} -> {}", hex(field), hex(kSwapInterval));
+    }
     if (m_block == 0) {
         m_refusal = m_reservationRefusal.empty()
                         ? "no executable guest memory was reserved for the stand-in"
@@ -395,6 +494,20 @@ std::string WindWakerPaint::disableLocked() {
     }
     m_installed = false;
     m_refusal.clear();
+    if (m_wroteInterval) {
+        uint32_t display = 0;
+        {
+            std::scoped_lock frameLock(m_frame.mutex);
+            display = m_frame.display;
+        }
+        if (display != 0 && !m_writeWord(display + kIntervalOffset, m_savedInterval)) {
+            m_refusal =
+                "the display's interval field would not take " + hex(m_savedInterval) + " back";
+            return m_refusal;
+        }
+        m_wroteInterval = false;
+        m_savedInterval = 0;
+    }
     lucent::info("paint", "vtable slot {:#04x} back to the title's own {}", kFrameSlot,
                  hex(m_original));
     m_patched = 0;

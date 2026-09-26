@@ -283,7 +283,27 @@ the interval rather than by reading the code:
    frame. The variant that re-reads it is kept as mode 4, because it is the
    falsifier for this decision -- same block, same words, one instruction pair
    apart, and it does not run.
-5. **The loop's top is not the thread's entry.** The display thread's entry at
+5. **A return into the stand-in's memory does not work.** Painting twice with
+   `bl` at the frame twice and a branch back took the *emulator* down with
+   signal 11 at a host address, on the first frame. The frame returns through
+   `blr`, and the payload's own `bl` had put the link register inside the
+   stand-in -- so the frame returned into the loader's trampoline arena, which is
+   the same class of failure as the freeze above: a register-indirect branch
+   whose target is that memory. Everything the payload does therefore happens on
+   the way *out*: it puts the link register back where the loop's own call left
+   it, and reaches the frame with a plain branch, so the frame's return goes to
+   the title's loop and the stand-in is never returned into.
+
+   **What that costs, and what it buys.** It buys the rate, because the flip is
+   what paces the loop: one vblank a flip is what doubles the picture, and the
+   interval call is the game's own `GX2SetSwapInterval(1)`. It costs the second
+   paint, which cannot be a second call in the same iteration. That paint is
+   still wanted -- it is what will carry the blend -- but it has to come from a
+   *different* place: an iteration that paints the blend and an iteration that
+   paints the tick's own frame, chosen by a counter in the stand-in's own
+   memory, with each iteration still leaving by a branch into the title's code.
+
+6. **The loop's top is not the thread's entry.** The display thread's entry at
    `0x0274c00c` is a prologue -- `mfspr r0,LR`, a new stack frame, `or r31,r3,r3`
    -- and the loop proper starts four instructions later at `0x0274c020`. A
    stand-in that branches back to the entry therefore re-frames the stack on
@@ -293,10 +313,30 @@ the interval rather than by reading the code:
    own crash dump named both the address and the register; nothing in the
    stand-in's source did.
 
-The second and third were found by a unit test and the first, fourth and fifth
-by the run, which is the order they should have been found in: none of the five
-is visible by reading the payload, and every one of them is silent until the
-guest executes it. The separation is what found them -- one stand-in with a mode
-each for the redirect, the second paint, the interval, and the indirect call --
-so that a title which would not take one said which, and so that a freeze could
-be narrowed to a single instruction pair instead of to "the stand-in".
+The second and third were found by a unit test and the rest by runs, which is the
+order they should have been found in: none of the six is visible by reading the
+payload, and every one of them is silent until the guest executes it. The
+separation is what found them -- one stand-in with a mode each for the redirect,
+the second paint, the interval, the indirect call, the field write and the
+one-vblank form -- so that a title which would not take one said which, and so
+that a freeze could be narrowed to a single instruction pair rather than to "the
+stand-in".
+
+### Three words that are lifted rather than derived
+
+The one-vblank payload needs `lis`, `ori` and `mtspr` to put a constant into a
+register, and none of them is in the payload for any other reason. All three are
+lifted from the title's own image, and the field that varies is checked against
+a second instruction instead of being derived:
+
+| word | instruction | where |
+|---|---|---|
+| `0x3d801019` | `lis r12,0x1019` | the title, so `lis r12,X` is `0x3d800000 \| X` |
+| `0x7c0803a6` | `mtspr LR,r0` | the title, so the SPR number is already in it |
+| `0x7d0903a6` | `mtspr CTR,r8` | and `0x7d6903a6` is `mtspr CTR,r11`, so the register is at bits 21-25: they differ by exactly `3 << 21` |
+
+That last pair is the check. A field position derived from one instruction is a
+guess; derived from two that differ only in that field it is a fact about this
+title's encoding, and `mtspr LR,r12` is then `0x7c0803a6 + (12 << 21)`. It is
+`0x7d8003a6` and not `0x7d8803a6` that a missing SPR field produces, and a
+unit test pins the word that works.

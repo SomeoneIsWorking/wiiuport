@@ -127,6 +127,23 @@ class WindWakerPaint {
         // against `b`. A payload that re-derives the frame every pass is a
         // nicety; one that paints nothing is not, and this is what says so.
         IndirectOnce = 4,
+        // Not a paint count but a check: the title's own record of what it asked
+        // for at init, at `display+0x50`, set to one, and nothing else changed.
+        // That field is passed to `GX2SetSwapInterval` once during initialisation
+        // and is read afterwards only to decide whether to wait for the flip, so
+        // writing it may turn out to change nothing at all -- in which case the
+        // rate follows from the call and not from the field, which is worth
+        // knowing before anyone builds a mechanism on the field. A run of this
+        // mode answers that, and a run of TwiceAtSixty answers the other half.
+        IntervalField = 5,
+        // One paint, at one vblank a flip: the game's own `GX2SetSwapInterval`
+        // called with one ahead of it, and the frame reached by a plain branch
+        // so that its return goes to the title's loop rather than back into the
+        // stand-in's memory. This is the rate the mechanism is for, and it is a
+        // different claim from painting twice: the flip is what paces the loop,
+        // so one vblank a flip is what doubles the picture, and the second
+        // paint is what will carry the blend.
+        OneAtSixty = 6,
     };
     // The name a refusal or a report uses for a mode.
     static std::string_view modeName(Mode mode);
@@ -231,6 +248,10 @@ class WindWakerPaint {
     // The word actually written, which is the live vtable's slot and not
     // necessarily the one out of the image.
     uint32_t m_patched = 0;
+    // The display's own interval field, when this mod changed it, and what it
+    // was: the title's state, put back on the way out.
+    uint32_t m_savedInterval = 0;
+    bool m_wroteInterval = false;
     std::string m_reservationRefusal;
     bool m_installed = false;
     Mode m_mode{Mode::TwiceAtSixty};
