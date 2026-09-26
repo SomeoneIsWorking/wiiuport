@@ -16,20 +16,27 @@
 namespace wiiuport::control {
 namespace {
 
+// The channel's own route list, in one place, because a list that is written
+// twice is a list that can disagree with itself: a route the refusal advertises
+// and no method reaches is a route that looks supported until a run needs it.
+// tests/cxx/control_tests.cpp asks every entry here for itself and fails on any
+// that comes back with the unknown-route refusal.
+const char* const kRoutes =
+    "GET /counters, GET /transforms, GET /capture, "
+    "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
+    "GET /recordings, GET /objects, GET /draws, GET /vertices, GET /memory, GET /callers, "
+    "GET /paint, GET /blocks, GET /logic, POST "
+    "/replay, POST /capture, "
+    "POST /present, "
+    "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, "
+    "POST /shadowcheck, "
+    "POST /neighbourcheck, POST /blends, POST /pacing, "
+    "POST /objects, POST /draws, POST /recordings, POST /paint, POST /logic, POST /input "
+    "and POST /quit";
+
 lucent::http::Response notFound() {
     return lucent::http::Response::text(
-        404, "Not Found",
-        "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
-        "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
-        "GET /recordings, GET /objects, GET /draws, GET /vertices, GET /memory, GET /callers, "
-        "GET /paint, GET /blocks, GET /logic, POST "
-        "/replay, POST /capture, "
-        "POST /present, "
-        "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, "
-        "POST /shadowcheck, "
-        "POST /neighbourcheck, POST /blends, POST /pacing, "
-        "POST /objects, POST /draws, POST /recordings, POST /paint, POST /logic, POST /input "
-        "and POST /quit.\n");
+        404, "Not Found", std::string("unknown route. This channel serves ") + kRoutes + ".\n");
 }
 
 // The one-shot routes each own a frame boundary, and so does continuous
@@ -761,384 +768,7 @@ bool ControlChannel::start(uint16_t port) {
     options.listen_scope = lucent::http::ListenScope::Loopback;
     m_server = std::make_unique<lucent::http::Server>(
         options, [this](const lucent::http::Request& request) -> lucent::http::Response {
-            // Arming is a deliberate one-shot: the next frame to end is
-            // replayed, and nothing after it. A replay that repeated every
-            // frame would make a crash impossible to attribute.
-            if (request.method == "POST" && request.path() == "/paint") {
-                if (!requestedFlag(std::string(request.query()), "on", true)) {
-                    std::string refusal = m_paint.disable();
-                    if (!refusal.empty()) {
-                        return lucent::http::Response::text(409, "Conflict", refusal + "\n");
-                    }
-                    return lucent::http::Response::json(200, "OK", m_paint.json());
-                }
-                const long long asked = requestedCount(std::string(request.query()), "mode", 3);
-                const std::optional<title::WindWakerPaint::Mode> mode =
-                    title::WindWakerPaint::modeFrom(asked);
-                if (!mode.has_value()) {
-                    return lucent::http::Response::text(
-                        400, "Bad Request",
-                        "mode " + std::to_string(asked) + " is not 1 (paint once), "
-                        "2 (paint twice) or 3 (paint twice at one vblank a flip)\n");
-                }
-                std::string refusal = m_paint.enable(*mode);
-                if (!refusal.empty()) {
-                    return lucent::http::Response::text(409, "Conflict", refusal + "\n");
-                }
-                return lucent::http::Response::json(200, "OK", m_paint.json());
-            }
-            if (request.method == "POST" && request.path() == "/continuous") {
-                bool on = requestedFlag(std::string(request.query()), "on", true);
-                m_continuous.setEnabled(on);
-                return lucent::http::Response::json(200, "OK", interpolationJson());
-            }
-            // Which of the per-object blends the in-between frame draws, the
-            // camera's always: objects=0 draws every object as the title did
-            // (and so every vertex), vertices=0 only the vertices, maps=0 only
-            // the draws into the light's map. A
-            // maintainer's discriminator, not a setting.
-            // vertexShaderOff=<16 hex digits>, repeated for several, draws
-            // the meshes those vertex shaders read as the title did, to name
-            // the draws a defect is; objectShaderOff does the same for the
-            // objects those shaders draw.
-            if (request.method == "POST" && request.path() == "/blends") {
-                std::string query(request.query());
-                std::vector<uint64_t> excluded;
-                if (!requestedHashes(query, "vertexShaderOff", excluded)) {
-                    return lucent::http::Response::text(
-                        400, "Bad Request",
-                        "vertexShaderOff must be a vertex shader's base hash, 16 hex digits.\n");
-                }
-                std::vector<uint64_t> objectExcluded;
-                if (!requestedHashes(query, "objectShaderOff", objectExcluded)) {
-                    return lucent::http::Response::text(
-                        400, "Bad Request",
-                        "objectShaderOff must be a shader's base hash, 16 hex digits.\n");
-                }
-                m_objects.exclude(std::move(objectExcluded));
-                m_objects.setPlanning(m_continuous.enabled() &&
-                                      requestedFlag(query, "objects", true));
-                m_objects.setMapBlending(requestedFlag(query, "maps", true));
-                m_objects.setPixelBlending(requestedFlag(query, "pixels", true));
-                m_vertices.setBlending(requestedFlag(query, "vertices", true));
-                m_vertices.exclude(std::move(excluded));
-                return lucent::http::Response::json(200, "OK", interpolationJson());
-            }
-            // Holds the title between frames: pause=1 holds at the next
-            // frame's end, step=N lets N more end and answers once it holds
-            // again, resume=1 lets it run.
-            if (request.method == "POST" && request.path() == "/gate") {
-                std::string query(request.query());
-                if (requestedFlag(query, "resume", false)) {
-                    m_gate.resume();
-                    return lucent::http::Response::json(200, "OK", gateJson(m_gate.status()));
-                }
-                size_t steps = requestedCount(query, "step", 0);
-                if (steps > 0) {
-                    m_gate.step(steps);
-                } else if (requestedFlag(query, "pause", false)) {
-                    m_gate.pause();
-                } else {
-                    return lucent::http::Response::text(
-                        400, "Bad Request",
-                        "name pause=1, step=N (a count above zero) or resume=1.\n");
-                }
-                if (!m_gate.awaitHeld(kGateHoldTimeout)) {
-                    return lucent::http::Response::json(504, "Gateway Timeout",
-                                                        gateJson(m_gate.status()));
-                }
-                return lucent::http::Response::json(200, "OK", gateJson(m_gate.status()));
-            }
-            // Whether an in-between frame changes guest memory, measured on
-            // the frame the gate holds: rounds=N in-between and control
-            // windows, alternating.
-            if (request.method == "POST" && request.path() == "/shadowcheck") {
-                size_t rounds = requestedCount(std::string(request.query()), "rounds", 4);
-                interp::ShadowCheck::Result result;
-                bool ran = m_gate.runWhileHeld([&](const frame::FrameRecording& held) {
-                    result = m_shadowCheck.run(held, static_cast<uint32_t>(rounds));
-                });
-                if (!ran) {
-                    return lucent::http::Response::text(
-                        409, "Conflict",
-                        "the check runs on a held frame. POST /gate?pause=1 first.\n");
-                }
-                return lucent::http::Response::json(200, "OK", interp::ShadowCheck::toJson(result));
-            }
-            // Frame pacing measured from here on, so a walk is not averaged
-            // with the boot and menus before it.
-            if (request.method == "POST" && request.path() == "/pacing") {
-                m_pacing.restart();
-                m_scanOut.restart();
-                return lucent::http::Response::json(200, "OK", interpolationJson());
-            }
-            // The guest's frame captured before and after the next in-between
-            // frame is drawn over it and taken back out, into capture slots 0
-            // and 1; with inbetween=1, slot 1 is the in-between frame instead,
-            // which is the comparison's control.
-            if (request.method == "POST" && request.path() == "/restorecheck") {
-                bool inBetween = requestedFlag(std::string(request.query()), "inbetween", false);
-                if (!m_restoreCheck.arm(inBetween ? interp::RestoreCheck::Against::InBetween
-                                                  : interp::RestoreCheck::Against::Restored)) {
-                    return lucent::http::Response::text(
-                        409, "Conflict", "a restore check is already waiting for its tick.\n");
-                }
-                return lucent::http::Response::json(200, "OK", interpolationJson());
-            }
-            // The title's frame of one interpolated tick, and the next
-            // tick's in-between frame and title's frame, into capture slots
-            // 2, 3 and 4.
-            if (request.method == "POST" && request.path() == "/neighbourcheck") {
-                if (!m_neighbourCheck.arm()) {
-                    return lucent::http::Response::text(
-                        409, "Conflict", "a neighbour check is already waiting for its ticks.\n");
-                }
-                return lucent::http::Response::json(200, "OK", interpolationJson());
-            }
-            // A census of the next planned frames' objects by shader; GET
-            // /objects reads it back once they are all planned.
-            if (request.method == "POST" && request.path() == "/objects") {
-                size_t frames = requestedCount(std::string(request.query()), "frames", 1);
-                if (frames == 0 || frames > interp::ObjectBlend::kMaxCensusFrames) {
-                    return lucent::http::Response::text(
-                        400, "Bad Request",
-                        "frames must be a count from 1 to " +
-                            std::to_string(interp::ObjectBlend::kMaxCensusFrames) + ".\n");
-                }
-                m_objects.requestCensus(static_cast<uint32_t>(frames));
-                return lucent::http::Response::json(
-                    200, "OK", "{\"requested\":true,\"frames\":" + std::to_string(frames) + "}\n");
-            }
-            // A census of the next frames' draws that read uniforms, by
-            // whether their vertex bytes change; GET /draws reads it back.
-            if (request.method == "POST" && request.path() == "/draws") {
-                size_t frames = requestedCount(std::string(request.query()), "frames", 1);
-                if (frames == 0 || frames > frame::VertexChanges::kMaxCensusFrames) {
-                    return lucent::http::Response::text(
-                        400, "Bad Request",
-                        "frames must be a count from 1 to " +
-                            std::to_string(frame::VertexChanges::kMaxCensusFrames) + ".\n");
-                }
-                m_vertexChanges.requestCensus(static_cast<uint32_t>(frames));
-                return lucent::http::Response::json(200, "OK", drawsJson());
-            }
-            // Several consecutive frames' uniform assemblies, filled at the
-            // frame boundaries that follow; GET /recordings reads them back.
-            if (request.method == "POST" && request.path() == "/recordings") {
-                size_t frames = requestedCount(std::string(request.query()), "frames", 2);
-                if (!m_snapshot.arm(frames)) {
-                    return lucent::http::Response::text(
-                        409, "Conflict",
-                        "a snapshot is already filling, or frames is zero or above " +
-                            std::to_string(frame::RecordingSnapshot::kMaxFrames) + ".\n");
-                }
-                return lucent::http::Response::json(
-                    200, "OK",
-                    "{\"armed\":true,\"frames\":" + std::to_string(frames) +
-                        ",\"snapshotsCompleted\":" +
-                        std::to_string(m_snapshot.snapshotsCompleted()) + "}\n");
-            }
-            bool oneShot = request.method == "POST" &&
-                           (request.path() == "/replay" || request.path() == "/nulldiff" ||
-                            request.path() == "/interpolate");
-            if (oneShot && m_continuous.enabled()) {
-                return continuousOwnsFrames();
-            }
-            if (request.method == "POST" && request.path() == "/replay") {
-                m_replayer.armOnce();
-                return lucent::http::Response::json(
-                    200, "OK",
-                    "{\"armed\":true,\"replaysRun\":" + std::to_string(m_replayer.replaysRun()) +
-                        "}\n");
-            }
-            // One frame captured twice, as the title drew it and as a replay
-            // redrew it. The two halves have to be armed around the same
-            // frame boundary, which only the scheduler can do.
-            if (request.method == "POST" && request.path() == "/nulldiff") {
-                bool redraw = requestedFlag(std::string(request.query()), "redraw", true);
-                if (!m_scheduler.armNullDiff(redraw)) {
-                    return lucent::http::Response::text(
-                        409, "Conflict",
-                        "a replay or a null diff is already armed, and taking it over would "
-                        "compare a frame against one somebody else asked for.\n");
-                }
-                return lucent::http::Response::json(
-                    200, "OK",
-                    "{\"armed\":true,\"redraw\":" + std::string(redraw ? "true" : "false") +
-                        ",\"nullDiffsCompleted\":" +
-                        std::to_string(m_scheduler.nullDiffsCompleted()) + "}");
-            }
-
-            // One frame between two the title drew: the last frame's
-            // geometry, replayed with the view blended between where the
-            // camera stood in each. Captured as a null diff is, so the pair
-            // that must differ is the title's frame and this one.
-            if (request.method == "POST" && request.path() == "/interpolate") {
-                float t = requestedBlend(std::string(request.query()), 0.5f);
-                if (!m_interpolator.armOnce(t)) {
-                    return lucent::http::Response::text(409, "Conflict",
-                                                        m_interpolator.lastRefusal() + "\n");
-                }
-                return lucent::http::Response::json(
-                    200, "OK",
-                    "{\"armed\":true,\"t\":" + floatText(t) + ",\"slots\":" +
-                        std::to_string(m_interpolator.substitution().slotCount()) + "}\n");
-            }
-
-            // A present the runtime owns, so a replay's output can be seen
-            // instead of being overdrawn by the guest's next frame. Refused
-            // when the title has not presented yet, because the arguments
-            // are observed and never invented.
-            if (request.method == "POST" && request.path() == "/present") {
-                bool presented = m_presenter.presentNow();
-                if (!presented && !m_presenter.hasObservedPresent()) {
-                    return lucent::http::Response::text(
-                        409, "Conflict",
-                        "the title has not presented a frame yet, so there are no present "
-                        "arguments to reuse. Reach gameplay first.\n");
-                }
-                return lucent::http::Response::json(
-                    200, "OK",
-                    "{\"presented\":" + std::string(presented ? "true" : "false") +
-                        ",\"presentsSubmitted\":" +
-                        std::to_string(m_presenter.presentsSubmitted()) +
-                        ",\"presentsRefusedBySubmit\":" +
-                        std::to_string(m_presenter.presentsRefusedBySubmit()) + "}");
-            }
-            if (request.method == "POST" && request.path() == "/capture") {
-                auto armed = m_capture.armOnce(requestedSlot(std::string(request.query())));
-                return lucent::http::Response::json(
-                    armed ? 200 : 503, armed ? "OK" : "Service Unavailable",
-                    std::string("{\"armed\":") + (armed ? "true" : "false") +
-                        ",\"imagesReceived\":" + std::to_string(m_capture.imagesReceived()) +
-                        "}\n");
-            }
-            if (request.method == "POST" && request.path() == "/quit") {
-                auto accepted = false;
-                auto body = requestHostStop(accepted);
-                return lucent::http::Response::json(accepted ? 202 : 409,
-                                                    accepted ? "Accepted" : "Conflict", body);
-            }
-            if (request.method == "POST" && request.path() == "/input") {
-                auto accepted = false;
-                auto body = applyInput(std::string(request.query()), accepted);
-                return lucent::http::Response::json(accepted ? 200 : 400,
-                                                    accepted ? "OK" : "Bad Request", body);
-            }
-            if (request.method != "GET") {
-                return notFound();
-            }
-            if (request.path() == "/controllers") {
-                return lucent::http::Response::json(200, "OK", controllersJson());
-            }
-            if (request.path() == "/setup") {
-                return lucent::http::Response::json(200, "OK", setupJson());
-            }
-            if (request.path() == "/counters") {
-                return lucent::http::Response::json(200, "OK", countersJson());
-            }
-            if (request.path() == "/capture") {
-                size_t slot = requestedSlot(std::string(request.query()));
-                auto image = m_capture.lastImage(slot);
-                if (image.empty()) {
-                    // An empty body would read as a black frame. Refusing
-                    // says which of the two actually happened.
-                    return lucent::http::Response::text(
-                        404, "Not Found",
-                        "no frame has been captured into slot " + std::to_string(slot) +
-                            " yet. Arm one with POST /capture and let the title present at "
-                            "least once.\n");
-                }
-                return lucent::http::Response::binary(200, "OK", "application/octet-stream",
-                                                      m_capture.lastImageFramed(slot));
-            }
-            if (request.path() == "/draws") {
-                return lucent::http::Response::json(200, "OK", drawsJson());
-            }
-            if (request.path() == "/gate") {
-                return lucent::http::Response::json(200, "OK", gateJson(m_gate.status()));
-            }
-            if (request.path() == "/frames") {
-                return lucent::http::Response::json(200, "OK", framesJson());
-            }
-            if (request.path() == "/interpolation") {
-                return lucent::http::Response::json(200, "OK", interpolationJson());
-            }
-            if (request.path() == "/vertices") {
-                return lucent::http::Response::json(200, "OK", vertexShadersJson());
-            }
-            if (request.path() == "/objects") {
-                std::optional<interp::ObjectCensus> census = m_objects.census();
-                if (!census) {
-                    return lucent::http::Response::text(
-                        404, "Not Found",
-                        "no census has been taken yet. Request one with POST /objects while "
-                        "continuous interpolation is planning.\n");
-                }
-                return lucent::http::Response::json(200, "OK", censusJson(*census));
-            }
-            if (request.path() == "/recordings") {
-                std::string framed = m_snapshot.framed();
-                if (framed.empty()) {
-                    return lucent::http::Response::text(
-                        404, "Not Found",
-                        "no snapshot has completed yet. Arm one with POST /recordings?frames=K "
-                        "and let K frames end.\n");
-                }
-                return lucent::http::Response::binary(200, "OK", "application/octet-stream",
-                                                      framed);
-            }
-            if (request.path() == "/substitution") {
-                return lucent::http::Response::json(200, "OK", substitutionJson());
-            }
-            if (request.path() == "/callers") {
-                return lucent::http::Response::json(200, "OK", m_callers.json());
-            }
-            if (request.method == "GET" && request.path() == "/paint") {
-                return lucent::http::Response::json(200, "OK", m_paint.json());
-            }
-            if (request.path() == "/blocks") {
-                return lucent::http::Response::json(200, "OK", m_blocks.json());
-            }
-            // The logic gate is `/logic` and not `/gate`: the frame gate has held
-            // that route since it existed, and two things meaning "hold" by the
-            // same name is how one of them ends up answering for the other.
-            if (request.method == "GET" && request.path() == "/logic") {
-                return lucent::http::Response::json(200, "OK", m_logic.json());
-            }
-            if (request.method == "POST" && request.path() == "/logic") {
-                if (!requestedFlag(std::string(request.query()), "on", true)) {
-                    const std::string refusal = m_logic.disable();
-                    if (!refusal.empty()) {
-                        return lucent::http::Response::text(409, "Conflict", refusal + "\n");
-                    }
-                    return lucent::http::Response::json(200, "OK", m_logic.json());
-                }
-                const std::string refusal = m_logic.enable();
-                if (!refusal.empty()) {
-                    return lucent::http::Response::text(409, "Conflict", refusal + "\n");
-                }
-                return lucent::http::Response::json(200, "OK", m_logic.json());
-            }
-            if (request.path() == "/memory") {
-                std::string refusal;
-                auto wanted = GuestMemoryRead::parse(request.query(), refusal);
-                if (!wanted.has_value()) {
-                    return lucent::http::Response::text(400, "Bad Request", refusal);
-                }
-                auto bytes = GuestMemoryRead::read(*wanted, m_guestBytes);
-                if (!bytes.has_value()) {
-                    return lucent::http::Response::text(
-                        404, "Not Found", "some of that range is not guest memory.\n");
-                }
-                return lucent::http::Response::binary(200, "OK", "application/octet-stream",
-                                                      *bytes);
-            }
-            if (request.path() == "/transforms") {
-                return lucent::http::Response::json(200, "OK",
-                                                    transformsJson(kDefaultTransformLimit));
-            }
-            return notFound();
+            return dispatch(request);
         });
     if (!m_server->start()) {
         lucent::error("control",
@@ -1150,6 +780,384 @@ bool ControlChannel::start(uint16_t port) {
     }
     lucent::info("control", "listening on http://127.0.0.1:{}/counters", m_server->port());
     return true;
+}
+
+std::string_view ControlChannel::routeList() {
+    return kRoutes;
+}
+
+// The routing table itself, as a member rather than a lambda inside start().
+// A route table a test cannot ask is a route table whose mistakes only surface
+// in a run that needs the route -- nine minutes in, with the title pressed
+// through a menu. Here it is asked about every route it advertises, by name.
+lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& request) {
+    // Arming is a deliberate one-shot: the next frame to end is
+    // replayed, and nothing after it. A replay that repeated every
+    // frame would make a crash impossible to attribute.
+    if (request.method == "POST" && request.path() == "/paint") {
+        if (!requestedFlag(std::string(request.query()), "on", true)) {
+            std::string refusal = m_paint.disable();
+            if (!refusal.empty()) {
+                return lucent::http::Response::text(409, "Conflict", refusal + "\n");
+            }
+            return lucent::http::Response::json(200, "OK", m_paint.json());
+        }
+        const long long asked = requestedCount(std::string(request.query()), "mode", 3);
+        const std::optional<title::WindWakerPaint::Mode> mode =
+            title::WindWakerPaint::modeFrom(asked);
+        if (!mode.has_value()) {
+            return lucent::http::Response::text(
+                400, "Bad Request",
+                "mode " + std::to_string(asked) +
+                    " is not 1 (paint once), "
+                    "2 (paint twice) or 3 (paint twice at one vblank a flip)\n");
+        }
+        std::string refusal = m_paint.enable(*mode);
+        if (!refusal.empty()) {
+            return lucent::http::Response::text(409, "Conflict", refusal + "\n");
+        }
+        return lucent::http::Response::json(200, "OK", m_paint.json());
+    }
+    if (request.method == "POST" && request.path() == "/continuous") {
+        bool on = requestedFlag(std::string(request.query()), "on", true);
+        m_continuous.setEnabled(on);
+        return lucent::http::Response::json(200, "OK", interpolationJson());
+    }
+    // Which of the per-object blends the in-between frame draws, the
+    // camera's always: objects=0 draws every object as the title did
+    // (and so every vertex), vertices=0 only the vertices, maps=0 only
+    // the draws into the light's map. A
+    // maintainer's discriminator, not a setting.
+    // vertexShaderOff=<16 hex digits>, repeated for several, draws
+    // the meshes those vertex shaders read as the title did, to name
+    // the draws a defect is; objectShaderOff does the same for the
+    // objects those shaders draw.
+    if (request.method == "POST" && request.path() == "/blends") {
+        std::string query(request.query());
+        std::vector<uint64_t> excluded;
+        if (!requestedHashes(query, "vertexShaderOff", excluded)) {
+            return lucent::http::Response::text(
+                400, "Bad Request",
+                "vertexShaderOff must be a vertex shader's base hash, 16 hex digits.\n");
+        }
+        std::vector<uint64_t> objectExcluded;
+        if (!requestedHashes(query, "objectShaderOff", objectExcluded)) {
+            return lucent::http::Response::text(
+                400, "Bad Request",
+                "objectShaderOff must be a shader's base hash, 16 hex digits.\n");
+        }
+        m_objects.exclude(std::move(objectExcluded));
+        m_objects.setPlanning(m_continuous.enabled() && requestedFlag(query, "objects", true));
+        m_objects.setMapBlending(requestedFlag(query, "maps", true));
+        m_objects.setPixelBlending(requestedFlag(query, "pixels", true));
+        m_vertices.setBlending(requestedFlag(query, "vertices", true));
+        m_vertices.exclude(std::move(excluded));
+        return lucent::http::Response::json(200, "OK", interpolationJson());
+    }
+    // Holds the title between frames: pause=1 holds at the next
+    // frame's end, step=N lets N more end and answers once it holds
+    // again, resume=1 lets it run.
+    if (request.method == "POST" && request.path() == "/gate") {
+        std::string query(request.query());
+        if (requestedFlag(query, "resume", false)) {
+            m_gate.resume();
+            return lucent::http::Response::json(200, "OK", gateJson(m_gate.status()));
+        }
+        size_t steps = requestedCount(query, "step", 0);
+        if (steps > 0) {
+            m_gate.step(steps);
+        } else if (requestedFlag(query, "pause", false)) {
+            m_gate.pause();
+        } else {
+            return lucent::http::Response::text(
+                400, "Bad Request", "name pause=1, step=N (a count above zero) or resume=1.\n");
+        }
+        if (!m_gate.awaitHeld(kGateHoldTimeout)) {
+            return lucent::http::Response::json(504, "Gateway Timeout", gateJson(m_gate.status()));
+        }
+        return lucent::http::Response::json(200, "OK", gateJson(m_gate.status()));
+    }
+    // The logic gate, beside the frame gate it shares a name with and
+    // does not: `/gate` holds the title between frames, `/logic` counts
+    // its ticks. It lives above the `method != "GET"` refusal below,
+    // because a POST handler under that refusal is a route the refusal
+    // itself advertises and no request can reach.
+    if (request.method == "POST" && request.path() == "/logic") {
+        const bool wanted = requestedFlag(std::string(request.query()), "on", true);
+        const std::string refusal = wanted ? m_logic.enable() : m_logic.disable();
+        if (!refusal.empty()) {
+            return lucent::http::Response::text(409, "Conflict", refusal + "\n");
+        }
+        return lucent::http::Response::json(200, "OK", m_logic.json());
+    }
+    // Whether an in-between frame changes guest memory, measured on
+    // the frame the gate holds: rounds=N in-between and control
+    // windows, alternating.
+    if (request.method == "POST" && request.path() == "/shadowcheck") {
+        size_t rounds = requestedCount(std::string(request.query()), "rounds", 4);
+        interp::ShadowCheck::Result result;
+        bool ran = m_gate.runWhileHeld([&](const frame::FrameRecording& held) {
+            result = m_shadowCheck.run(held, static_cast<uint32_t>(rounds));
+        });
+        if (!ran) {
+            return lucent::http::Response::text(
+                409, "Conflict", "the check runs on a held frame. POST /gate?pause=1 first.\n");
+        }
+        return lucent::http::Response::json(200, "OK", interp::ShadowCheck::toJson(result));
+    }
+    // Frame pacing measured from here on, so a walk is not averaged
+    // with the boot and menus before it.
+    if (request.method == "POST" && request.path() == "/pacing") {
+        m_pacing.restart();
+        m_scanOut.restart();
+        return lucent::http::Response::json(200, "OK", interpolationJson());
+    }
+    // The guest's frame captured before and after the next in-between
+    // frame is drawn over it and taken back out, into capture slots 0
+    // and 1; with inbetween=1, slot 1 is the in-between frame instead,
+    // which is the comparison's control.
+    if (request.method == "POST" && request.path() == "/restorecheck") {
+        bool inBetween = requestedFlag(std::string(request.query()), "inbetween", false);
+        if (!m_restoreCheck.arm(inBetween ? interp::RestoreCheck::Against::InBetween
+                                          : interp::RestoreCheck::Against::Restored)) {
+            return lucent::http::Response::text(
+                409, "Conflict", "a restore check is already waiting for its tick.\n");
+        }
+        return lucent::http::Response::json(200, "OK", interpolationJson());
+    }
+    // The title's frame of one interpolated tick, and the next
+    // tick's in-between frame and title's frame, into capture slots
+    // 2, 3 and 4.
+    if (request.method == "POST" && request.path() == "/neighbourcheck") {
+        if (!m_neighbourCheck.arm()) {
+            return lucent::http::Response::text(
+                409, "Conflict", "a neighbour check is already waiting for its ticks.\n");
+        }
+        return lucent::http::Response::json(200, "OK", interpolationJson());
+    }
+    // A census of the next planned frames' objects by shader; GET
+    // /objects reads it back once they are all planned.
+    if (request.method == "POST" && request.path() == "/objects") {
+        size_t frames = requestedCount(std::string(request.query()), "frames", 1);
+        if (frames == 0 || frames > interp::ObjectBlend::kMaxCensusFrames) {
+            return lucent::http::Response::text(
+                400, "Bad Request",
+                "frames must be a count from 1 to " +
+                    std::to_string(interp::ObjectBlend::kMaxCensusFrames) + ".\n");
+        }
+        m_objects.requestCensus(static_cast<uint32_t>(frames));
+        return lucent::http::Response::json(
+            200, "OK", "{\"requested\":true,\"frames\":" + std::to_string(frames) + "}\n");
+    }
+    // A census of the next frames' draws that read uniforms, by
+    // whether their vertex bytes change; GET /draws reads it back.
+    if (request.method == "POST" && request.path() == "/draws") {
+        size_t frames = requestedCount(std::string(request.query()), "frames", 1);
+        if (frames == 0 || frames > frame::VertexChanges::kMaxCensusFrames) {
+            return lucent::http::Response::text(
+                400, "Bad Request",
+                "frames must be a count from 1 to " +
+                    std::to_string(frame::VertexChanges::kMaxCensusFrames) + ".\n");
+        }
+        m_vertexChanges.requestCensus(static_cast<uint32_t>(frames));
+        return lucent::http::Response::json(200, "OK", drawsJson());
+    }
+    // Several consecutive frames' uniform assemblies, filled at the
+    // frame boundaries that follow; GET /recordings reads them back.
+    if (request.method == "POST" && request.path() == "/recordings") {
+        size_t frames = requestedCount(std::string(request.query()), "frames", 2);
+        if (!m_snapshot.arm(frames)) {
+            return lucent::http::Response::text(
+                409, "Conflict",
+                "a snapshot is already filling, or frames is zero or above " +
+                    std::to_string(frame::RecordingSnapshot::kMaxFrames) + ".\n");
+        }
+        return lucent::http::Response::json(
+            200, "OK",
+            "{\"armed\":true,\"frames\":" + std::to_string(frames) + ",\"snapshotsCompleted\":" +
+                std::to_string(m_snapshot.snapshotsCompleted()) + "}\n");
+    }
+    bool oneShot =
+        request.method == "POST" && (request.path() == "/replay" || request.path() == "/nulldiff" ||
+                                     request.path() == "/interpolate");
+    if (oneShot && m_continuous.enabled()) {
+        return continuousOwnsFrames();
+    }
+    if (request.method == "POST" && request.path() == "/replay") {
+        m_replayer.armOnce();
+        return lucent::http::Response::json(
+            200, "OK",
+            "{\"armed\":true,\"replaysRun\":" + std::to_string(m_replayer.replaysRun()) + "}\n");
+    }
+    // One frame captured twice, as the title drew it and as a replay
+    // redrew it. The two halves have to be armed around the same
+    // frame boundary, which only the scheduler can do.
+    if (request.method == "POST" && request.path() == "/nulldiff") {
+        bool redraw = requestedFlag(std::string(request.query()), "redraw", true);
+        if (!m_scheduler.armNullDiff(redraw)) {
+            return lucent::http::Response::text(
+                409, "Conflict",
+                "a replay or a null diff is already armed, and taking it over would "
+                "compare a frame against one somebody else asked for.\n");
+        }
+        return lucent::http::Response::json(
+            200, "OK",
+            "{\"armed\":true,\"redraw\":" + std::string(redraw ? "true" : "false") +
+                ",\"nullDiffsCompleted\":" + std::to_string(m_scheduler.nullDiffsCompleted()) +
+                "}");
+    }
+
+    // One frame between two the title drew: the last frame's
+    // geometry, replayed with the view blended between where the
+    // camera stood in each. Captured as a null diff is, so the pair
+    // that must differ is the title's frame and this one.
+    if (request.method == "POST" && request.path() == "/interpolate") {
+        float t = requestedBlend(std::string(request.query()), 0.5f);
+        if (!m_interpolator.armOnce(t)) {
+            return lucent::http::Response::text(409, "Conflict",
+                                                m_interpolator.lastRefusal() + "\n");
+        }
+        return lucent::http::Response::json(
+            200, "OK",
+            "{\"armed\":true,\"t\":" + floatText(t) +
+                ",\"slots\":" + std::to_string(m_interpolator.substitution().slotCount()) + "}\n");
+    }
+
+    // A present the runtime owns, so a replay's output can be seen
+    // instead of being overdrawn by the guest's next frame. Refused
+    // when the title has not presented yet, because the arguments
+    // are observed and never invented.
+    if (request.method == "POST" && request.path() == "/present") {
+        bool presented = m_presenter.presentNow();
+        if (!presented && !m_presenter.hasObservedPresent()) {
+            return lucent::http::Response::text(
+                409, "Conflict",
+                "the title has not presented a frame yet, so there are no present "
+                "arguments to reuse. Reach gameplay first.\n");
+        }
+        return lucent::http::Response::json(
+            200, "OK",
+            "{\"presented\":" + std::string(presented ? "true" : "false") +
+                ",\"presentsSubmitted\":" + std::to_string(m_presenter.presentsSubmitted()) +
+                ",\"presentsRefusedBySubmit\":" +
+                std::to_string(m_presenter.presentsRefusedBySubmit()) + "}");
+    }
+    if (request.method == "POST" && request.path() == "/capture") {
+        auto armed = m_capture.armOnce(requestedSlot(std::string(request.query())));
+        return lucent::http::Response::json(
+            armed ? 200 : 503, armed ? "OK" : "Service Unavailable",
+            std::string("{\"armed\":") + (armed ? "true" : "false") +
+                ",\"imagesReceived\":" + std::to_string(m_capture.imagesReceived()) + "}\n");
+    }
+    if (request.method == "POST" && request.path() == "/quit") {
+        auto accepted = false;
+        auto body = requestHostStop(accepted);
+        return lucent::http::Response::json(accepted ? 202 : 409,
+                                            accepted ? "Accepted" : "Conflict", body);
+    }
+    if (request.method == "POST" && request.path() == "/input") {
+        auto accepted = false;
+        auto body = applyInput(std::string(request.query()), accepted);
+        return lucent::http::Response::json(accepted ? 200 : 400, accepted ? "OK" : "Bad Request",
+                                            body);
+    }
+    if (request.method != "GET") {
+        return notFound();
+    }
+    if (request.path() == "/controllers") {
+        return lucent::http::Response::json(200, "OK", controllersJson());
+    }
+    if (request.path() == "/setup") {
+        return lucent::http::Response::json(200, "OK", setupJson());
+    }
+    if (request.path() == "/counters") {
+        return lucent::http::Response::json(200, "OK", countersJson());
+    }
+    if (request.path() == "/capture") {
+        size_t slot = requestedSlot(std::string(request.query()));
+        auto image = m_capture.lastImage(slot);
+        if (image.empty()) {
+            // An empty body would read as a black frame. Refusing
+            // says which of the two actually happened.
+            return lucent::http::Response::text(
+                404, "Not Found",
+                "no frame has been captured into slot " + std::to_string(slot) +
+                    " yet. Arm one with POST /capture and let the title present at "
+                    "least once.\n");
+        }
+        return lucent::http::Response::binary(200, "OK", "application/octet-stream",
+                                              m_capture.lastImageFramed(slot));
+    }
+    if (request.path() == "/draws") {
+        return lucent::http::Response::json(200, "OK", drawsJson());
+    }
+    if (request.path() == "/gate") {
+        return lucent::http::Response::json(200, "OK", gateJson(m_gate.status()));
+    }
+    if (request.path() == "/frames") {
+        return lucent::http::Response::json(200, "OK", framesJson());
+    }
+    if (request.path() == "/interpolation") {
+        return lucent::http::Response::json(200, "OK", interpolationJson());
+    }
+    if (request.path() == "/vertices") {
+        return lucent::http::Response::json(200, "OK", vertexShadersJson());
+    }
+    if (request.path() == "/objects") {
+        std::optional<interp::ObjectCensus> census = m_objects.census();
+        if (!census) {
+            return lucent::http::Response::text(
+                404, "Not Found",
+                "no census has been taken yet. Request one with POST /objects while "
+                "continuous interpolation is planning.\n");
+        }
+        return lucent::http::Response::json(200, "OK", censusJson(*census));
+    }
+    if (request.path() == "/recordings") {
+        std::string framed = m_snapshot.framed();
+        if (framed.empty()) {
+            return lucent::http::Response::text(
+                404, "Not Found",
+                "no snapshot has completed yet. Arm one with POST /recordings?frames=K "
+                "and let K frames end.\n");
+        }
+        return lucent::http::Response::binary(200, "OK", "application/octet-stream", framed);
+    }
+    if (request.path() == "/substitution") {
+        return lucent::http::Response::json(200, "OK", substitutionJson());
+    }
+    if (request.path() == "/callers") {
+        return lucent::http::Response::json(200, "OK", m_callers.json());
+    }
+    if (request.method == "GET" && request.path() == "/paint") {
+        return lucent::http::Response::json(200, "OK", m_paint.json());
+    }
+    if (request.path() == "/blocks") {
+        return lucent::http::Response::json(200, "OK", m_blocks.json());
+    }
+    // The logic gate is `/logic` and not `/gate`: the frame gate has held
+    // that route since it existed, and two things meaning "hold" by the
+    // same name is how one of them ends up answering for the other.
+    if (request.method == "GET" && request.path() == "/logic") {
+        return lucent::http::Response::json(200, "OK", m_logic.json());
+    }
+    if (request.path() == "/memory") {
+        std::string refusal;
+        auto wanted = GuestMemoryRead::parse(request.query(), refusal);
+        if (!wanted.has_value()) {
+            return lucent::http::Response::text(400, "Bad Request", refusal);
+        }
+        auto bytes = GuestMemoryRead::read(*wanted, m_guestBytes);
+        if (!bytes.has_value()) {
+            return lucent::http::Response::text(404, "Not Found",
+                                                "some of that range is not guest memory.\n");
+        }
+        return lucent::http::Response::binary(200, "OK", "application/octet-stream", *bytes);
+    }
+    if (request.path() == "/transforms") {
+        return lucent::http::Response::json(200, "OK", transformsJson(kDefaultTransformLimit));
+    }
+    return notFound();
 }
 
 bool ControlChannel::running() const {

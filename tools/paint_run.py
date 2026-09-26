@@ -29,7 +29,7 @@ from pathlib import Path
 
 from wiiuport.drive import press, release
 from wiiuport.headless import Display, HeadlessSession, LogType, log_flags
-from wiiuport.paths import find_layout
+from wiiuport.paths import Layout, find_layout
 
 from wiiuport.control import (
     DEFAULT_PORT,
@@ -132,6 +132,23 @@ def _logic_source(port: int) -> tuple[int, str]:
     if gate.enabled and gate.ticks is not None:
         return gate.ticks, "the logic gate's own tick counter"
     return _logic_calls(port), "the caller census on fapGm_Execute"
+
+
+def save_block_dumps(layout: Layout, block: int, before: bytes, after: bytes) -> tuple[Path, Path]:
+    """The two dumps, on disk, in one activity directory of their own.
+
+    The bytes are the only copy of the title's per-tick state that a run will
+    ever have: the game's next tick overwrites them and nothing records what they
+    were. So they are written out, with the block's address in the name, and the
+    report says where they are -- a measurement nobody can look at again is a
+    measurement one has to take again.
+    """
+    directory = layout.activity_dir("block-dump")
+    first = directory / f"block-{block:08x}-before.bin"
+    second = directory / f"block-{block:08x}-after.bin"
+    first.write_bytes(before)
+    second.write_bytes(after)
+    return first, second
 
 
 def _window(name: str, port: int, seconds: float, before: tuple[int, int]) -> Window:
@@ -352,16 +369,38 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             block = binding.block()
+            other = binding.other_block()
             if block is None:
                 print("    no single word of the entry names a readable block, so no address")
                 continue
-            # The block itself, twice, half a tick apart: a range whose contents
-            # change per tick is where a per-tick pose has to be, and one that
-            # does not is not.
+            # Both slots, twice, half a tick apart. The bound one says what the
+            # tick is drawing from now; the other one says whether the previous
+            # tick's values are still in memory when it does, which is the whole
+            # question a blend has to answer before it can be built on this ring.
+            # Their difference is the per-tick pose, and it is a range, not a
+            # guess: the bytes that move are the bytes a blend would write.
             before_bytes = dump_guest(args.port, block, binding.size)
+            before_other = dump_guest(args.port, other, binding.other_size) if other else None
             time.sleep(0.3)
             after_bytes = dump_guest(args.port, block, binding.size)
-            print(f"    at {block:#010x}: {compare_bytes(before_bytes, after_bytes)}")
+            after_other = dump_guest(args.port, other, binding.other_size) if other else None
+            print(
+                f"    slot {binding.cursor} at {block:#010x}: {compare_bytes(before_bytes, after_bytes)}"
+            )
+            if other is not None:
+                print(
+                    f"    slot {binding.other_cursor} at {other:#010x}: "
+                    f"{compare_bytes(before_other, after_other)}"
+                )
+                print(
+                    "    and the two slots against each other, right now: "
+                    f"{compare_bytes(before_bytes, before_other)}"
+                )
+                saved = save_block_dumps(layout, block, before_bytes, after_bytes)
+                other_saved = save_block_dumps(layout, other, before_other, after_other)
+                print(
+                    f"    saved {saved[0].name} and {other_saved[0].name} for tools/block_pose.py"
+                )
     except ControlUnavailable as unavailable:
         print(f"refused: {unavailable}", file=sys.stderr)
     if state is not None:

@@ -1,4 +1,5 @@
 #include "check.h"
+#include "lucent/http.h"
 #include "suites.h"
 #include "wiiuport/control/ControlChannel.h"
 #include "wiiuport/control/GuestMemoryRead.h"
@@ -91,8 +92,8 @@ struct Fixture {
     wiiuport::guest::CallerCensus callers{&noRegistration};
     wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord};
     wiiuport::title::LogicGate logic{&noRegistration, &noCodeSpace, &noWriteWord, &noReadWord};
-    wiiuport::title::WindWakerPaint paint{&noRegistration, &noCodeSpace, &noWriteWord,
-                                           &noReadWord, &noPacingChange, &noPacing};
+    wiiuport::title::WindWakerPaint paint{&noRegistration, &noCodeSpace,    &noWriteWord,
+                                          &noReadWord,     &noPacingChange, &noPacing};
     wiiuport::interp::VertexBlend vertices{objects, writers,
                                            wiiuport::interp::ContinuousInterpolator::kBlendPoint};
     wiiuport::frame::GuestStateGuard guard{&noGuard, &noRestore};
@@ -337,6 +338,90 @@ void aMemoryReadNamesItsRangeAndIsBounded() {
                   "nor past the end of the address space");
 }
 
+// Every route the channel advertises, asked for by its own method, must reach a
+// handler. The one it cannot reach is the kind of mistake that costs a nine
+// minute run to find: the refusal names the route, the client sends it, and the
+// answer is that the route does not exist.
+//
+// The test asks each entry of the channel's own list and counts what matched, so
+// a list that shrank cannot pass by having nothing left to check. A route may
+// still refuse the *request* -- a read with no range, a gate with no pause -- and
+// that is a different answer, told apart by the refusal's own text rather than
+// by its status, because a legitimate 404 (a range that is not guest memory) is
+// not a missing route.
+void everyAdvertisedRouteIsReachableByItsOwnMethod() {
+    Fixture fixture;
+    const std::string list{ControlChannel::routeList()};
+    size_t advertised = 0;
+    std::vector<std::string> missing;
+    std::string rest = list;
+    while (!rest.empty()) {
+        const size_t comma = rest.find(',');
+        std::string entry = rest.substr(0, comma);
+        rest = comma == std::string::npos ? std::string{} : rest.substr(comma + 1);
+        // The last entry is written "X and Y".
+        const size_t conjunction = entry.rfind(" and ");
+        if (conjunction != std::string::npos) {
+            entry = entry.substr(conjunction + 5);
+        }
+        while (!entry.empty() && entry.front() == ' ') {
+            entry.erase(entry.begin());
+        }
+        while (!entry.empty() && entry.back() == ' ') {
+            entry.pop_back();
+        }
+        const size_t space = entry.find(' ');
+        if (space == std::string::npos) {
+            continue;
+        }
+        ++advertised;
+        lucent::http::Request request;
+        request.method = entry.substr(0, space);
+        request.target = entry.substr(space + 1);
+        auto answer = fixture.channel.dispatch(request);
+        if (answer.body.rfind("unknown route. This channel serves", 0) == 0) {
+            missing.push_back(request.method + " " + request.target);
+        }
+    }
+    check::isTrue(advertised > 20, "the list this checked is the whole list");
+    check::isTrue(
+        missing.empty(), "every advertised route reaches a handler; these answer that they "
+                         "do not exist: " +
+                             [&missing] {
+                                 std::string joined;
+                                 for (const auto& route : missing) {
+                                     joined += (joined.empty() ? "" : ", ") + route;
+                                 }
+                                 return joined;
+                             }());
+}
+
+// A GET reports; it does not change anything. The routes that both read and arm
+// -- GET /paint is the state, POST /paint arms it -- are the ones where a method
+// check that was forgotten would show up as a diagnostic that installs a mod, and
+// the arming would then happen in whichever run happened to ask. So: a GET of a
+// route that has both forms must leave the mod off, and a GET of a POST-only
+// route must be refused rather than quietly answered.
+void aGetReportsAndDoesNotChangeAnything() {
+    Fixture fixture;
+    lucent::http::Request read;
+    read.method = "GET";
+    read.target = "/paint";
+    auto state = fixture.channel.dispatch(read);
+    check::isTrue(state.status == 200, "GET /paint answers with the state");
+    check::isTrue(contains(state.body, "\"installed\":false"),
+                  "and the mod is not installed by asking about it");
+
+    lucent::http::Request postOnly;
+    postOnly.method = "GET";
+    postOnly.target = "/replay";
+    auto refused = fixture.channel.dispatch(postOnly);
+    check::isTrue(refused.body.rfind("unknown route. This channel serves", 0) == 0,
+                  "a GET of a POST-only route is refused as unknown, not answered");
+    check::isTrue(contains(refused.body, "POST /replay"),
+                  "and the refusal still says the route exists for POST");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -353,6 +438,8 @@ void runControlTests() {
     aCensusTakesEntriesWithTheirFirstInstructionAndRefusesAnythingElse();
     anIdleCensusReportsNoEntriesRatherThanNothing();
     aMemoryReadNamesItsRangeAndIsBounded();
+    everyAdvertisedRouteIsReachableByItsOwnMethod();
+    aGetReportsAndDoesNotChangeAnything();
 }
 
 } // namespace wiiuport::tests
