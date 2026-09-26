@@ -639,6 +639,43 @@ def read_blocks(port: int = DEFAULT_PORT, timeout: float = 2.0) -> BlockCensus:
     )
 
 
+def capture_frame(port: int, slot: int, timeout: float = 15.0) -> bytes:
+    """One frame's bytes, by arming a slot and waiting for the image to land.
+
+    The arm is one-shot, so a second call is a second frame rather than the
+    same one again -- which is the whole point when the question is whether two
+    consecutive paints are the same picture.
+    """
+    request_bytes("POST", f"/capture?slot={slot}", port, timeout)
+    deadline = time.monotonic() + timeout
+    refusal = ""
+    while time.monotonic() < deadline:
+        try:
+            body = request_bytes("GET", f"/capture?slot={slot}", port, timeout)
+        except ControlUnavailable as notyet:
+            refusal = str(notyet)
+            time.sleep(0.2)
+            continue
+        if body:
+            return body
+        refusal = "the slot held an empty image"
+        time.sleep(0.2)
+    raise ControlUnavailable(f"no image reached slot {slot} within {timeout:.0f}s: {refusal}")
+
+
+def compare_images(first: bytes, second: bytes) -> str:
+    """How two captured frames differ, byte by byte, in one sentence."""
+    if len(first) != len(second):
+        return f"different sizes: {len(first)} and {len(second)} bytes"
+    differing = [i for i, (a, b) in enumerate(zip(first, second)) if a != b]
+    if not differing:
+        return f"identical, {len(first)} bytes"
+    return (
+        f"{len(differing)} of {len(first)} bytes differ, first at offset {differing[0]} "
+        f"({first[differing[0]]:#04x} against {second[differing[0]]:#04x})"
+    )
+
+
 def read_paint(port: int = DEFAULT_PORT, timeout: float = 2.0) -> PaintState:
     return _paint_state(_get("/paint", port, timeout), "GET /paint")
 
