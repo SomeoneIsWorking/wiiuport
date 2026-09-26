@@ -41,8 +41,15 @@ class WindWakerPaint {
     // The display vtable this title installs, and the slot its thread calls:
     // read out of the title's image, where slot 0xcc of the vtable at
     // 0x10004e88 holds the frame at 0x0274c264.
+    //
+    // An address out of the image is not the same as the one the title
+    // installed, and patching the wrong vtable is a change to an object whose
+    // slot 0xcc means something else entirely. So the vtable the running
+    // display actually holds, at `display+0x24`, is read and has to be this one.
     static constexpr uint32_t kDisplayVTable = 0x10004e88;
     static constexpr uint32_t kFrameSlot = 0xcc;
+    // Where the display object keeps its vtable.
+    static constexpr uint32_t kVTableOffset = 0x24;
     // The frame the stand-in is written for. Refused by name rather than
     // installed over, so a different revision of the title cannot be patched
     // with this one's payload.
@@ -91,7 +98,9 @@ class WindWakerPaint {
     WindWakerPaint(Register registerProbe, AllocateCode allocateCode, WriteWord writeWord,
                    ReadWord readWord);
 
-    // Registers the frame probe, before the title is linked.
+    // Registers the frame probe and takes the stand-in's memory, before the
+    // title is linked and before anything has run. Everything that changes the
+    // guest is then a single word: the vtable slot.
     void install();
 
     // What the stand-in does, kept separable so a failure says which part.
@@ -113,6 +122,12 @@ class WindWakerPaint {
     // Puts the stand-in in and points the vtable slot at it. Empty on success,
     // otherwise the refusal, naming what it found instead of the frame.
     std::string enable(Mode mode);
+
+    // Why the memory is not there, for a report: asked before anything runs,
+    // so a refusal names the cause instead of leaving a blank block.
+    const std::string& reservationRefusal() const {
+        return m_reservationRefusal;
+    }
 
     // Puts the title's own frame pointer back. Empty on success, otherwise
     // the refusal.
@@ -151,8 +166,14 @@ class WindWakerPaint {
     // What the frame probe reported about itself, for the report to carry.
     std::string probeName() const;
 
-    // The display object's own fields as a JSON object of its own.
-    std::string displayFields() const;
+    // One reading of the display object: which vtable it holds, and its fields.
+    struct DisplayFacts {
+        uint32_t display = 0;
+        uint32_t vtable = 0;
+        std::string fields = "{}";
+    };
+
+    DisplayFacts displayFacts() const;
 
     class Frame final : public GuestCallProbes::Probe {
       public:
@@ -178,6 +199,10 @@ class WindWakerPaint {
     mutable std::mutex m_mutex;
     uint32_t m_block = 0;
     uint32_t m_original = 0;
+    // The word actually written, which is the live vtable's slot and not
+    // necessarily the one out of the image.
+    uint32_t m_patched = 0;
+    std::string m_reservationRefusal;
     bool m_installed = false;
     Mode m_mode{Mode::TwiceAtSixty};
     std::string m_refusal;

@@ -2,8 +2,10 @@
 #include "suites.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
+#include <array>
 #include <cstdio>
 #include <map>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -58,7 +60,19 @@ WindWakerPaint* g_guest = nullptr;
 FakeGuest* g_fake = nullptr;
 uint32_t g_lastBlock = 0;
 
-void noRegistration(uint32_t, uint32_t, GuestCallProbes::Probe&) {
+// The probe the mod registered, kept so a test can call the title's draw the way
+// the title does -- through the probe -- instead of reaching inside the mod.
+GuestCallProbes::Probe* g_probe = nullptr;
+
+void keepRegistration(uint32_t, uint32_t, GuestCallProbes::Probe& probe) {
+    g_probe = &probe;
+}
+
+// One paint, as the display thread's entry makes it: the frame's arguments.
+void paintOnce(uint32_t display) {
+    std::array<uint32_t, 32> gpr{};
+    gpr[3] = display;
+    g_probe->OnCall(std::span<const uint32_t, 32>(gpr.data(), gpr.size()), 0);
 }
 
 uint32_t allocateCode(uint32_t sizeInBytes) {
@@ -79,12 +93,18 @@ bool readWord(uint32_t address, uint32_t& value) {
 
 WindWakerPaint makeMod(FakeGuest& guest) {
     g_fake = &guest;
-    return WindWakerPaint(&noRegistration, &allocateCode, &writeWord, &readWord);
+    g_probe = nullptr;
+    return WindWakerPaint(&keepRegistration, &allocateCode, &writeWord, &readWord);
 }
 
-// A guest with this title's display vtable and thread entry in place.
+// A display object at a fixed address, holding this title's vtable, and the
+// vtable's frame slot filled in -- the state the title is in once it has
+// painted anything.
+constexpr uint32_t kDisplay = 0x43e08af8;
+
 FakeGuest loadedTitle() {
     FakeGuest guest;
+    guest.writeWord(kDisplay + WindWakerPaint::kVTableOffset, WindWakerPaint::kDisplayVTable);
     guest.writeWord(WindWakerPaint::kDisplayVTable + WindWakerPaint::kFrameSlot,
                     WindWakerPaint::kDisplayFrame);
     guest.writeWord(WindWakerPaint::kDisplayLoopTop, WindWakerPaint::kDisplayLoopTopFirst);
@@ -137,12 +157,21 @@ void wiiuport::tests::runPaintTests() {
     {
         FakeGuest guest = loadedTitle();
         WindWakerPaint mod = makeMod(guest);
+        mod.install();
+        // Before the display thread has painted, which vtable it calls is not
+        // known, and patching an address out of the image instead is exactly
+        // the mistake worth refusing.
+        check::isTrue(mod.enable(WindWakerPaint::Mode::PassThrough).find("has not painted") !=
+                          std::string::npos,
+                      "with no paint seen yet there is no vtable to patch, and it says so");
+        paintOnce(kDisplay);
         check::isTrue(mod.enable(WindWakerPaint::Mode::PassThrough).empty(),
                       "the stand-in installs over this title's own frame");
         uint32_t slot = 0;
         check::isTrue(readWord(WindWakerPaint::kDisplayVTable + WindWakerPaint::kFrameSlot, slot) &&
                           slot == g_lastBlock,
                       "and the vtable slot points at it");
+        check::isTrue(mod.paints() == 1, "one paint counted through the probe");
         check::isTrue(guest.block().size() == 6,
                       "the block holds exactly the stand-in's six words");
         check::isTrue(mod.json().find("\"installed\":true") != std::string::npos,
@@ -156,10 +185,12 @@ void wiiuport::tests::runPaintTests() {
         // indistinguishable from a product that is not reporting, and this is
         // the one place that catches a stray quote or a doubled comma.
         check::isTrue(mod.json() ==
-                          "{\"frame\":\"0x0274c264\",\"vtable\":\"0x10004e88\",\"slot\":\"0xcc\","
+                          "{\"frame\":\"0x0274c264\",\"vtable\":\"0x10004e88\","
+                          "\"patchedSlot\":\"0x00000000\",\"slot\":\"0xcc\","
                           "\"installed\":false,\"mode\":\"passThrough\",\"block\":\"0x00e07000\","
-                          "\"swapIntervalAsked\":1,\"titleSwapInterval\":2,\"paints\":0,"
-                          "\"probe\":\"pending\",\"display\":\"0x00000000\",\"fields\":{}}\n",
+                          "\"swapIntervalAsked\":1,\"titleSwapInterval\":2,\"paints\":1,"
+                          "\"probe\":\"pending\",\"display\":\"0x43e08af8\","
+                          "\"liveVTable\":\"0x10004e88\",\"fields\":{}}\n",
                       "the report is one JSON object, spelled out");
         check::isTrue(readWord(WindWakerPaint::kDisplayVTable + WindWakerPaint::kFrameSlot, slot) &&
                           slot == WindWakerPaint::kDisplayFrame,
@@ -168,9 +199,11 @@ void wiiuport::tests::runPaintTests() {
     {
         // Another title: the slot holds something else, and the mod says so
         // rather than writing a stand-in for one frame over another.
-        FakeGuest guest;
+        FakeGuest guest = loadedTitle();
         guest.writeWord(WindWakerPaint::kDisplayVTable + WindWakerPaint::kFrameSlot, 0xDEADBEEF);
         WindWakerPaint mod = makeMod(guest);
+        mod.install();
+        paintOnce(kDisplay);
         const std::string refusal = mod.enable(WindWakerPaint::Mode::PassThrough);
         check::isTrue(refusal.find("0xdeadbeef") != std::string::npos,
                       "a foreign frame is refused by what the slot holds");
@@ -184,6 +217,8 @@ void wiiuport::tests::runPaintTests() {
         FakeGuest guest = loadedTitle();
         guest.writeWord(WindWakerPaint::kDisplayLoopTop, 0x60000000);
         WindWakerPaint mod = makeMod(guest);
+        mod.install();
+        paintOnce(kDisplay);
         const std::string refusal = mod.enable(WindWakerPaint::Mode::PassThrough);
         check::isTrue(refusal.find("display thread's loop") != std::string::npos,
                       "a foreign loop is refused by name");
@@ -193,6 +228,8 @@ void wiiuport::tests::runPaintTests() {
         // which of the two the title would not take.
         FakeGuest guest = loadedTitle();
         WindWakerPaint mod = makeMod(guest);
+        mod.install();
+        paintOnce(kDisplay);
         check::isTrue(mod.enable(WindWakerPaint::Mode::Twice).empty(), "two paints install");
         const auto twice = guest.block();
         check::isTrue(twice.size() == 11, "two paints are eleven words");
@@ -215,6 +252,8 @@ void wiiuport::tests::runPaintTests() {
         // frame goes back first, so a refusal leaves it running.
         FakeGuest guest = loadedTitle();
         WindWakerPaint mod = makeMod(guest);
+        mod.install();
+        paintOnce(kDisplay);
         mod.enable(WindWakerPaint::Mode::PassThrough);
         check::isTrue(mod.enable(WindWakerPaint::Mode::Twice).empty(), "a second mode replaces it");
         uint32_t slot = 0;
