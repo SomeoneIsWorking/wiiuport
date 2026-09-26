@@ -248,7 +248,20 @@ the interval rather than by reading the code:
    words are checked against reach before anything is written, and the branch
    encoding is unit-tested against a real instruction from the title's image.
 
-4. **The loop's top is not the thread's entry.** The display thread's entry at
+4. **"May execute from" is half a contract.** The stand-in reached through the
+   display vtable -- the title's own loop body, word for word -- froze the whole
+   emulated system for exactly as long as it was installed. No paints, no logic
+   ticks, no error logged anywhere, and 30 a second the moment it came out. The
+   same block reached by a plain branch instead of through the count register
+   runs the title at 30 paints and 30 logic ticks a second with the stand-in
+   installed, so the memory is sound, the redirect is sound, and the difference
+   is one instruction pair: `mtctr`/`bctr` against `b`. A direct branch
+   translates at the address it lands on; an indirect one looks the target up in
+   the recompiler's jump table, and a block allocated out of the loader's
+   trampoline arena was never in it. `AllocateCode` registers the block now, and
+   that control -- mode 4, two branches and nothing else -- is what turned a
+   freeze into a cause rather than a fourth guess.
+5. **The loop's top is not the thread's entry.** The display thread's entry at
    `0x0274c00c` is a prologue -- `mfspr r0,LR`, a new stack frame, `or r31,r3,r3`
    -- and the loop proper starts four instructions later at `0x0274c020`. A
    stand-in that branches back to the entry therefore re-frames the stack on
@@ -258,9 +271,10 @@ the interval rather than by reading the code:
    own crash dump named both the address and the register; nothing in the
    stand-in's source did.
 
-The second and third were found by a unit test and the first and fourth by the
-run, which is the order they should have been found in: none of the four is
-visible by reading the payload, and every one of them is silent until the guest
-executes it. The separation is what found them -- one stand-in with a mode for
-the redirect, for the second paint, and for the interval, so that a title which
-died said which of the three it would not take.
+The second and third were found by a unit test and the first, fourth and fifth
+by the run, which is the order they should have been found in: none of the five
+is visible by reading the payload, and every one of them is silent until the
+guest executes it. The separation is what found them -- one stand-in with a mode
+each for the redirect, the second paint, the interval, and the indirect call --
+so that a title which would not take one said which, and so that a freeze could
+be narrowed to a single instruction pair instead of to "the stand-in".
