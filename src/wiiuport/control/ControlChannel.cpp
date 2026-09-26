@@ -21,13 +21,14 @@ lucent::http::Response notFound() {
         404, "Not Found",
         "unknown route. This channel serves GET /counters, GET /transforms, GET /capture, "
         "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
-        "GET /recordings, GET /objects, GET /draws, GET /vertices, GET /memory, GET /callers, POST "
+        "GET /recordings, GET /objects, GET /draws, GET /vertices, GET /memory, GET /callers, "
+        "GET /paint, POST "
         "/replay, POST /capture, "
         "POST /present, "
         "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, "
         "POST /shadowcheck, "
         "POST /neighbourcheck, POST /blends, POST /pacing, "
-        "POST /objects, POST /draws, POST /recordings, POST /input and POST /quit.\n");
+        "POST /objects, POST /draws, POST /recordings, POST /paint, POST /input and POST /quit.\n");
 }
 
 // The one-shot routes each own a frame boundary, and so does continuous
@@ -161,6 +162,7 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
       m_neighbourCheck(sources.neighbourCheck), m_objects(sources.objects),
       m_vertices(sources.vertices), m_writers(sources.writers), m_callers(sources.callers),
+      m_paint(sources.paint),
       m_guestBytes(sources.guestBytes), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
       m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate),
       m_shadowCheck(sources.shadowCheck) {
@@ -761,6 +763,29 @@ bool ControlChannel::start(uint16_t port) {
             // Arming is a deliberate one-shot: the next frame to end is
             // replayed, and nothing after it. A replay that repeated every
             // frame would make a crash impossible to attribute.
+            if (request.method == "POST" && request.path() == "/paint") {
+                if (!requestedFlag(std::string(request.query()), "on", true)) {
+                    std::string refusal = m_paint.disable();
+                    if (!refusal.empty()) {
+                        return lucent::http::Response::text(409, "Conflict", refusal + "\n");
+                    }
+                    return lucent::http::Response::json(200, "OK", m_paint.json());
+                }
+                const long long asked = requestedCount(std::string(request.query()), "mode", 3);
+                const std::optional<title::WindWakerPaint::Mode> mode =
+                    title::WindWakerPaint::modeFrom(asked);
+                if (!mode.has_value()) {
+                    return lucent::http::Response::text(
+                        400, "Bad Request",
+                        "mode " + std::to_string(asked) + " is not 1 (paint once), "
+                        "2 (paint twice) or 3 (paint twice at one vblank a flip)\n");
+                }
+                std::string refusal = m_paint.enable(*mode);
+                if (!refusal.empty()) {
+                    return lucent::http::Response::text(409, "Conflict", refusal + "\n");
+                }
+                return lucent::http::Response::json(200, "OK", m_paint.json());
+            }
             if (request.method == "POST" && request.path() == "/continuous") {
                 bool on = requestedFlag(std::string(request.query()), "on", true);
                 m_continuous.setEnabled(on);
@@ -1067,6 +1092,9 @@ bool ControlChannel::start(uint16_t port) {
             }
             if (request.path() == "/callers") {
                 return lucent::http::Response::json(200, "OK", m_callers.json());
+            }
+            if (request.method == "GET" && request.path() == "/paint") {
+                return lucent::http::Response::json(200, "OK", m_paint.json());
             }
             if (request.path() == "/memory") {
                 std::string refusal;

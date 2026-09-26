@@ -3,6 +3,7 @@
 #include <mutex>
 
 #include "wiiuport/control/ControlChannel.h"
+#include "Cafe/HW/Espresso/GuestPatching.h"
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FrameGate.h"
 #include "wiiuport/frame/FramePresenter.h"
@@ -30,6 +31,7 @@
 #include "wiiuport/interp/TransformSubstitution.h"
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
+#include "wiiuport/title/WindWakerPaint.h"
 
 namespace wiiuport {
 
@@ -131,6 +133,8 @@ class Runtime {
     guest::EnvironmentProbe m_environmentProbe{m_writers};
     guest::LineProbe m_lineProbe{m_writers};
     guest::CallerCensus m_callers{&GuestCallProbes::Register};
+    title::WindWakerPaint m_paint{&GuestCallProbes::Register, &GuestPatching::AllocateCode,
+                                  &GuestPatching::WriteWord, &GuestPatching::ReadWord};
     interp::VertexBlend m_vertexBlend{m_objectBlend, m_writers,
                                       interp::ContinuousInterpolator::kBlendPoint};
     interp::FrameInterpolator m_interpolator{m_search, m_substitution, m_scheduler};
@@ -163,6 +167,7 @@ class Runtime {
         .vertices = m_vertexBlend,
         .writers = m_writers,
         .callers = m_callers,
+        .paint = m_paint,
         .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,
         .pacing = m_pacing,

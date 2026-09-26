@@ -71,6 +71,8 @@ add_library(wiiuport STATIC
   guest/BufferWriters.h
   guest/CallerCensus.cpp
   guest/CallerCensus.h
+  title/WindWakerPaint.cpp
+  title/WindWakerPaint.h
   guest/ParticleProbe.cpp
   guest/ParticleProbe.h
   guest/LineProbe.cpp
