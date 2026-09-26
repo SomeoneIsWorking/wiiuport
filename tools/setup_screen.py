@@ -28,7 +28,6 @@ from pathlib import Path
 from wiiuport.headless import Display, HeadlessError, HeadlessSession
 from wiiuport.paths import Layout, find_layout
 from wiiuport.screenshot import ScreenshotUnavailable, capture_display, spread
-from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
 from wiiuport.control import (
     DEFAULT_PORT,
@@ -37,6 +36,7 @@ from wiiuport.control import (
     read_setup,
     runtime_env,
 )
+from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
 RECORD_NAME = "selected-title.txt"
 

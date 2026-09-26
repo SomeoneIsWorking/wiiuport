@@ -17,9 +17,9 @@ from pathlib import Path
 
 from wiiuport.headless import HeadlessSession
 from wiiuport.paths import find_layout
-from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
 from wiiuport.control import DEFAULT_PORT, ControlUnavailable, read_transforms, runtime_env
+from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
 
 def main(argv: list[str] | None = None) -> int:

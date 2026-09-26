@@ -19,10 +19,10 @@ from pathlib import Path
 from wiiuport.gameplay import INTERVAL_SECONDS, PRESSES, press_into_world
 from wiiuport.headless import HeadlessSession
 from wiiuport.paths import find_layout
-from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
 from wiiuport import shadow
 from wiiuport.control import DEFAULT_PORT, ControlUnavailable, runtime_env, wait_for_channel
+from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
 
 def main(argv: list[str] | None = None) -> int:

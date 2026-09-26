@@ -36,6 +36,18 @@ void noRegistration(uint32_t /*entry*/, uint32_t /*firstInstruction*/,
                     GuestCallProbes::Probe& /*probe*/) {
 }
 
+uint32_t noCodeSpace(uint32_t /*sizeInBytes*/) {
+    return 0;
+}
+
+bool noWriteWord(uint32_t /*address*/, uint32_t /*value*/) {
+    return false;
+}
+
+bool noReadWord(uint32_t /*address*/, uint32_t& /*value*/) {
+    return false;
+}
+
 const void* noGuestBytes(uint32_t /*address*/, uint32_t /*size*/) {
     return nullptr;
 }
@@ -69,6 +81,8 @@ struct Fixture {
     wiiuport::interp::ObjectBlend objects{wiiuport::interp::ContinuousInterpolator::kBlendPoint};
     wiiuport::guest::BufferWriters writers;
     wiiuport::guest::CallerCensus callers{&noRegistration};
+    wiiuport::title::WindWakerPaint paint{&noRegistration, &noCodeSpace, &noWriteWord,
+                                           &noReadWord};
     wiiuport::interp::VertexBlend vertices{objects, writers,
                                            wiiuport::interp::ContinuousInterpolator::kBlendPoint};
     wiiuport::frame::GuestStateGuard guard{&noGuard, &noRestore};
@@ -111,6 +125,7 @@ struct Fixture {
         .vertices = vertices,
         .writers = writers,
         .callers = callers,
+        .paint = paint,
         .guestBytes = &noGuestBytes,
         .snapshot = snapshot,
         .pacing = pacing,

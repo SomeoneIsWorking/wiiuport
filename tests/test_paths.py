@@ -85,6 +85,7 @@ def test_a_packaged_product_is_launched_in_place_of_the_checkouts_binary(tmp_pat
 def test_no_save_named_is_a_legitimate_answer_and_a_wrong_one_is_not(tmp_path) -> None:
     """Absent means "start a new game"; a typo must not read as absent."""
     import pytest
+
     from wiiuport.title import TitleUnavailable, resolve_save
 
     assert resolve_save(None) is None

@@ -24,9 +24,9 @@ from types import FrameType
 from wiiuport.gameplay import INTERVAL_SECONDS, PRESSES, press_into_world
 from wiiuport.headless import TITLE_OUTPUT_SIZE, HeadlessSession
 from wiiuport.paths import find_layout
-from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
 from wiiuport.control import DEFAULT_PORT, ControlUnavailable, runtime_env, wait_for_channel
+from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
 ACTIVITY = "session"
 

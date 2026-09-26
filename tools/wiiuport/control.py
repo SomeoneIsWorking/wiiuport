@@ -508,3 +508,110 @@ def read_transforms(port: int = DEFAULT_PORT, timeout: float = 5.0) -> Transform
         shadersInLastFrame=int(payload["shadersInLastFrame"]),
         candidates=tuple(candidates),
     )
+
+
+@dataclass(frozen=True)
+class CallerEntry:
+    """One function the census watches, and the call sites that reached it."""
+
+    entry: int
+    installation: str
+    calls: int
+    callers: tuple[tuple[int, int], ...]
+
+    def render(self) -> str:
+        sites = ", ".join(f"{address:#010x} {count}" for address, count in self.callers[:4])
+        return (
+            f"{self.entry:#010x} {self.installation}: {self.calls} calls"
+            f"{f' from {sites}' if sites else ''}"
+        )
+
+
+def read_callers(port: int = DEFAULT_PORT, timeout: float = 2.0) -> tuple[CallerEntry, ...]:
+    payload = _get("/callers", port, timeout)
+    require_fields("GET /callers", payload, ("entries",), "the caller census")
+    return tuple(
+        CallerEntry(
+            entry=int(entry["entry"], 16),
+            installation=str(entry["installation"]),
+            calls=int(entry["calls"]),
+            callers=tuple(
+                (int(caller["returnAddress"], 16), int(caller["calls"]))
+                for caller in entry["callers"]
+            ),
+        )
+        for entry in payload["entries"]
+    )
+
+
+@dataclass(frozen=True)
+class PaintState:
+    """What the title's own paint mod is doing, and what it has seen.
+
+    `paints` counts the frames the display thread has drawn since the title
+    started, so a rate is taken from two of these a window apart rather than
+    from a running average the runtime keeps.
+    """
+
+    frame: int
+    vtable: int
+    installed: bool
+    block: int
+    paints: int
+    probe: str
+    mode: str
+    display: int
+    fields: dict[str, int]
+    refusal: str
+
+    def render(self) -> str:
+        fields = ", ".join(f"{name} {value}" for name, value in sorted(self.fields.items()))
+        body = (
+            f"display paint: installed {self.installed} ({self.mode}), probe "
+            f"{self.probe}, block {self.block:#010x}, {self.paints} paints"
+        )
+        if self.display:
+            body += f", display {self.display:#010x}"
+            if fields:
+                body += f" ({fields})"
+        if self.refusal:
+            body += f", refused: {self.refusal}"
+        return body
+
+
+def read_paint(port: int = DEFAULT_PORT, timeout: float = 2.0) -> PaintState:
+    return _paint_state(_get("/paint", port, timeout), "GET /paint")
+
+
+def set_paint(
+    on: bool, port: int = DEFAULT_PORT, timeout: float = 5.0, mode: int = 3
+) -> PaintState:
+    body = request_bytes("POST", f"/paint?on={1 if on else 0}&mode={mode}", port, timeout)
+    try:
+        return _paint_state(json.loads(body.decode("utf-8")), "POST /paint")
+    except json.JSONDecodeError as malformed:
+        raise ControlUnavailable(
+            f"POST /paint answered something that is not JSON: {malformed}; body was "
+            f"{body[:300].decode('utf-8', 'replace')!r}"
+        )
+
+
+def _paint_state(payload: dict, url: str) -> PaintState:
+    require_fields(
+        url,
+        payload,
+        ("frame", "vtable", "installed", "block", "paints", "probe", "mode", "display", "fields"),
+        "the display paint mod",
+    )
+    return PaintState(
+        frame=int(payload["frame"], 16),
+        vtable=int(payload["vtable"], 16),
+        installed=bool(payload["installed"]),
+        block=int(payload["block"], 16),
+        paints=int(payload["paints"]),
+        probe=str(payload["probe"]),
+        mode=str(payload["mode"]),
+        display=int(payload["display"], 16),
+        fields={str(name): int(value) for name, value in payload["fields"].items()},
+        refusal=str(payload.get("refusal", "")),
+    )

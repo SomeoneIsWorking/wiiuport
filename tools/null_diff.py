@@ -44,7 +44,6 @@ from wiiuport.image import (
     read_capture,
 )
 from wiiuport.paths import find_layout
-from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
 from wiiuport.control import (
     DEFAULT_PORT,
@@ -53,6 +52,7 @@ from wiiuport.control import (
     read_transforms,
     runtime_env,
 )
+from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
 
 
 def main(argv: list[str] | None = None) -> int:
