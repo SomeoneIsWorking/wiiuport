@@ -242,7 +242,13 @@ def main(argv: list[str] | None = None) -> int:
                     # the first second's paints are not counted twice.
                     time.sleep(1.0)
                     start = (read_paint(args.port).paints, _logic_calls(args.port))
-                    windows.append(_window(name, args.port, args.window, start))
+                    window = _window(name, args.port, args.window, start)
+                    windows.append(window)
+                    # Printed as it is measured. A run whose product dies before
+                    # the end -- which this one has done twice, once on a lost
+                    # display and once for reasons the log does not name -- would
+                    # otherwise throw away the numbers it had already taken.
+                    print(window.render(), flush=True)
                     if name == "on" and args.captures >= 2:
                         # Two paints in a row, compared byte by byte. With the
                         # logic at 30 and the picture at 60 the two are the same
@@ -251,7 +257,11 @@ def main(argv: list[str] | None = None) -> int:
                         first = capture_frame(args.port, 0)
                         second = capture_frame(args.port, 1)
                         comparison = compare_images(first, second)
-                state = read_paint(args.port)
+                try:
+                    state = read_paint(args.port)
+                except ControlUnavailable as unavailable:
+                    print(f"the product stopped answering before the end: {unavailable}",
+                          file=sys.stderr)
             except ControlUnavailable as unavailable:
                 print(f"refused: {unavailable}", file=sys.stderr)
                 return 1
@@ -264,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
             except ControlUnavailable:
                 pass
 
-    if not windows or state is None:
+    if not windows:
         print("refused: the run measured no window at all.", file=sys.stderr)
         return 1
     device = session.rendered_on()
@@ -284,8 +294,6 @@ def main(argv: list[str] | None = None) -> int:
     except ControlUnavailable as unavailable:
         print(f"refused: {unavailable}", file=sys.stderr)
     print(state.render())
-    for window in windows:
-        print(window.render())
     if comparison:
         print(f"  two consecutive paints: {comparison}")
 
@@ -317,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{window.logic_per_second:.2f}/s, outside "
                 f"{LOGIC_RANGE[0]}-{LOGIC_RANGE[1]}: the simulation moved with the picture"
             )
-    if state.probe != "installed":
+    if state is not None and state.probe != "installed":
         failures.append(f"the frame probe is {state.probe}, so paints were not all counted")
     if failures:
         print("\nFAILED", file=sys.stderr)
