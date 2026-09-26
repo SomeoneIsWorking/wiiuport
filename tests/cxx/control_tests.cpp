@@ -48,6 +48,14 @@ bool noReadWord(uint32_t /*address*/, uint32_t& /*value*/) {
     return false;
 }
 
+uint32_t noPacingChange(uint32_t vblanks) {
+    return vblanks;
+}
+
+uint32_t noPacing() {
+    return 2;
+}
+
 const void* noGuestBytes(uint32_t /*address*/, uint32_t /*size*/) {
     return nullptr;
 }
@@ -83,7 +91,7 @@ struct Fixture {
     wiiuport::guest::CallerCensus callers{&noRegistration};
     wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord};
     wiiuport::title::WindWakerPaint paint{&noRegistration, &noCodeSpace, &noWriteWord,
-                                           &noReadWord};
+                                           &noReadWord, &noPacingChange, &noPacing};
     wiiuport::interp::VertexBlend vertices{objects, writers,
                                            wiiuport::interp::ContinuousInterpolator::kBlendPoint};
     wiiuport::frame::GuestStateGuard guard{&noGuard, &noRestore};

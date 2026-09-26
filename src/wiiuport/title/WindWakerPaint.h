@@ -96,9 +96,13 @@ class WindWakerPaint {
     // across this boundary yields an address with its halves exchanged.
     using WriteWord = bool (*)(uint32_t guestAddress, uint32_t value);
     using ReadWord = bool (*)(uint32_t guestAddress, uint32_t& value);
+    // The emulator's flip pacing, and what it was. Returns the value in force
+    // after the call, so a refusal is visible as an unchanged one.
+    using SetSwapInterval = uint32_t (*)(uint32_t vblanksPerFlip);
+    using SwapInterval = uint32_t (*)();
 
     WindWakerPaint(Register registerProbe, AllocateCode allocateCode, WriteWord writeWord,
-                   ReadWord readWord);
+                   ReadWord readWord, SetSwapInterval setSwapInterval, SwapInterval swapInterval);
 
     // Registers the frame probe. Everything that changes the guest is then a
     // single word: the vtable slot. The stand-in's memory is taken when the
@@ -240,6 +244,11 @@ class WindWakerPaint {
     AllocateCode m_allocateCode;
     WriteWord m_writeWord;
     ReadWord m_readWord;
+    SetSwapInterval m_setSwapInterval;
+    SwapInterval m_swapInterval;
+    // What the emulator's pacing was before this mod touched it.
+    uint32_t m_savedPacing = 0;
+    bool m_wrotePacing = false;
     std::atomic<uint64_t> m_paints{0};
     Frame m_frame;
     mutable std::mutex m_mutex;

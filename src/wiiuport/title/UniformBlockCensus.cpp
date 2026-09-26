@@ -104,9 +104,15 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
     Binding binding;
     binding.read = m_readWord(object + kCursorOffset, binding.cursor);
     if (binding.read) {
+        // The whole entry, word for word. A partial read is a partial answer and
+        // is reported as unread rather than as zeroes, because a block that was
+        // dumped from zeroes would look like a real one.
         const uint32_t entry = object + kEntriesOffset + binding.cursor * kEntrySize;
-        binding.read = m_readWord(entry + kEntryOffsetOffset, binding.offset) &&
-                       m_readWord(entry + kEntrySizeOffset, binding.size);
+        for (size_t word = 0; word < kEntryWords; word++) {
+            binding.read = m_readWord(entry + 4 * static_cast<uint32_t>(word),
+                                      binding.entry[word]) &&
+                           binding.read;
+        }
     }
     std::scoped_lock lock(m_mutex);
     if (std::find(m_seen.begin(), m_seen.end(), object) == m_seen.end()) {
@@ -152,8 +158,13 @@ std::string UniformBlockCensus::json() const {
         const Binding& binding = m_examples[index];
         JsonBody one;
         one.number("cursor", binding.cursor);
-        one.number("offset", binding.offset);
-        one.number("size", binding.size);
+        one.number("offset", binding.entry[kEntryOffsetOffset / 4]);
+        one.number("size", binding.entry[kEntrySizeOffset / 4]);
+        JsonBody words;
+        for (size_t word = 0; word < kEntryWords; word++) {
+            words.number(std::to_string(word).c_str(), binding.entry[word]);
+        }
+        one.raw("entry", words.text());
         one.raw("read", binding.read ? "true" : "false");
         examples.raw(std::to_string(index).c_str(), one.text());
     }

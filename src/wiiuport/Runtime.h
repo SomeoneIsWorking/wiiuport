@@ -136,7 +136,8 @@ class Runtime {
     guest::CallerCensus m_callers{&GuestCallProbes::Register};
     title::UniformBlockCensus m_blocks{&GuestCallProbes::Register, &GuestPatching::ReadWord};
     title::WindWakerPaint m_paint{&GuestCallProbes::Register, &GuestPatching::AllocateCode,
-                                  &GuestPatching::WriteWord, &GuestPatching::ReadWord};
+                                  &GuestPatching::WriteWord, &GuestPatching::ReadWord,
+                                  &GuestPatching::SetSwapInterval, &GuestPatching::SwapInterval};
     interp::VertexBlend m_vertexBlend{m_objectBlend, m_writers,
                                       interp::ContinuousInterpolator::kBlendPoint};
     interp::FrameInterpolator m_interpolator{m_search, m_substitution, m_scheduler};

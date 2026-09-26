@@ -194,32 +194,16 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
     }
 
     if (mode == Mode::OneAtSixty) {
-        // One paint, at one vblank a flip. Seven words, and each earns its
-        // place:
-        //   li r3,1                  the title's own word, for the setter
-        //   bl  <swap interval>      the game's own API, so the interval is the
-        //                            game's change and not the host's
-        //   lis r12 / ori r12        the loop's return address, which the call
-        //                            above has just overwritten
-        //   mtspr LR,r12             put it back where the loop's call left it
-        //   or  r3,r31,r31           the display, as the loop's call passed it,
-        //                            which the setter has just clobbered
-        //   b   <frame>              and hand the frame to the title's own
-        //                            return, so nothing branches back into the
-        //                            stand-in's memory
-        std::vector<uint32_t> words{kLoadOne, 0, 0, 0, 0, 0, 0};
-        const uint32_t callAt = blockAddress + 4;
-        if (!withinReach(callAt, kSetSwapInterval) ||
-            !withinReach(blockAddress + 24, kDisplayFrame)) {
+        // One paint, at one vblank a flip -- and the payload is a single branch,
+        // because the pacing is the emulator's and the title's own record of it
+        // is a field `enable()` writes. Nothing here calls anything, so the
+        // display register the loop's call set up arrives at the frame
+        // untouched, and the frame's return goes to the title's loop rather than
+        // back into this memory.
+        if (!withinReach(blockAddress, kDisplayFrame)) {
             return std::nullopt;
         }
-        words[1] = branchTo(callAt, kSetSwapInterval, true);
-        words[2] = kLoadUpper | ((kLoopReturn >> 16) & 0xffff);
-        words[3] = kOrImmediate | (12 << 21) | (12 << 21) | (kLoopReturn & 0xffff);
-        words[4] = kMoveToLink | (12 << 21);
-        words[5] = kLoopBody[3];
-        words[6] = branchTo(blockAddress + 24, kDisplayFrame, false);
-        return words;
+        return std::vector<uint32_t>{branchTo(blockAddress, kDisplayFrame, false)};
     }
 
     // Everything else is a list of direct branches. The frame is reached by
@@ -269,9 +253,11 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
 }
 
 WindWakerPaint::WindWakerPaint(Register registerProbe, AllocateCode allocateCode,
-                               WriteWord writeWord, ReadWord readWord)
+                               WriteWord writeWord, ReadWord readWord,
+                               SetSwapInterval setSwapInterval, SwapInterval swapInterval)
     : m_register(registerProbe), m_allocateCode(allocateCode), m_writeWord(writeWord),
-      m_readWord(readWord), m_frame(m_paints) {
+      m_readWord(readWord), m_setSwapInterval(setSwapInterval), m_swapInterval(swapInterval),
+      m_frame(m_paints) {
 }
 
 void WindWakerPaint::install() {
@@ -388,21 +374,7 @@ std::string WindWakerPaint::enable(Mode mode) {
         return m_refusal;
     }
     m_original = frame;
-    if (mode == Mode::OneAtSixty) {
-        // The payload puts the link register back where the loop's own call put
-        // it, and hands the frame to that address. So that word has to be what
-        // this document says it is: the loop's branch back to its top. Checked
-        // rather than assumed, because a frame returning somewhere else is a
-        // jump with nothing readable at the far end.
-        uint32_t tail = 0;
-        const uint32_t reachable = branchTo(kLoopReturn, kDisplayLoopTop, false);
-        if (!m_readWord(kLoopReturn, tail) || tail != reachable) {
-            m_refusal = "the loop's return at " + hex(kLoopReturn) + " holds " + hex(tail) +
-                        ", not the branch back to " + hex(kDisplayLoopTop);
-            return m_refusal;
-        }
-    }
-    if (mode == Mode::IntervalField) {
+    if (mode == Mode::IntervalField || mode == Mode::OneAtSixty) {
         // The field the title's own `GX2SetSwapInterval` call was handed, written
         // to one. Recorded and restored on the way out, because it is the
         // title's state and not the mod's.
@@ -426,6 +398,24 @@ std::string WindWakerPaint::enable(Mode mode) {
         }
         m_wroteInterval = true;
         lucent::info("paint", "display interval field {} -> {}", hex(field), hex(kSwapInterval));
+        if (mode == Mode::OneAtSixty) {
+            // And the pacing itself, which is the emulator's and not the title's
+            // memory. Both, so the title's record and the thing it records agree:
+            // a field saying one while the flip still takes two vblanks would be
+            // a claim nothing backs.
+            m_savedPacing = m_swapInterval();
+            const uint32_t now = m_setSwapInterval(kSwapInterval);
+            if (now != kSwapInterval) {
+                m_refusal = "the flip pacing refused one vblank and is at " + hex(now);
+                (void)m_writeWord(display + kIntervalOffset, m_savedInterval);
+                m_wroteInterval = false;
+                m_savedInterval = 0;
+                return m_refusal;
+            }
+            m_wrotePacing = true;
+            lucent::info("paint", "flip pacing {} -> {} vblank(s), and the title's field agrees",
+                         hex(m_savedPacing), hex(kSwapInterval));
+        }
     }
     if (m_block == 0) {
         m_refusal = m_reservationRefusal.empty()
@@ -508,6 +498,11 @@ std::string WindWakerPaint::disableLocked() {
         m_wroteInterval = false;
         m_savedInterval = 0;
     }
+    if (m_wrotePacing) {
+        (void)m_setSwapInterval(m_savedPacing);
+        m_wrotePacing = false;
+        m_savedPacing = 0;
+    }
     lucent::info("paint", "vtable slot {:#04x} back to the title's own {}", kFrameSlot,
                  hex(m_original));
     m_patched = 0;
@@ -526,6 +521,7 @@ std::string WindWakerPaint::json() const {
     body.string("mode", std::string(modeName(m_mode)));
     body.string("block", hex(m_block));
     body.number("swapIntervalAsked", kSwapInterval);
+    body.number("pacing", m_swapInterval());
     body.number("titleSwapInterval", kTitleSwapInterval);
     body.number("paints", m_paints.load());
     body.string("probe", probeName());
