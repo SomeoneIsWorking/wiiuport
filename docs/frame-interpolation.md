@@ -187,10 +187,41 @@ change did what it said; what is left is the work, and the work is there because
 the logic is riding the flip.
 
 So the fix belongs in the logic path, which is where the goal said to look: gate
-the tick on the title's own period, so a tick that arrives before the period has
-elapsed returns without doing it. That is a change to the title's logic, in guest
+the tick on the title's own period. That is a change to the title's logic, in guest
 memory, like everything else here -- and it is the first change in this mechanism
 that is not about the picture.
+
+**What the title's own code says about it.** `FUN_025f172c` is the per-frame
+entry, and it calls the tick unconditionally:
+
+```c
+uVar1 = DAT_1048d0ac;                        /* a period  */
+DAT_1048d0a8 = DAT_1048d0a8 + 1;              /* a counter */
+if (uVar1 != 0 && DAT_1048d0a8 == (DAT_1048d0a8 / uVar1) * uVar1) {
+    FUN_025f1654();                           /* every Nth frame */
+}
+FUN_025f2d74(); FUN_025e15e0(); FUN_025d42ec();   /* the tick, always */
+```
+
+So the title already counts its frames, already has a period, and already uses
+both to run one of its own functions every Nth frame. The gate is that idiom
+applied to the one call that should have obeyed it: count the calls, let every
+other one through. Nothing is invented -- the count, the test and the skip are the
+title's own shape, and the finding is that the tick was the call that ignored it.
+
+**And its shape in memory is forced by the arena.** The gate is fourteen words and
+the tick is fifty-two, so the gate cannot live inside the tick; it lives in its own
+block and the word after the tick's entry -- where the probe put the tick's own
+first instruction back -- gets a branch to it. Both of the gate's exits go to the
+title's own code: the tick by a *tail* branch, so its return reaches the title's
+caller, and a skipped call by a plain return. Neither returns into the stand-in's
+memory, because that is the one direction measured not to work.
+
+The gate keeps two counters in guest memory -- calls, and ticks it let through --
+so the host reads the logic's rate from the gate itself rather than from a probe on
+a function the gate has replaced. The run says which of the two it used, because a
+rate taken from a counter the gate owns and a rate taken from a probe are not the
+same measurement.
 
 The picture is otherwise already right. Two consecutive paints, captured one after
 the other in that same window, compared byte for byte over 6,220,816 bytes: **identical**.
