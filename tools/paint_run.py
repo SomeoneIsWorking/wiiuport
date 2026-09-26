@@ -58,7 +58,7 @@ LOGIC_RANGE = (28.5, 31.5)
 # repaints the same thirty frames a second and only doubles the work, and only
 # the one-vblank stand-in can present at sixty. The first two modes are asked
 # whether the title survives them at all.
-EXPECTED_MULTIPLE = {1: 1.0, 2: 1.0, 3: 2.0, 4: 1.0}
+EXPECTED_MULTIPLE = {1: 1.0, 2: 1.0, 3: 2.0, 4: 1.0, 5: 1.0, 6: 2.0}
 RATE_TOLERANCE = 0.9
 
 
@@ -131,11 +131,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--mode",
         type=int,
-        choices=[1, 2, 3, 4],
-        default=3,
+        choices=[1, 2, 3, 4, 5, 6],
+        default=6,
         help="what the stand-in does: 1 paints once (the redirect alone), 2 paints "
-        "twice at the title's two vblanks a flip, 3 paints twice at one, 4 paints "
-        "once by branching straight at the frame (a control for the indirect call)",
+        "twice at the title's two vblanks a flip, 3 paints twice at one, 4 is the "
+        "indirect variant that does not run, 5 paints once and writes the title's "
+        "own interval field to one, 6 paints once and asks the game's own setter "
+        "for one vblank a flip",
     )
     parser.add_argument(
         "--display",

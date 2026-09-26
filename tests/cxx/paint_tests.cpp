@@ -178,7 +178,11 @@ void wiiuport::tests::runPaintTests() {
     }
     {
         check::isTrue(!WindWakerPaint::modeFrom(0).has_value(), "mode 0 names no stand-in");
-        check::isTrue(!WindWakerPaint::modeFrom(5).has_value(), "mode 5 names no stand-in");
+        check::isTrue(!WindWakerPaint::modeFrom(7).has_value(), "mode 7 names no stand-in");
+        check::isTrue(WindWakerPaint::modeFrom(6) == WindWakerPaint::Mode::OneAtSixty,
+                      "mode 6 is one paint at one vblank a flip");
+        check::isTrue(WindWakerPaint::modeFrom(5) == WindWakerPaint::Mode::IntervalField,
+                      "mode 5 writes the title's own interval field and nothing else");
         check::isTrue(WindWakerPaint::modeFrom(4) == WindWakerPaint::Mode::IndirectOnce,
                       "mode 4 is the variant that re-reads the frame through CTR");
         check::isTrue(WindWakerPaint::modeFrom(1) == WindWakerPaint::Mode::PassThrough,
@@ -320,6 +324,70 @@ void wiiuport::tests::runPaintTests() {
                       "then the frame, called twice");
         check::isTrue(sixty[4] == WindWakerPaint::branchTo(0x00e07010, 0x0274c020, false),
                       "and a branch back to the top of the loop");
+    }
+    {
+        // The one-vblank payload, word for word, because every word in it is
+        // either lifted from the title or lifted-with-a-checked-field, and the
+        // last two are the point: the link register goes back where the loop's
+        // own call put it, and the frame is reached by a branch rather than a
+        // call, so nothing returns into this memory.
+        const auto words = WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::OneAtSixty);
+        check::isTrue(words.has_value() && words->size() == 7, "it is seven words");
+        if (words.has_value() && words->size() == 7) {
+            check::isTrue((*words)[0] == 0x38600001, "the title's own li r3,1");
+            check::isTrue((*words)[1] == WindWakerPaint::branchTo(0x00e07004, 0x028fad2c, true),
+                          "then a call at the game's own swap-interval setter");
+            check::isTrue((*words)[2] == 0x3d800274, "then lis r12,0x0275 for the loop's return");
+            check::isTrue((*words)[3] == 0x6180c034, "then ori r12,r12,0xc034");
+            check::isTrue((*words)[4] == 0x7d8803a6, "then mtspr LR,r12 to put it back");
+            check::isTrue((*words)[5] == 0x7fe3fb78, "then the title's own or r3,r31,r31");
+            check::isTrue((*words)[6] == WindWakerPaint::branchTo(0x00e07018, 0x0274c264, false),
+                          "and a plain branch at the frame, so its return is the title's");
+        }
+    }
+    {
+        // The loop's return word is what the payload relies on, so a revision
+        // that put something else there is refused rather than branched to.
+        FakeGuest guest = loadedTitle();
+        guest.writeWord(0x0274c034, 0x60000000);
+        WindWakerPaint mod = makeMod(guest);
+        mod.install();
+        linked();
+        paintOnce(kDisplay);
+        const std::string refusal = mod.enable(WindWakerPaint::Mode::OneAtSixty);
+        check::isTrue(refusal.find("loop's return") != std::string::npos,
+                      "a foreign word where the loop returns is refused by name");
+    }
+    {
+        // The interval field is the title's own state, so the mode that writes it
+        // has to put it back, and a field it cannot read is a refusal rather than
+        // a write of a value it guessed.
+        FakeGuest guest = loadedTitle();
+        guest.writeWord(kDisplay + WindWakerPaint::kIntervalOffset, 2);
+        WindWakerPaint mod = makeMod(guest);
+        mod.install();
+        linked();
+        paintOnce(kDisplay);
+        check::isTrue(mod.enable(WindWakerPaint::Mode::IntervalField).empty(),
+                      "the interval-field mode installs");
+        uint32_t field = 0;
+        check::isTrue(readWord(kDisplay + WindWakerPaint::kIntervalOffset, field) && field == 1,
+                      "and the display's own field now reads one");
+        check::isTrue(mod.disable().empty(), "and comes back out");
+        check::isTrue(readWord(kDisplay + WindWakerPaint::kIntervalOffset, field) && field == 2,
+                      "with the title's own value put back");
+    }
+    {
+        // A display whose interval field cannot be read: refused by name, and
+        // the field left as it was rather than written blind.
+        FakeGuest guest = loadedTitle();
+        WindWakerPaint mod = makeMod(guest);
+        mod.install();
+        linked();
+        paintOnce(kDisplay);
+        const std::string refusal = mod.enable(WindWakerPaint::Mode::IntervalField);
+        check::isTrue(refusal.find("interval field") != std::string::npos,
+                      "an unreadable interval field is refused by name");
     }
     {
         // A stand-in already in, asked for a different one: the title's own
