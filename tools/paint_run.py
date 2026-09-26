@@ -81,6 +81,15 @@ class Window:
         )
 
 
+def _last_log_lines(session: HeadlessSession, count: int) -> list[str]:
+    """The product's own last words, for a refusal that has to say more."""
+    log = session.session_dir / "data" / "Cemu" / "log.txt"
+    if not log.is_file():
+        return ["(the product wrote no log)"]
+    lines = [line for line in log.read_text(errors="replace").splitlines() if line.strip()]
+    return lines[-count:]
+
+
 def _logic_calls(port: int) -> int:
     for entry in read_callers(port):
         if entry.entry == 0x025D42EC:
@@ -187,6 +196,19 @@ def main(argv: list[str] | None = None) -> int:
                     continue
             try:
                 for name in ("off", "on", "off"):
+                    if running.poll() is not None:
+                        # The product died between windows. Said plainly, with
+                        # what its own log last said, because "the channel did
+                        # not answer" reads the same whether the mod killed the
+                        # title or the display did.
+                        print(
+                            f"refused: the product exited {running.returncode} before the "
+                            f"{name} window; its log last said:",
+                            file=sys.stderr,
+                        )
+                        for line in _last_log_lines(session, 4):
+                            print(f"  {line}", file=sys.stderr)
+                        return 1
                     set_paint(name == "on", port=args.port, mode=args.mode)
                     # One settle second, then the window's own start reading, so
                     # the first second's paints are not counted twice.
