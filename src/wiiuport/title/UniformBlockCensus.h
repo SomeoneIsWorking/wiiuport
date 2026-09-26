@@ -51,6 +51,8 @@ class UniformBlockCensus {
     static constexpr uint32_t kEntrySize = 0x1c;
     static constexpr uint32_t kEntrySizeOffset = 0x04;
     static constexpr uint32_t kEntryOffsetOffset = 0x0c;
+    // How many words a descriptor entry is, all of them reported.
+    static constexpr size_t kEntryWords = kEntrySize / sizeof(uint32_t);
     // The list is allocated with two entries; a cursor above that is a reading
     // this census reports rather than one it explains.
     static constexpr int kEntries = 2;
@@ -93,12 +95,16 @@ class UniformBlockCensus {
         bool m_second;
     };
 
-    // One binding, as read out of the object the binder was handed.
+    // One binding, as read out of the object the binder was handed: the
+    // cursor, and the descriptor entry whole. The entry is seven words and the
+    // binder uses two of them, so the other five are reported as they lie --
+    // which is how the block's *address* gets found, since what the binder
+    // passes the GPU is an offset into a region the title set elsewhere and a
+    // relative offset alone cannot dump.
     struct Binding {
         bool read = false;
         uint32_t cursor = 0;
-        uint32_t offset = 0;
-        uint32_t size = 0;
+        std::array<uint32_t, kEntryWords> entry{};
     };
 
     // Called on the display thread, once per binding, with the object.

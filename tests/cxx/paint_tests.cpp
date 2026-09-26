@@ -83,6 +83,22 @@ void linked() {
     g_probe->OnInstall(GuestCallProbes::Installation::Installed);
 }
 
+// The flip pacing this test pretends the emulator has, and whether a write to it
+// took: a fake that refuses is how the refusal path is reached.
+uint32_t g_pacing = 2;
+bool g_pacingTakes = true;
+
+uint32_t setPacing(uint32_t vblanks) {
+    if (g_pacingTakes) {
+        g_pacing = vblanks;
+    }
+    return g_pacing;
+}
+
+uint32_t pacing() {
+    return g_pacing;
+}
+
 uint32_t allocateCode(uint32_t sizeInBytes) {
     // The block is empty and writable, as a fresh allocation out of the
     // loader's arena is.
@@ -102,7 +118,10 @@ bool readWord(uint32_t address, uint32_t& value) {
 WindWakerPaint makeMod(FakeGuest& guest) {
     g_fake = &guest;
     g_probe = nullptr;
-    return WindWakerPaint(&keepRegistration, &allocateCode, &writeWord, &readWord);
+    g_pacing = 2;
+    g_pacingTakes = true;
+    return WindWakerPaint(&keepRegistration, &allocateCode, &writeWord, &readWord, &setPacing,
+                          &pacing);
 }
 
 // A display object at a fixed address, holding this title's vtable, and the
@@ -223,14 +242,15 @@ void wiiuport::tests::runPaintTests() {
         // The whole body, exactly: a report no JSON parser will take is
         // indistinguishable from a product that is not reporting, and this is
         // the one place that catches a stray quote or a doubled comma.
-        check::isTrue(mod.json() ==
-                          "{\"frame\":\"0x0274c264\",\"vtable\":\"0x10004e88\","
-                          "\"patchedSlot\":\"0x00000000\",\"slot\":\"0xcc\","
-                          "\"installed\":false,\"mode\":\"passThrough\",\"block\":\"0x00e07000\","
-                          "\"swapIntervalAsked\":1,\"titleSwapInterval\":2,\"paints\":1,"
-                          "\"probe\":\"installed\",\"display\":\"0x43e08af8\","
-                          "\"liveVTable\":\"0x10004e88\",\"fields\":{}}\n",
-                      "the report is one JSON object, spelled out");
+        check::isTrue(
+            mod.json() ==
+                "{\"frame\":\"0x0274c264\",\"vtable\":\"0x10004e88\","
+                "\"patchedSlot\":\"0x00000000\",\"slot\":\"0xcc\","
+                "\"installed\":false,\"mode\":\"passThrough\",\"block\":\"0x00e07000\","
+                "\"swapIntervalAsked\":1,\"pacing\":2,\"titleSwapInterval\":2,\"paints\":1,"
+                "\"probe\":\"installed\",\"display\":\"0x43e08af8\","
+                "\"liveVTable\":\"0x10004e88\",\"fields\":{}}\n",
+            "the report is one JSON object, spelled out");
         check::isTrue(readWord(WindWakerPaint::kDisplayVTable + WindWakerPaint::kFrameSlot, slot) &&
                           slot == WindWakerPaint::kDisplayFrame,
                       "leaving the title's own frame in the slot");
@@ -326,37 +346,54 @@ void wiiuport::tests::runPaintTests() {
                       "and a branch back to the top of the loop");
     }
     {
-        // The one-vblank payload, word for word, because every word in it is
-        // either lifted from the title or lifted-with-a-checked-field, and the
-        // last two are the point: the link register goes back where the loop's
-        // own call put it, and the frame is reached by a branch rather than a
-        // call, so nothing returns into this memory.
+        // The one-vblank payload is a single branch. The pacing is the
+        // emulator's and the title's own record of it is a field, so nothing in
+        // the guest is called and the display register arrives untouched.
         const auto words = WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::OneAtSixty);
-        check::isTrue(words.has_value() && words->size() == 7, "it is seven words");
-        if (words.has_value() && words->size() == 7) {
-            check::isTrue((*words)[0] == 0x38600001, "the title's own li r3,1");
-            check::isTrue((*words)[1] == WindWakerPaint::branchTo(0x00e07004, 0x028fad2c, true),
-                          "then a call at the game's own swap-interval setter");
-            check::isTrue((*words)[2] == 0x3d800274, "then lis r12,0x0275 for the loop's return");
-            check::isTrue((*words)[3] == 0x6180c034, "then ori r12,r12,0xc034");
-            check::isTrue((*words)[4] == 0x7d8803a6, "then mtspr LR,r12 to put it back");
-            check::isTrue((*words)[5] == 0x7fe3fb78, "then the title's own or r3,r31,r31");
-            check::isTrue((*words)[6] == WindWakerPaint::branchTo(0x00e07018, 0x0274c264, false),
-                          "and a plain branch at the frame, so its return is the title's");
+        check::isTrue(words.has_value() && words->size() == 1, "it is one branch");
+        if (words.has_value() && words->size() == 1) {
+            check::isTrue((*words)[0] == WindWakerPaint::branchTo(0x00e07000, 0x0274c264, false),
+                          "at the frame, so its return is the title's loop's");
         }
     }
     {
-        // The loop's return word is what the payload relies on, so a revision
-        // that put something else there is refused rather than branched to.
+        // One vblank: the title's own field says one, the emulator's pacing says
+        // one, and both are put back on the way out.
         FakeGuest guest = loadedTitle();
-        guest.writeWord(0x0274c034, 0x60000000);
+        guest.writeWord(kDisplay + WindWakerPaint::kIntervalOffset, 2);
         WindWakerPaint mod = makeMod(guest);
         mod.install();
         linked();
         paintOnce(kDisplay);
+        check::isTrue(mod.enable(WindWakerPaint::Mode::OneAtSixty).empty(),
+                      "the one-vblank mode installs");
+        uint32_t field = 0;
+        check::isTrue(readWord(kDisplay + WindWakerPaint::kIntervalOffset, field) && field == 1,
+                      "the title's own field reads one");
+        check::isTrue(g_pacing == 1, "and the emulator's pacing is one vblank a flip");
+        check::isTrue(mod.json().find("\"pacing\":1") != std::string::npos,
+                      "and the report says so");
+        check::isTrue(mod.disable().empty(), "and it comes back out");
+        check::isTrue(readWord(kDisplay + WindWakerPaint::kIntervalOffset, field) && field == 2,
+                      "with the title's field back at two");
+        check::isTrue(g_pacing == 2, "and the pacing back at two");
+    }
+    {
+        // A pacing the emulator refuses is a refusal, and the title's field is
+        // not left saying one when the pacing is not.
+        FakeGuest guest = loadedTitle();
+        guest.writeWord(kDisplay + WindWakerPaint::kIntervalOffset, 2);
+        WindWakerPaint mod = makeMod(guest);
+        mod.install();
+        linked();
+        paintOnce(kDisplay);
+        g_pacingTakes = false;
         const std::string refusal = mod.enable(WindWakerPaint::Mode::OneAtSixty);
-        check::isTrue(refusal.find("loop's return") != std::string::npos,
-                      "a foreign word where the loop returns is refused by name");
+        check::isTrue(refusal.find("pacing refused") != std::string::npos,
+                      "a refused pacing is refused by name");
+        uint32_t field = 0;
+        check::isTrue(readWord(kDisplay + WindWakerPaint::kIntervalOffset, field) && field == 2,
+                      "and the title's field is left as it was");
     }
     {
         // The interval field is the title's own state, so the mode that writes it

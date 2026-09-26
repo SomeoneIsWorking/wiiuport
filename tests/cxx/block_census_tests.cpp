@@ -75,15 +75,23 @@ void linked() {
 // A sub-object whose descriptor list has two entries, the second in use.
 constexpr uint32_t kObject = 0x43e00000;
 
+// A whole descriptor entry, all seven words: the census reports the entry whole,
+// so a fake that filled only the two the binder uses would read as an entry it
+// could not read, which is the same report a real unmapped one gives.
 void writeEntry(FakeGuest& guest, uint32_t entry, uint32_t offset, uint32_t size) {
-    guest.writeWord(kObject + UniformBlockCensus::kEntriesOffset +
-                        entry * UniformBlockCensus::kEntrySize +
-                        UniformBlockCensus::kEntryOffsetOffset,
-                    offset);
-    guest.writeWord(kObject + UniformBlockCensus::kEntriesOffset +
-                        entry * UniformBlockCensus::kEntrySize +
-                        UniformBlockCensus::kEntrySizeOffset,
-                    size);
+    for (uint32_t word = 0; word < UniformBlockCensus::kEntryWords; word++) {
+        uint32_t value = 0;
+        if (word == UniformBlockCensus::kEntryOffsetOffset / 4) {
+            value = offset;
+        } else if (word == UniformBlockCensus::kEntrySizeOffset / 4) {
+            value = size;
+        } else {
+            value = 0x1000 + word;
+        }
+        guest.writeWord(kObject + UniformBlockCensus::kEntriesOffset +
+                            entry * UniformBlockCensus::kEntrySize + 4 * word,
+                        value);
+    }
 }
 
 } // namespace
