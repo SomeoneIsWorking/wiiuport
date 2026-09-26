@@ -35,11 +35,15 @@ from wiiuport.control import (
     DEFAULT_PORT,
     ControlUnavailable,
     capture_frame,
+    compare_bytes,
     compare_images,
+    dump_guest,
     read_blocks,
     read_callers,
+    read_gate,
     read_paint,
     runtime_env,
+    set_gate,
     set_paint,
     wait_for_channel,
 )
@@ -60,6 +64,12 @@ LOGIC_TARGET = "025d42ec:7c0802a6"
 # a doubling of the simulation would break first, and every window's count and
 # rate is printed so the spread is visible rather than asserted.
 LOGIC_RANGE = (29.5, 30.5)
+
+# The logic's rate is counted at the tick, and with the gate in the tick is
+# replaced -- so the rate comes from the gate's own counter of the ticks it let
+# through. Both counts are read and the run says which it used, because a rate
+# taken from a counter the gate owns and a rate taken from a probe are not the
+# same measurement and the report should not read as though they were.
 
 # What each stand-in should do to the display's rate, and why. The frame waits
 # for its own flip at the end, so a paint costs a flip however many of them
@@ -82,6 +92,8 @@ class Window:
     logic_per_second: float
     paints: int
     logic_calls: int
+
+    source: str = "the caller census on fapGm_Execute"
 
     def render(self) -> str:
         return (
@@ -107,18 +119,36 @@ def _logic_calls(port: int) -> int:
     return 0
 
 
+def _logic_source(port: int) -> tuple[int, str]:
+    """The logic's tick count and where it came from.
+
+    The gate's own counter when the gate is in, because the gate has replaced
+    the tick the probe watches; the probe's call count otherwise.
+    """
+    try:
+        gate = read_gate(port)
+    except ControlUnavailable:
+        return _logic_calls(port), "the caller census on fapGm_Execute"
+    if gate.enabled and gate.ticks is not None:
+        return gate.ticks, "the logic gate's own tick counter"
+    return _logic_calls(port), "the caller census on fapGm_Execute"
+
+
 def _window(name: str, port: int, seconds: float, before: tuple[int, int]) -> Window:
     time.sleep(seconds)
-    after = (read_paint(port).paints, _logic_calls(port))
+    # One reading of each counter, so the two rates come from the same moment.
+    paints = read_paint(port).paints
+    ticks, source = _logic_source(port)
     elapsed = seconds
     return Window(
         name=name,
         installed=name == "on",
         seconds=elapsed,
-        paints_per_second=(after[0] - before[0]) / elapsed,
-        logic_per_second=(after[1] - before[1]) / elapsed,
-        paints=after[0] - before[0],
-        logic_calls=after[1] - before[1],
+        source=source,
+        paints_per_second=(paints - before[0]) / elapsed,
+        logic_per_second=(ticks - before[1]) / elapsed,
+        paints=paints - before[0],
+        logic_calls=ticks - before[1],
     )
 
 
@@ -158,6 +188,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="turn on the recompiler's own log: what it translated, and what it "
         "refused to. Very large, so a diagnostic asks for it rather than a run",
+    )
+    parser.add_argument(
+        "--gate",
+        action="store_true",
+        help="gate the title's logic alongside the stand-in, so the picture runs at "
+        "the display's rate and the logic keeps its own",
     )
     parser.add_argument(
         "--captures",
@@ -245,6 +281,14 @@ def main(argv: list[str] | None = None) -> int:
                             print(f"  {line}", file=sys.stderr)
                         return 1
                     set_paint(name == "on", port=args.port, mode=args.mode)
+                    # The gate with it: the paint rate and the logic rate are the
+                    # same measurement until something separates them, and the
+                    # gate is what separates them.
+                    if args.gate:
+                        gate = set_gate(name == "on", port=args.port)
+                        print(
+                            f"  gate {'in' if gate.enabled else 'out'}: {gate.render()}", flush=True
+                        )
                     # One settle second, then the window's own start reading, so
                     # the first second's paints are not counted twice.
                     time.sleep(1.0)
@@ -276,6 +320,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             try:
                 set_paint(False, port=args.port)
+                if args.gate:
+                    set_gate(False, port=args.port)
             except ControlUnavailable:
                 pass
             try:
@@ -297,12 +343,29 @@ def main(argv: list[str] | None = None) -> int:
         census = read_blocks(args.port)
         print(census.render())
         print(f"  its two entries: {census.parity()}")
-        if census.examples:
-            first = census.examples[0]
-            print(f"  a binding read cursor {first[0]}, block offset {first[1]}, size {first[2]}")
+        for binding in census.examples[:2]:
+            print(
+                f"  a binding read cursor {binding.cursor}, offset {binding.offset}, "
+                f"size {binding.size}, entry "
+                + ", ".join(
+                    f"{word}:{value:#010x}" for word, value in sorted(binding.entry.items())
+                )
+            )
+            block = binding.block()
+            if block is None:
+                print("    no single word of the entry names a readable block, so no address")
+                continue
+            # The block itself, twice, half a tick apart: a range whose contents
+            # change per tick is where a per-tick pose has to be, and one that
+            # does not is not.
+            before_bytes = dump_guest(args.port, block, binding.size)
+            time.sleep(0.3)
+            after_bytes = dump_guest(args.port, block, binding.size)
+            print(f"    at {block:#010x}: {compare_bytes(before_bytes, after_bytes)}")
     except ControlUnavailable as unavailable:
         print(f"refused: {unavailable}", file=sys.stderr)
-    print(state.render())
+    if state is not None:
+        print(state.render())
     if comparison:
         print(f"  two consecutive paints: {comparison}")
 

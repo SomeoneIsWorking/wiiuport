@@ -100,6 +100,7 @@ void Runtime::installHooks() {
     m_lineProbe.install();
     m_paint.install();
     m_blocks.install();
+    m_logic.install();
     m_hooksInstalled = true;
     // Always open, on loopback: the channel is how an agent asks a running
     // product, the player's own session included, what it is doing.

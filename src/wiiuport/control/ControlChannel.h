@@ -26,6 +26,7 @@
 #include "wiiuport/interp/TransformSearch.h"
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
+#include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
@@ -89,6 +90,7 @@ class ControlChannel {
         const guest::CallerCensus& callers;
         title::WindWakerPaint& paint;
         const title::UniformBlockCensus& blocks;
+        title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
         frame::PresentPacing& pacing;
@@ -216,6 +218,7 @@ class ControlChannel {
     const guest::CallerCensus& m_callers;
     title::WindWakerPaint& m_paint;
     const title::UniformBlockCensus& m_blocks;
+    title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;
     frame::PresentPacing& m_pacing;
