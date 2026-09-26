@@ -209,13 +209,42 @@ applied to the one call that should have obeyed it: count the calls, let every
 other one through. Nothing is invented -- the count, the test and the skip are the
 title's own shape, and the finding is that the tick was the call that ignored it.
 
-**And its shape in memory is forced by the arena.** The gate is fourteen words and
-the tick is fifty-two, so the gate cannot live inside the tick; it lives in its own
-block and the word after the tick's entry -- where the probe put the tick's own
-first instruction back -- gets a branch to it. Both of the gate's exits go to the
-title's own code: the tick by a *tail* branch, so its return reaches the title's
-caller, and a skipped call by a plain return. Neither returns into the stand-in's
-memory, because that is the one direction measured not to work.
+**And its shape in memory is forced by the tick itself.** The gate is sixteen words
+and the tick is fifty-two, so the gate cannot live inside the tick; it lives in its
+own block and the tick's *second* instruction takes a branch to it. Both of the
+gate's exits go to the title's own code: the tick by a *tail* branch, so its return
+reaches the title's caller, and a skipped call by a plain return. Neither returns
+into the stand-in's memory, because that is the one direction measured not to work.
+
+Which word it takes is not a choice, and getting it wrong is a crash dressed as a
+gate. The tick, whole, from the image:
+
+```
+025d42ec  mfspr r0,LR        7c0802a6
+025d42f0  stw  r0,0x4(r1)    90010004
+025d42f4  stwu r1,-0x8(r1)   9421fff8
+025d42f8  lis  r4,0x25d      3c80025d
+025d42fc  li   r3,0          38600000
+025d4300  addi r4,r4,0x42c4  388442c4
+025d4304  bl   0x025df948    4800b645
+025d4308  li   r3,0          38600000
+025d430c  bl   0x0200e6ec    4ba3a3e1
+025d4310  lwz  r0,0xc(r1)    8001000c
+025d4314  mtspr LR,r0        7c0803a6
+025d4318  addi r1,r1,0x8     38210008
+025d431c  blr                4e800020
+```
+
+The first instruction saves the link register into the **caller's** frame, at
+`0x4(r1)`, and the epilogue reads it back from `0xc(r1)` after its own `stwu` has
+moved the stack pointer down eight. So the tick's return address lives in the
+caller's frame and the tick is not re-entrant by construction: branch into it past
+that store and its `blr` returns to whatever the link register happened to hold,
+which after a gate has been counting is the gate's own return. The gate therefore
+supplies the first two instructions itself, lifted whole from `0x025d42ec` and
+`0x025d42f0`, and branches to `0x025d42f4`. A call it lets through is then the
+title's tick entered exactly as the title enters it -- which is the only claim
+worth making about a patch that skips half the calls.
 
 The gate keeps two counters in guest memory -- calls, and ticks it let through --
 so the host reads the logic's rate from the gate itself rather than from a probe on
