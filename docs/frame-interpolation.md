@@ -163,6 +163,43 @@ explicit limitation, not an oversight, and it is recorded as such in project sta
 
 ## The other mechanism: the title's own paint path
 
+### The measured result, and what it says about the title
+
+One window, six seconds, alternating with unmodded windows either side, on the real
+title headless:
+
+| | paints | logic ticks |
+|---|---|---|
+| mod off | 180 in 6.0 s = 30.00/s | 180 in 6.0 s = 30.00/s |
+| mod on, one vblank a flip | 277 in 6.0 s = **46.17/s** | 277 in 6.0 s = **46.17/s** |
+| mod off again | 181 in 6.0 s = 30.17/s | 181 in 6.0 s = 30.17/s |
+
+Two numbers, and they are the same number. **The title runs its logic once per
+paint**: the caller census on `fapGm_Execute` counted 277 calls for 277 paints, so
+the tick is not merely correlated with the flip, it is one-for-one with it. The
+logic has a counter and a period of its own and does not wait -- but the *call*
+that starts it comes from the frame path, and so it inherits the frame's pacing.
+
+That is why the picture reached 46.17 and not 60. At one vblank a flip the loop
+will go as fast as a vblank allows, but each iteration now carries a whole tick's
+work, and the frame takes longer than the vblank it is waiting for. The pacing
+change did what it said; what is left is the work, and the work is there because
+the logic is riding the flip.
+
+So the fix belongs in the logic path, which is where the goal said to look: gate
+the tick on the title's own period, so a tick that arrives before the period has
+elapsed returns without doing it. That is a change to the title's logic, in guest
+memory, like everything else here -- and it is the first change in this mechanism
+that is not about the picture.
+
+The picture is otherwise already right. Two consecutive paints, captured one after
+the other in that same window, compared byte for byte over 6,220,816 bytes: **identical**.
+A full 1080p frame, every byte. That is the null case the blend has to beat, and it
+is measured rather than assumed -- with the caveat the run's own state carries, that
+the scene the presses left was not moving, so "identical" is what a still scene
+gives and does not yet distinguish two paints of one tick from two paints of a
+stationary world. Three captures would.
+
 Everything above is the runtime re-issuing a frame it recorded. This is the
 other way to present at the display's rate: change the title's own paint, in
 the title's own memory, and let it draw the frame twice itself.
