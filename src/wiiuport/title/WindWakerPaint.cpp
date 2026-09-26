@@ -172,20 +172,43 @@ WindWakerPaint::WindWakerPaint(Register registerProbe, AllocateCode allocateCode
 }
 
 void WindWakerPaint::install() {
+    m_frame.setReservation([this](std::string& refusal) {
+        reserve(refusal);
+    });
     m_register(kDisplayFrame, kDisplayFrameFirst, m_frame);
-    // Taken now, not when the stand-in is asked for. Reserving executable guest
-    // memory while the title is running is a thing the loader's arena does not
-    // expect to be asked for, and the one thing this mod does not need to do
-    // while the title is running is allocate.
+}
+
+void WindWakerPaint::reserve(std::string& refusal) {
+    std::scoped_lock lock(m_mutex);
+    if (m_block != 0) {
+        return;
+    }
+    // Taken once the title's modules are linked, not when the stand-in is asked
+    // for: the loader's arena expects to be asked while it is linking, and the
+    // one thing this mod does not need to do while the title is running is
+    // allocate. Enabling is then a single word.
     m_block = m_allocateCode(4 * kMaxWords);
     if (m_block == 0) {
-        m_reservationRefusal = "no executable guest memory for the stand-in";
+        m_reservationRefusal = "the loader's arena had no " + std::to_string(4 * kMaxWords) +
+                               " bytes of executable guest memory";
+        refusal = m_reservationRefusal;
+        return;
     }
+    m_reservationRefusal.clear();
+    lucent::info("paint", "stand-in memory reserved at {}", hex(m_block));
 }
 
 void WindWakerPaint::Frame::OnInstall(GuestCallProbes::Installation result) {
-    std::scoped_lock lock(mutex);
-    installation = result;
+    {
+        std::scoped_lock lock(mutex);
+        installation = result;
+    }
+    // Outside the probe's own lock: the reservation logs, and the probe's lock
+    // is held on the thread that is linking the title.
+    if (m_reserve) {
+        std::string refusal;
+        m_reserve(refusal);
+    }
 }
 
 void WindWakerPaint::Frame::OnCall(std::span<const uint32_t, 32> gpr, uint32_t /*returnAddress*/) {
@@ -264,7 +287,9 @@ std::string WindWakerPaint::enable(Mode mode) {
     }
     m_original = frame;
     if (m_block == 0) {
-        m_refusal = "no executable guest memory was reserved: " + m_reservationRefusal;
+        m_refusal = m_reservationRefusal.empty()
+                        ? "no executable guest memory was reserved for the stand-in"
+                        : m_reservationRefusal;
         return m_refusal;
     }
     const std::optional<std::vector<uint32_t>> at = payload(m_block, mode);

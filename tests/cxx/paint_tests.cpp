@@ -75,6 +75,14 @@ void paintOnce(uint32_t display) {
     g_probe->OnCall(std::span<const uint32_t, 32>(gpr.data(), gpr.size()), 0);
 }
 
+// The fork's report that the title's modules are linked and the probe is in
+// place, which is when the mod takes its memory. A test that skipped it would be
+// testing a mod that was never given any, and every check after would be about
+// the refusal instead of about the stand-in.
+void linked() {
+    g_probe->OnInstall(GuestCallProbes::Installation::Installed);
+}
+
 uint32_t allocateCode(uint32_t sizeInBytes) {
     // The block is empty and writable, as a fresh allocation out of the
     // loader's arena is.
@@ -120,7 +128,7 @@ void wiiuport::tests::runPaintTests() {
     {
         const auto words = WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::PassThrough);
         check::isTrue(words.has_value(), "a pass-through payload is built");
-        if (words.has_value()) {
+        if (words.has_value() && words->size() == 6) {
             check::isTrue(words->size() == 6, "a pass-through payload is six words");
             check::isTrue((*words)[0] == 0x819f0024, "it starts with the title's lwz r12");
             check::isTrue((*words)[4] == 0x4e800421, "it ends its body with the title's bctr");
@@ -158,6 +166,7 @@ void wiiuport::tests::runPaintTests() {
         FakeGuest guest = loadedTitle();
         WindWakerPaint mod = makeMod(guest);
         mod.install();
+        linked();
         // Before the display thread has painted, which vtable it calls is not
         // known, and patching an address out of the image instead is exactly
         // the mistake worth refusing.
@@ -189,7 +198,7 @@ void wiiuport::tests::runPaintTests() {
                           "\"patchedSlot\":\"0x00000000\",\"slot\":\"0xcc\","
                           "\"installed\":false,\"mode\":\"passThrough\",\"block\":\"0x00e07000\","
                           "\"swapIntervalAsked\":1,\"titleSwapInterval\":2,\"paints\":1,"
-                          "\"probe\":\"pending\",\"display\":\"0x43e08af8\","
+                          "\"probe\":\"installed\",\"display\":\"0x43e08af8\","
                           "\"liveVTable\":\"0x10004e88\",\"fields\":{}}\n",
                       "the report is one JSON object, spelled out");
         check::isTrue(readWord(WindWakerPaint::kDisplayVTable + WindWakerPaint::kFrameSlot, slot) &&
@@ -203,6 +212,7 @@ void wiiuport::tests::runPaintTests() {
         guest.writeWord(WindWakerPaint::kDisplayVTable + WindWakerPaint::kFrameSlot, 0xDEADBEEF);
         WindWakerPaint mod = makeMod(guest);
         mod.install();
+        linked();
         paintOnce(kDisplay);
         const std::string refusal = mod.enable(WindWakerPaint::Mode::PassThrough);
         check::isTrue(refusal.find("0xdeadbeef") != std::string::npos,
@@ -218,6 +228,7 @@ void wiiuport::tests::runPaintTests() {
         guest.writeWord(WindWakerPaint::kDisplayLoopTop, 0x60000000);
         WindWakerPaint mod = makeMod(guest);
         mod.install();
+        linked();
         paintOnce(kDisplay);
         const std::string refusal = mod.enable(WindWakerPaint::Mode::PassThrough);
         check::isTrue(refusal.find("display thread's loop") != std::string::npos,
@@ -229,6 +240,7 @@ void wiiuport::tests::runPaintTests() {
         FakeGuest guest = loadedTitle();
         WindWakerPaint mod = makeMod(guest);
         mod.install();
+        linked();
         paintOnce(kDisplay);
         check::isTrue(mod.enable(WindWakerPaint::Mode::Twice).empty(), "two paints install");
         const auto twice = guest.block();
@@ -237,7 +249,13 @@ void wiiuport::tests::runPaintTests() {
         check::isTrue(mod.enable(WindWakerPaint::Mode::TwiceAtSixty).empty(),
                       "two paints and one vblank install");
         const auto sixty = guest.block();
+        // Guarded: an index into a block that was never written is a crash that
+        // takes the whole report with it, which is the one thing a test suite
+        // must never do to the run that reads it.
         check::isTrue(sixty.size() == 13, "and thirteen words, the interval call among them");
+        if (sixty.size() != 13) {
+            return;
+        }
         check::isTrue(sixty[0] == 0x38600001, "starting with the title's own li r3,1");
         // The second body, and the branch back to the loop that ends it: with
         // the interval call the words are li, bl, then two bodies of five.
@@ -253,6 +271,7 @@ void wiiuport::tests::runPaintTests() {
         FakeGuest guest = loadedTitle();
         WindWakerPaint mod = makeMod(guest);
         mod.install();
+        linked();
         paintOnce(kDisplay);
         mod.enable(WindWakerPaint::Mode::PassThrough);
         check::isTrue(mod.enable(WindWakerPaint::Mode::Twice).empty(), "a second mode replaces it");
