@@ -456,15 +456,14 @@ built on it would find nothing while looking as though it had worked):
 0x0274c280  0x807e0018  lwz    r3,0x18(r30)        <- the first sub-object
 ```
 
-**Three things this corrects.** The listing previously shown here started at `0x0274c278` and so
-**omitted the entire five-word prologue**, which means the `lwz` it showed at `0x0274c288` is the
-image's `0x0274c280`. The offsets past the first eight words are *not* re-verified by this read, and
-the ones before it are now measured rather than quoted. The first sub-object is at
-**`display+0x18`, not `display+0x24`** -- so "all five call targets come from `*(display+0x24)`" is
-wrong by an offset, and the display probe that reads the call targets through `*(display+0x24)` has
-been reading a field the frame does not read.
+**What this corrects.** The listing previously shown here started at `0x0274c278` and so **omitted
+the entire five-word prologue**, which means the `lwz` it showed at `0x0274c288` is the image's
+`0x0274c280`. The offsets past the first eight words are *not* re-verified by that read, and the ones
+before it are now measured rather than quoted. The first load is `display+0x18` into `r3` -- and a
+later section, which reads all 85 instructions, shows that is **not** where the call targets come
+from, so the "`display+0x18` not `display+0x24`" reading that was briefly written here is withdrawn.
 
-And the prologue says something about the objective's payload: **the frame's first instruction
+The prologue does say something about the objective's payload: **the frame's first instruction
 clobbers `r0` with the link register**, storing it at `0x1c(r1)`. `r0` is therefore not a register
 the frame preserves, and a stand-in that expects `r0` to still hold something of its own across the
 call is expecting a register the callee's first instruction overwrites.
@@ -745,38 +744,117 @@ recompiler declined**, and that is a fact about the patch rather than about the 
 Which of the two remaining causes it is, and where `FUN_021c54e0` and `FUN_021c5cb8` sit relative to
 the display thread, are not yet measured.
 
-### The guest dump works now, and its first result is a question
+### The guest is the image, and the debugger was reading it backwards
 
-With the three instrument defects below repaired, the dump read guest memory for the first time. The
-addressing is right -- `memory_base` came back `0x7ffed4000000` and every read is that base plus the
-guest address -- and **the words it found are not the words the image has at those addresses**:
+The section this replaces said the running guest's memory did not match the disc image's. **That was
+a byte-order artifact, and the image is the guest.** The product's own accessor settles it --
+`GET /memory` goes through the fork's `GuestCallProbes::GuestBytes`, which returns null unless every
+byte of the range is mapped guest memory (`GuestMemoryRead.h:26-31`), so it is a read that refuses by
+reason rather than one that returns whatever the host had there:
 
 ```
-the frame, guest 0x0274c264:     0x1c966b4a 0xe8ff2194 0x1000c193 0x1400e193 ...
-the vtable slot, guest 0x01004f4c: 0x00000000 0x00000000 0x00000000 0x00000000
-the stand-in block, guest 0x00e05898: 0x01006038 0x9154af49 0xc5699449 ...
+  the frame, guest 0x0274c264, as the product reads it
+    4a6b961c 9421ffe8 93c10010 93e10014 9001001c 7c7e1b78 4bffedd9 807e0018
+  the frame, guest 0x0274c264, as gdb's x/8wx read it
+    1c966b4a e8ff2194 1000c193 1400e193 1c000190 781b7e7c d9edff4b 18007e80
+  every one of the eight byte-reversed: True
 ```
 
-So the running guest's memory does not match the disc image **at the addresses this whole file's
-reasoning is quoted from**, and that has to be settled before any of the disassembly here can be
-treated as a statement about the running title. Three explanations are consistent with it and one
-measurement would choose between them, so none is claimed: the title's code and data are **encrypted
-on disc and decrypted into place**; or the frame is in a **different module** than the one
-`cking.elf` was converted from and `0x0274xxxx` is not its load address at run time; or the mod's
-block, vtable and display addresses are reported as host-side values where the guest wants guest ones.
-**What is not consistent with it is the paint mod's own working**: it installs, it patches a vtable
-it reports, and it counts paints, so something at those addresses is being written.
+**gdb reverses every word it prints for big-endian guest memory.** Eight words, eight reversals, no
+exceptions -- and one of them is the frame's own `or r3,r30,r3`, which no coincidence produces. So
+every guest word this project's debugger has read was byte-swapped, and the conclusions drawn from
+them are withdrawn: that the running guest differs from the image, and that the faulting opcode is
+absent from the title's RPX.
 
-That is why the dump's self-check changed. It used to fail the whole dump when the frame's word did
-not match the image and declare "nothing in it is evidence" -- quietly assuming the thing now in
-question. It now prints both numbers and draws no verdict, and its constant is the listing's own
-`0x7c7e1b78` rather than a hand-encoded one: **that encoding was got wrong three times** before being
-read out of the image (`0x4b800003` is not an instruction, `0x7ff31b78` is not this instruction), and
-a fourth attempt to derive it would have been the fourth wrong one.
+**The one word that genuinely differs is the mod's own probe**, and it is a branch because that is
+what a probe is. `GuestCallProbes::Install` writes
+`memory_writeU32(registration.entry, RelativeBranch(entry, stubAddress))` and keeps the image's word
+inside the stub, which the arena dump shows at its own offset: `040004e4` (the HLE `bl`),
+`7c0802a6` (the displaced `mfspr r0`), `3d80027f 618cf890` (the resume address), `7d8903a6`
+(`mtctr r12`) -- exactly `WriteStub`'s layout, and the displaced word is the image's. So the frame's
+first word at run time is `0x4a6b961c`, a relative branch into that stub, where the frame's real first
+instruction waits.
 
-**And the `display+0x18` correction above is a correction to the image's listing, not yet a statement
-about the running title.** It stands as a correction to what this file quoted; whether the running
-frame reads `display+0x18` is one of the things this question decides.
+**And the vtable slot, read by the product, agrees with the objective's arithmetic:**
+
+```
+  guest 0x10004f4c:  0274c00c 00000000 0274c264 00000000 0274c67c 00000000
+                     vtable+0xc4  vtable+0xcc = the frame   vtable+0xd4
+```
+
+`0x10004e88 + 0xcc = 0x10004f54` holds `0x0274c264`, and `+0xd4` holds `0x0274c67c`. That is also why
+the mod installs at all: it refuses unless slot `0xcc` holds `kDisplayFrame` and the loop's top holds
+its expected first word, so **the mod working is itself the evidence that the guest is the image.**
+
+`arena.py` now reads `/xb` and assembles big-endian, and its check moved to the frame's *second*
+word -- the first is the probe's, and cannot judge the read.
+
+### The frame's display fields, measured rather than quoted
+
+Two claims have been made about this function from its first eight words: that all five call targets
+come from `*(display+0x24)`, and then that this is "wrong by an offset" because the first load is
+`+0x18`. Both are claims about a prologue. The frame sets `r30` to the display on its sixth word and
+restores it from the stack on the way out, so every load off `r30` anywhere in it is a display field.
+All 85 instructions, `q_together.py`:
+
+```
+  distinct display offsets READ off r30: 5
+    display+0x18   1 read,   first at 0x0274c280
+    display+0x24   5 reads,  first at 0x0274c288
+    display+0x28   1 read,   first at 0x0274c35c
+    display+0x4c   2 reads,  first at 0x0274c2d0
+    display+0x74   2 reads,  first at 0x0274c2c4
+  distinct display offsets WRITTEN through r30: 6
+    display+0x28   1 write,  first at 0x0274c378
+    display+0x74   1 write,  first at 0x0274c38c
+    display+0x78   1 write,  first at 0x0274c350
+    display+0x7c   1 write,  first at 0x0274c354
+    display+0x80   1 write,  first at 0x0274c368
+    display+0x84   1 write,  first at 0x0274c360
+  loads off a register that is not r30: 8
+    0x0274c28c lwz 0xd4 off r10      0x0274c2b4 lwz 0x6c off r10
+    0x0274c2a0 lwz 0xdc off r12      0x0274c308 lwz 0xec off r10
+    0x0274c390 lwz 0xe4 off r11      (three restores off r1)
+```
+
+**Both claims were half right and the second was wrong, and this settles it.** `+0x18` is read once,
+into `r3`, early. `+0x24` is read **five** times, and every one of the frame's five call targets
+(`+0xd4` off `r10`, `+0xdc` off `r12`, `+0x6c` off `r10`, `+0xec` off `r10`, `+0xe4` off `r11`) is
+loaded through a register the `+0x24` chain supplies. **The mod is right**: `kFrameTargetBaseOffset =
+0x24` with `kFrameCallTargetOffsets{0x6c, 0xd4, 0xdc, 0xec, 0xe4}` is exactly the frame's own access
+pattern, confirmed against the image rather than assumed. The `display+0x18` correction is withdrawn.
+
+The two fields the objective names are confirmed too: `+0x74` is read twice and written once at
+`0x0274c38c`, which is the documented `stw r0,0x74(r30)`, and `+0x28` is read once and written once --
+`kPhaseOffset = 0x28`. The four counters the frame keeps are `+0x78`, `+0x7c`, `+0x80`, `+0x84`, and
+`kCounterOffset = 0x78` is the first of them.
+
+The query carries its own falsifier, because a parse that finds nothing where something is known to be
+is a defect and not a finding: the first version of it put the displacement *after* the bracket, found
+zero loads in a function full of them, and the check on a word the image and this file agree on
+(`lwz r3,0x18(r30)`) said so.
+
+### The faulting instruction, decoded with the byte order right
+
+With the reversal undone, the opcode the interpreter was executing is `0xe2060380`, and
+
+```
+scanned 9,432,460 executable bytes in 17 blocks
+  control 0x7c7e1b78 (the frame's sixth word): 4,893 matches
+  sought  0xe2060380:                             0 matches
+```
+
+**So the faulting instruction is not in the title's own RPX -- and that now survives the byte-order
+fix, which the earlier version of the claim did not.** `0xe2060380` decodes as `lwarx r16, r6, r0`, a
+load-and-reserve, which is the shape a lock takes and not the shape a display path takes. The
+interpreter frame's own name (`PPCInterpreter_LWZ`) cannot be taken at face value either, since an
+`lwarx` is not what that handler executes; the backtrace's argument values are read off a frame that
+has been unwound, which is the same reason the effective address differed between two runs.
+
+What is consistent across every run of the fault: the program counter is in the loader arena at
+`0x00e000xxx` and the link register is inside the stand-in's block. **So the second paint enters the
+arena and leaves it somewhere the title's own code does not account for, and the instruction it
+executes there belongs to a module this project has not analysed.**
 
 ### A search that reported a falsifier it had not earned
 
@@ -823,14 +901,19 @@ Two more defects in the same instrument, both found by its own output rather tha
 
 **This is where the double-paint fault stands, as known rather than as a theory.** The guest is
 healthy at the fault; the fault is a host segfault reached through `PPCInterpreterSlim_executeInstruction`
--- the recompiler's *fallback* -- on the display fiber; the specific instruction gdb named does not
-survive a second run of identical code and is withdrawn; the title's own code holds **two** loads at
-the displacement that fault was reported with and neither is the one; the display object is cleared
-(its flag, its phase and all five of its call targets are identical across the two paints); five
-payload shapes built on five readings have each been measured -- four fault, and the objective's own
-neither faults nor paints. Two things are open, and both are prerequisites: **why the recompiler
-declined the second pass**, and **whether the running guest's memory is the image's memory at all**,
-which every disassembly-derived claim in this file depends on.
+-- the recompiler's *fallback* -- on the display fiber. **The running guest is the disc image**, proven
+by the product's own accessor: eight of the frame's words read identically and the ninth is the mod's
+own probe, and the byte order that made it look otherwise is now fixed in the reader. The faulting
+opcode, decoded with that order right, is `0xe2060380` (`lwarx r16, r6, r0`) and is **not in the
+title's RPX**: 0 matches over 9,432,460 executable bytes against a control found 4,893 times. The
+frame's own field usage is measured and the mod's offsets are confirmed against it. Five payload
+shapes have each been measured -- four fault, and the objective's own neither faults nor paints.
+
+One thing is open, and it is the whole of what is left: **the faulting code is in a module this
+project has not analysed.** The second paint enters the loader's arena and leaves it executing
+something outside the title's own code, and the arena is where the mod's stand-in and its probes live.
+The next step is therefore to identify the module the arena address belongs to, which is a question
+about cemu's loader rather than about the title's draw path.
 
 ### A real bug found on the way, which is not this fault
 
