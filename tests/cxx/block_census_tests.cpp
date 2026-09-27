@@ -119,6 +119,39 @@ void cursorSwitchesAreCountedAgainstTheBindsTheyCouldBeAmong();
 void theTwoAddressesABindingNamesAreBothFed();
 void aBindingPublishesItsObjectForTheAssemblyHook();
 
+// **The word that reads as guest memory is the address, named by the mapping route.** A fake
+// whose record points one of its words at a block it has really mapped, so the word is an
+// address by the only test that can tell: the guest can read it.
+//
+// The negative half is in the case above, where no word reads and the report is a null. One test
+// with both halves in it would pass if the census named whichever word it liked, so they are two
+// cases: a word that reads is named, and a record with no readable word names nothing.
+void theWordThatReadsIsNamedAsTheAddress() {
+    constexpr uint32_t kBlock = 0x43e10000;
+    FakeGuest guest;
+    guest.writeWord(kBlock, 0x3f800000u);
+    guest.writeWord(kBlock + 4, 0x3f800000u);
+    guest.writeWord(kObject + UniformBlockCensus::kCursorOffset, 0);
+    writeEntry(guest, 0, 0x1000, 0x40);
+    // The word at `+0x04` names a block the fake has really mapped, and no other word does.
+    guest.writeWord(kObject + UniformBlockCensus::kEntriesOffset +
+                        0 * UniformBlockCensus::kEntrySize + UniformBlockCensus::kEntryBlockAddress,
+                    kBlock);
+    UniformBlockCensus census = makeCensus(guest);
+    census.install();
+    linked();
+    bind(g_first, kObject);
+    const std::string body = census.json();
+    check::isTrue(body.find("\"addressWord\":1") != std::string::npos,
+                  "the word whose value is a mapped block is named as the address word: " + body);
+    check::isTrue(body.find("\"addressWordOffset\":4") != std::string::npos,
+                  "with the offset it came from, so the finding is an address and not a word "
+                  "index to be looked up again");
+    check::isTrue(body.find("\"blockAddress\":" + std::to_string(kBlock)) != std::string::npos,
+                  "and the block the census reports is that block, which is the re-read target "
+                  "the ring test needs");
+}
+
 // The node locator's own registration, kept apart from the census's two: the census's sink
 // decides by address, and the node draw's entry is neither binder, so it would land in the
 // second slot and stand in for a probe that is not there.
@@ -133,6 +166,45 @@ NodePoseLocator makeNodeLocator() {
     return NodePoseLocator(&keepNodeRegistration, &readWords);
 }
 
+// **The mapping route refuses when more than one word reads.** Measured: five of the record's
+// seven words read as guest memory in every one of 179,597 bindings and word 3 in none, so a
+// route returning the first word to clear a majority returns word 0 -- the record's own leading
+// pointer. The ring then re-read the descriptor instead of the block and 16 of 16 comparisons
+// agreed, because it was comparing the record with itself.
+//
+// So the bar is not a majority, it is being the only one. This is the case that catches it: two
+// readable words, and neither named.
+void severalReadableWordsNameNothing() {
+    constexpr uint32_t kFirst = 0x43e10000;
+    constexpr uint32_t kSecond = 0x43e20000;
+    FakeGuest guest;
+    for (uint32_t word = 0; word < 4; word++) {
+        guest.writeWord(kFirst + 4 * word, 0x3f800000u);
+        guest.writeWord(kSecond + 4 * word, 0x3f800000u);
+    }
+    guest.writeWord(kObject + UniformBlockCensus::kCursorOffset, 0);
+    writeEntry(guest, 0, kFirst, 0x40);
+    // The record's word 5 names a second block the guest can also read, so two words read and the
+    // mapping route has nothing to distinguish.
+    guest.writeWord(kObject + UniformBlockCensus::kEntriesOffset + 5 * 4, kSecond);
+    UniformBlockCensus census = makeCensus(guest);
+    census.install();
+    linked();
+    bind(g_first, kObject);
+    bind(g_first, kObject);
+    const std::string body = census.json();
+    check::isTrue(body.find("\"addressWord\":null") != std::string::npos,
+                  "two words that read are not narrowed to one, because choosing between them "
+                  "would be a guess: " +
+                      body);
+    check::isTrue(body.find("\"addressWordRefused\":\"severalWordsReadSoNoneIsDistinguished\"") !=
+                      std::string::npos,
+                  "and the report says which refusal it was, so a null is a statement and not an "
+                  "absence");
+    check::isTrue(body.find("\"addressWordCandidates\":2") != std::string::npos,
+                  "with the number of candidates, which is the denominator the refusal rests on");
+}
+
 } // namespace
 
 void wiiuport::tests::runBlockCensusTests() {
@@ -140,6 +212,8 @@ void wiiuport::tests::runBlockCensusTests() {
     aBindingPublishesItsObjectForTheAssemblyHook();
     theOtherSlotIsReadAsWellAsTheBoundOne();
     cursorSwitchesAreCountedAgainstTheBindsTheyCouldBeAmong();
+    theWordThatReadsIsNamedAsTheAddress();
+    severalReadableWordsNameNothing();
     // An object the binder would be handed, with its cursor naming the second
     // entry and both entries filled in.
     FakeGuest guest;
@@ -168,18 +242,17 @@ void wiiuport::tests::runBlockCensusTests() {
     check::isTrue(body.find("\"offset\":8192") != std::string::npos,
                   "the report carries the block's offset as read");
     check::isTrue(body.find("\"size\":128") != std::string::npos, "and its size");
-    // The block's address is a base the title set elsewhere, so the entry is
-    // where it has to be looked for: which words, added to the offset, name
-    // memory the guest can read.
-    check::isTrue(body.find("\"readableAtOffset\"") != std::string::npos,
-                  "and the report says which of the entry's words read at that offset");
-    // The fake's words are 0x1000+word, and the block the entry names would sit
-    // at that plus the offset -- which only word 0's does, because the fake maps
-    // nothing else. So exactly one word reads, and the report says which.
-    check::isTrue(body.find("\"readableAtOffset\":{\"0\":true") != std::string::npos,
-                  "the one word that names a mapped block is reported as such");
-    check::isTrue(body.find("\"3\":false") != std::string::npos,
-                  "and the one that does not as not");
+    // **Each word is read as an address on its own.** The first version added the word at
+    // `+0x04` to every other word, which assumed the thing it was looking for -- a base -- and
+    // so made "word 0 reads" an artefact of the arithmetic. The fixture's other words are
+    // 0x1000+word and the fake maps nothing there, so no word reads and the report says so.
+    check::isTrue(body.find("\"readableAsAddress\"") != std::string::npos,
+                  "and the report says which of the entry's words read as an address");
+    check::isTrue(body.find("\"addressWord\":null") != std::string::npos,
+                  "and names no address word, because none of the fixture's words read as a "
+                  "guest address -- a null rather than the word that happened to win");
+    check::isTrue(body.find("\"bestWordShare\":0") != std::string::npos,
+                  "with the share the best word reached beside it, so the null carries a margin");
 
     // The other binder counts into the same census: they are the same function
     // apart from which triple of indices they read, so one report covers both.
