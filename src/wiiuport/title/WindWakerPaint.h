@@ -75,7 +75,21 @@ class WindWakerPaint {
     static constexpr uint32_t kDisplayLoopTopFirst = 0x819f0024;
     // The frame's first instruction, as GuestCallProbes relocation needs it,
     // and the gx2 import that sets the flip interval.
-    static constexpr uint32_t kDisplayFrameFirst = 0x7c0802a6;
+    static constexpr uint32_t kDisplayFrameFirst = 0x7c0802a6; // mfspr r0, LR
+    // **Where the probe goes, and why it is not the frame's first word.**
+    //
+    // The first word is `mfspr r0, LR`, and the frame stores that link register in its own frame at
+    // `0x1c(r1)` and returns through it on the way out. A probe's stub begins with an HLE *call*,
+    // and a call sets the link register -- so probing the first word made the frame save the stub's
+    // return address instead of its caller's, and return into the loader's arena. Measured: at the
+    // fault the link register was inside the frame and the program counter was in the arena.
+    //
+    // The sixth word is `or r30,r3,r3`, which reads no special register, and at that point `r3` is
+    // still the display pointer -- the frame has not touched it, and its own first act is to copy
+    // it into `r30`. So a probe there receives the display in `r3` exactly as the objective asks,
+    // with the displaced instruction meaning the same thing in the stub as where it stands.
+    static constexpr uint32_t kDisplayFrameProbe = 0x0274c278;
+    static constexpr uint32_t kDisplayFrameProbeFirst = 0x7c7e1b78; // or r30,r3,r3
     // **The address the payloads used to branch to for the swap interval, and it is not code.**
     // Measured out of the title's own image: 0x028fad2c, 0x028fad30, 0x028fad34 and 0x028fad38 all
     // hold 0x00000000, which is `add r0,r0,r0` -- four synchronisation no-ops and then whatever

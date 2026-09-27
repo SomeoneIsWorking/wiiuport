@@ -593,6 +593,33 @@ void wiiuport::tests::runPaintTests() {
                       "the image and was the fault");
     }
     {
+        // **The probe's word is the frame's sixth, not its first, and that is load-bearing.** The
+        // frame's first word is `mfspr r0, LR` and the frame returns through what that instruction
+        // produced; a probe's stub begins with an HLE *call*, and a call sets the link register, so
+        // a probe on the first word made the frame save the stub's return address and return into
+        // the loader's arena. The sixth word is `or r30,r3,r3`, which reads no special register,
+        // and `r3` is still the display there -- which is what the probe reports.
+        //
+        // Asserted on the words, not on a flag: a probe that moved back to the first word would
+        // still report installed and would still be wrong.
+        check::isTrue(WindWakerPaint::kDisplayFrameProbe == 0x0274c278,
+                      "the probe sits on the frame's sixth word, 0x0274c278");
+        check::isTrue(WindWakerPaint::kDisplayFrameProbeFirst == 0x7c7e1b78,
+                      "whose instruction is or r30,r3,r3, 0x7c7e1b78");
+        check::isTrue(WindWakerPaint::kDisplayFrameProbe != WindWakerPaint::kDisplayFrame,
+                      "and it is not the frame's entry");
+        // The two facts that make the sixth word the right one, decoded rather than asserted as
+        // constants: the entry reads the link register, and the probe word does not.
+        auto reads_link_register = [](uint32_t word) {
+            return (word >> 26) == 31 && ((word >> 1) & 0x3FF) == 339 && ((word >> 16) & 0x1F) == 8;
+        };
+        check::isTrue(reads_link_register(WindWakerPaint::kDisplayFrameFirst),
+                      "the frame's first word does read the link register, which is why the probe "
+                      "cannot displace it");
+        check::isTrue(!reads_link_register(WindWakerPaint::kDisplayFrameProbeFirst),
+                      "and the word the probe does displace does not");
+    }
+    {
         // The one-vblank payload is a single branch. The pacing is the
         // emulator's and the title's own record of it is a field, so nothing in
         // the guest is called and the display register arrives untouched.

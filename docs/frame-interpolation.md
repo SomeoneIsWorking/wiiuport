@@ -877,6 +877,67 @@ Both were predicted by this file's own measurements before they were run, and th
 payload with eleven words has one call target and one call site; this one has two of each and they
 disagree.**
 
+### The probe was on a word that reads the link register, and the frame returns through what it produced
+
+Read at the fault, with the guest's own program counter and link register taken from the CPU state
+through the register the recompiler reserves for it -- which is right on a thread inside recompiled
+code, and was read wrongly on a thread inside the interpreter in every earlier attempt:
+
+```
+OSSched[core=1]  via recompiled  guest pc=0x00e0586c  lr=0x0274c280
+  r0..r7 = 00e05888 0e275a38 10008000 00000000 0e275a24 0e275a28 0e275a30 44213980
+```
+
+**The frame's first word is `mfspr r0, LR`, and the frame returns through what that instruction
+produced.** The measured words:
+
+```
+0x0274c264  0x7c0802a6  mfspr  r0, LR       SPR field 8, destination r0
+0x0274c274  0x9001001c  stw    r0,0x1c(r1)  <- the link register, into its own frame
+0x0274c278  0x7c7e1b78  or     r30,r3,r3
+0x0274c27c  0x4bffedd9  bl     0x0274b054
+0x0274c3a0  0x8001001c  ...                  and on the way out it loads that slot back
+```
+
+And `GuestCallProbes::WriteStub` puts an **HLE call** in the stub's *first* word, with the displaced
+instruction second:
+
+```
+stub+0   0x0400xxxx   the HLE call      <- a call, so it sets LR
+stub+4   displaced    the image's own instruction
+stub+8   lis r12, resume
+stub+12  ori r12,r12,resume
+stub+16  mtctr r12
+stub+20  bctr
+```
+
+**So a probe on the frame's first word made the frame save the stub's return address instead of its
+caller's, and return into the loader's arena.** At the fault the link register was inside the frame and
+the program counter was in the arena, which is what that predicts.
+
+**Fixed in the mechanism, not in the mod**, because the mechanism silently changes the meaning of any
+displaced instruction that reads `LR`:
+
+- `GuestCallProbes::Install` now refuses an entry whose first instruction is an `mfspr`/`mfmsr` with
+  SPR field 8, as `Installation::EntryReadsLinkRegister`, decoded from the opcode and the SPR field
+  rather than matched on two full encodings so a destination register or a bit cannot hide it. The
+  report names it, so a caller can act on it rather than discover it by crashing.
+- The paint mod's probe moved to the frame's **sixth** word, `0x0274c278` = `or r30,r3,r3`, which
+  reads no special register -- and at that point `r3` is still the display pointer, because the frame
+  has not touched it and its own first act is to copy it into `r30`. So the probe still receives the
+  display in `r3`, which is what the objective asks of it, and the displaced instruction means the same
+  thing in the stub as where it stands.
+- The install checks the probe's word separately from the frame's entry, and refuses by name, and the
+  payload test asserts the two facts that make the sixth word the right one: that the entry reads the
+  link register and that the probe word does not.
+
+**And the fault persists, so this was necessary and not sufficient.** With the fix in, the register
+that was wrong is right: `lr = 0x0274c280` is the frame's own seventh word, which is where a frame that
+returned from its sixth word belongs. The guest still reaches the arena -- `pc = 0x00e0586c`, still in
+the recompiled code, still with the arena holding a run of the guest's own values. So the probe's `LR`
+was a real defect and is fixed, and something else sends the guest into the arena after the frame has
+returned.
+
 ### A payload was branching into a zero-filled hole, and that was a real fault
 
 Read live, at the fault, in one pass from one register (`faultgpc.py`) so that nothing had to be
