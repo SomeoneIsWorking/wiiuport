@@ -439,11 +439,88 @@ That fits every observation, which is why it is worth the two withdrawals:
   display pointer that is not the display on the second entry turns into a small value used as a
   call target or a base.
 
-**The last piece is the guest instruction**, and it is a bounded read rather than another payload:
-the block being executed is a recompiled one, so its guest program counter is in the recompiler's
-own bookkeeping, and naming it names the instruction that reads 0x198 and the register that holds
-0x15c. That is a guest-logic question, and it is answerable without a debugger full of guesses --
-the recompiler stores the guest PC it is translating.
+### The frame's own dispatch chain, and three payloads that did not fix it
+
+The frame's body was disassembled as far as its exit, and the dispatch is this:
+
+```
+0x0274c278  or    r30,r3,r3          <- the display pointer
+0x0274c27c  bl    0x0274b054
+0x0274c288  lwz   r10,0x24(r30)
+0x0274c28c  lwz   r12,0xd4(r10)
+0x0274c290  mtspr CTR,r12
+0x0274c294  or    r3,r30,r30
+0x0274c298  bctrl
+0x0274c29c  lwz   r12,0x24(r30)
+0x0274c2a0  lwz   r0,0xdc(r12)
+0x0274c2a4  mtspr CTR,r0
+0x0274c2a8  or    r3,r30,r30
+0x0274c2ac  bctrl
+...
+0x0274c31c  bl    0x0274c038
+0x0274c338  or    r3,r30,r30
+0x0274c33c  bl    0x0274b06c
+0x0274c340  addi  r3,r30,0x80
+0x0274c344  bl    0x02760e58
+0x0274c390  lwz   r0,0xe4(r11)
+0x0274c394  mtspr CTR,r0
+0x0274c3a0  lwz   r0,0x1c(r1)
+0x0274c3a4  lwz   r30,0x10(r1)      <- and back out
+```
+
+**Every one of the frame's calls is a `bctrl` through a target loaded out of the display object** --
+`display+0xd4`, `display+0xdc`, `display+0x6c`, `display+0xec`, and one more at `0x0274c390` -- with
+the argument rebuilt as `or r3, r30, r30` each time. **There is no callee reachable by a name in the
+frame's own words** except the three direct `bl`s, and the paint itself is one of the `bctrl`s.
+
+And one field gates two of them:
+
+```
+0x0274c2c4  lwz    r0,0x74(r30)
+0x0274c2cc  rlwinm. r12,r0,0x0,0x1f,0x1f     <- bit 0
+0x0274c2d4  beq    0x0274c2e4
+0x0274c2d8  rlwinm. r0,r0,0x1f,0x1f,0x1f     <- bit 31
+0x0274c2dc  beq    0x0274c2e4
+0x0274c2e0  li     r31,0
+0x0274c2fc  cmpwi  r31,0
+0x0274c300  beq    0x0274c320                  <- skips 0x0274c304..0x0274c31c
+0x0274c304  lwz    r10,0x24(r30)
+0x0274c308  lwz    r0,0xec(r10)
+0x0274c30c  mtspr  CTR,r0
+0x0274c310  or     r3,r30,r30
+0x0274c314  bctrl
+0x0274c318  or     r3,r30,r30
+0x0274c31c  bl     0x0274c038
+...
+0x0274c38c  stw    r0,0x74(r30)                <- and the frame writes the field
+```
+
+So `display+0x74` is not the flip counter the objective's note assumed. It is what the frame
+**branches on at entry** and **writes on exit**, and it decides whether a virtual `bctrl` and a call
+to `0x0274c038` happen at all.
+
+**Three payloads, three hypotheses, three faults.** All measured, all on the real title, all armed
+over a run that had reached 1,845 or 1,983 paints at rest:
+
+| mode | hypothesis | result |
+|---|---|---|
+| 9 | the second call needs `r3` back, from the frame's own `r30` | faults |
+| 10 | the second call needs `display+0x74` back, from the frame's own words | faults |
+| 8 | the second paint can be a tail branch, not a call | paints nothing |
+
+Mode 10's payload is worth keeping for what it is: **every word in it is the frame's own, verbatim**
+-- `lwz r0,0x74(r30)` from `0x0274c2c4` and `stw r0,0x74(r30)` from `0x0274c38c`, both on the
+frame's own `r30` -- so it introduced no encoding of its own and still did not fix the fault. Its
+test also caught a fourth thing: a first version checked word 1's branch displacement against the
+*block's* address rather than *its own*, which makes the displacement four bytes long and lands four
+bytes past the frame. The same mistake the gate's counters were once read for, in a payload.
+
+**What this leaves.** The frame's five `bctrl` targets all come from the display object, so the second
+paint's near-null dereference is most likely one of those fields holding a value from the first
+paint rather than a call target. Reading the five fields -- `display+0x6c`, `+0xdc`, `+0xd4`, `+0xec`
+and the one behind `+0xe4` -- at the frame's entry on the first and the second paint, through the
+probe the paint mod already installs on the frame, would say which one differs. That is a
+measurement in the mechanism that already exists, and it is the next thing to do.
 
 ### A real bug found on the way, which is not this fault
 

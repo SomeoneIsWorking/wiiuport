@@ -302,8 +302,44 @@ void wiiuport::tests::runPaintTests() {
         }
     }
     {
+        // **Mode 10 is built from the frame's own words and nothing else.** The load and the store
+        // are 0x0274c2c4 and 0x0274c38c verbatim, and the test asserts the exact words -- not "the
+        // payload differs from mode 9", which a payload that invented its own encoding would also
+        // satisfy.
+        const auto ten = WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::SamePhaseTwice);
+        check::isTrue(ten.has_value(),
+                      "the same-phase two-paint payload is built where the frame is in reach");
+        if (ten.has_value()) {
+            check::isTrue(
+                ten->size() == 5,
+                "and it is five words -- read the flag, paint, write it back, paint, back "
+                "to the loop: " +
+                    std::to_string(ten->size()));
+            check::isTrue((*ten)[0] == 0x801e0074,
+                          "the first word is the frame's own `lwz r0,0x74(r30)` at 0x0274c2c4, "
+                          "verbatim");
+            check::isTrue(
+                (*ten)[2] == 0x901e0074,
+                "the third is its `stw r0,0x74(r30)` at 0x0274c38c, verbatim -- the two "
+                "words the payload needs are the two the frame already uses on this field");
+            check::isTrue(
+                // **From each word's own address, not from the block's.** A first version checked
+                // word 1 against `branchTo(block, frame)` -- word *0*'s address -- which makes a
+                // displacement four bytes long and lands four bytes past the frame. The same
+                // mistake the gate's counters were read for, in a payload rather than a test: a
+                // displacement is measured from the branch, not from the start of the block the
+                // branch happens to live in.
+                (*ten)[1] == WindWakerPaint::branchTo(0x00e07004, 0x0274c264, true) &&
+                    (*ten)[3] == WindWakerPaint::branchTo(0x00e0700c, 0x0274c264, true),
+                "and the two paints are calls at the frame, each displacement measured from its "
+                "own "
+                "word: " +
+                    std::to_string((*ten)[1]) + " then " + std::to_string((*ten)[3]));
+        }
+    }
+    {
         check::isTrue(!WindWakerPaint::modeFrom(0).has_value(), "mode 0 names no stand-in");
-        check::isTrue(!WindWakerPaint::modeFrom(10).has_value(), "mode 10 names no stand-in");
+        check::isTrue(!WindWakerPaint::modeFrom(11).has_value(), "mode 11 names no stand-in");
         // Mode 8 is the tail-branch twin, and the pair is the discriminator: 3 calls the frame
         // twice and faults, 8 paints twice with the second paint returning through the title's own
         // loop. Both exist, and the number reaches the payload builder.
@@ -312,6 +348,9 @@ void wiiuport::tests::runPaintTests() {
         check::isTrue(WindWakerPaint::modeFrom(9) == WindWakerPaint::Mode::RestoreDisplayTwice,
                       "mode 9 is the one that restores the display pointer, and it is reachable by "
                       "number");
+        check::isTrue(WindWakerPaint::modeFrom(10) == WindWakerPaint::Mode::SamePhaseTwice,
+                      "mode 10 is the one that holds the display's per-pass flag, and it is "
+                      "reachable by number");
         // Mode 7 is the branch-entry control: the same payload, reached by a
         // direct branch at the frame instead of through the vtable, so that the
         // one difference between it and mode 1 is the kind of branch.

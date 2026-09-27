@@ -220,6 +220,20 @@ class WindWakerPaint {
         // rather than computed, because a hand-derived `or` encoding matched nothing in nine
         // megabytes of PowerPC and a payload word nobody checked has already cost a run.
         RestoreDisplayTwice = 9,
+        // Two paints with the display's own per-pass flag held at the value the first one saw.
+        //
+        // **This is the re-entrancy, named with addresses.** The frame reads `display+0x74` at
+        // 0x0274c2c4, branches three ways on bits 0 and 31 of it, and **skips a virtual `bctrl` and
+        // a call to 0x0274c038** at 0x0274c300 when both are set. It then *writes* the field at
+        // 0x0274c38c. So the first paint leaves the second one on a different path, and the second
+        // one's near-null dereference at guest address 0x198 is what that path does with a value
+        // the other path had set.
+        //
+        // The payload saves the field before the first paint and puts it back before the second, so
+        // both paints run the path the first one chose. **Every word is the frame's own,
+        // verbatim**: the load is 0x0274c2c4 and the store is 0x0274c38c, both with the frame's own
+        // `r30` base.
+        SamePhaseTwice = 10,
     };
     // The name a refusal or a report uses for a mode.
     static std::string_view modeName(Mode mode);
