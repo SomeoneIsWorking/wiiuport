@@ -138,6 +138,16 @@ class DrawAttributeCensus final : public frame::DrawRecordedListener {
     // at offset 0 produced exactly that. Generous on purpose: the point is to catch 1e+38 and
     // denormals, not to bound a world.
     static constexpr float kComponentCeiling = 1.0e6f;
+    // **And a SHARE, because all-or-nothing is a threshold in the wrong place.** The first
+    // version refused a layout outright if any component it had ever read was implausible, and
+    // that refused four of the title's seven layouts -- because one odd draw in one frame of one
+    // object is enough. That is the same mistake as the loose class being too loose: a bar with
+    // no stated fraction, refusing on a single sample. A layout's position is named when the
+    // implausible SHARE of the components read at its offset is at or below this, so a layout
+    // that is mostly positions survives a bad draw and a layout that is mostly arithmetic does
+    // not. One percent: generous, because the point is to refuse a layout that is not positions
+    // and not to refuse one for a padding vertex.
+    static constexpr double kImplausibleShareCeiling = 0.01;
     // How many vertices' worth of components are read per draw per candidate. A handful is
     // enough to see whether an offset holds positions, and reading every vertex of a million-
     // vertex mesh to find that out would be a census that costs more than the frame it watches.
