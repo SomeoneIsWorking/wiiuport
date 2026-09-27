@@ -32,6 +32,13 @@ NodePoseLocator::NodePoseLocator(Register registerProbe, ReadWords readWords)
 }
 
 void NodePoseLocator::install() {
+    // The entry's own word, read before the probe is asked for it. The fork refuses the
+    // install when the entry does not hold the word the probe names, and reports that as
+    // `entryHeldOther` -- true, and silent about what was there instead.
+    std::array<uint32_t, 1> word{};
+    if (m_readWords(kDraw, word.data(), 1)) {
+        m_entryWord = word[0];
+    }
     m_register(kDraw, kFirstInstruction, m_draw, true, 0);
 }
 
@@ -42,7 +49,11 @@ void NodePoseLocator::Draw::OnInstall(GuestCallProbes::Installation installation
 
 void NodePoseLocator::Draw::OnCall(std::span<const uint32_t, 32> gpr, uint32_t /*returnAddress*/) {
     m_owner.m_calls.fetch_add(1, std::memory_order_relaxed);
-    m_owner.scan(gpr[kNodeRegister]);
+    m_owner.observe(gpr[kNodeRegister]);
+}
+
+void NodePoseLocator::observe(uint32_t node) {
+    scan(node);
 }
 
 bool NodePoseLocator::isPose(const float* words) {
@@ -188,6 +199,10 @@ std::string NodePoseLocator::json() const {
     JsonBody body;
     body.string("draw", hexValue(kDraw));
     body.string("firstInstruction", hexValue(kFirstInstruction));
+    // What the entry actually held, and whether the two agree. A mismatch is why the fork
+    // refused the install, so it is the first thing a reader of a refusal needs.
+    body.string("entryWordAtInstall", hexValue(m_entryWord));
+    body.raw("entryWordMatches", m_entryWord == kFirstInstruction ? "true" : "false");
     body.number("nodeRegister", kNodeRegister);
     // The vtable's target, reported because it is *not* the probed address and a reader
     // comparing the two should not have to find that out from the code.

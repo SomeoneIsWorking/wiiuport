@@ -56,7 +56,20 @@ NodePoseLocator makeLocator() {
     return NodePoseLocator(&keepRegistration, &readWords);
 }
 
+NodePoseLocator* g_locator = nullptr;
+
+// The route the product uses: a probe on the sub-object's binder, whose argument is the
+// sub-object, one fixed subtraction from the node. The probe is exercised too, because the
+// two paths are the same code reached two ways and the entry's being uncalled is a
+// measurement the report carries.
 void draw(uint32_t node) {
+    g_locator->observe(node);
+}
+
+// The other path, kept and counted: the probed entry, which installs and is never called
+// because the title dispatches the draw through the vtable's target. Exercised so the
+// report's `calls` is a number something tested rather than a field nothing reaches.
+void drawThroughProbe(uint32_t node) {
     std::array<uint32_t, 32> gpr{};
     gpr[NodePoseLocator::kNodeRegister] = node;
     g_probe->OnCall(std::span<const uint32_t, 32>(gpr.data(), gpr.size()), 0);
@@ -100,7 +113,7 @@ void wiiuport::tests::runNodePoseLocatorTests() {
         check::isTrue(g_entry == NodePoseLocator::kDraw, "the probe is on the node draw's entry");
         check::isTrue(g_first == NodePoseLocator::kFirstInstruction,
                       "with that entry's own first word, lifted from the image and not "
-                      "assembled: 0x9422feb8 is stwu r1,-0x148(r1)");
+                      "assembled: 0x9421feb8 is stwu r1,-0x148(r1)");
         check::isTrue(NodePoseLocator::kVtableTarget > NodePoseLocator::kDraw,
                       "and the vtable's target is inside the function rather than at its entry, "
                       "which is why it is not the probe site");
@@ -119,6 +132,7 @@ void wiiuport::tests::runNodePoseLocatorTests() {
         NodePoseLocator locator = makeLocator();
         g_nodes = &nodes;
         locator.install();
+        g_locator = &locator;
         for (uint32_t node = 1; node <= 5; node++) {
             for (int scan = 0; scan < 3; scan++) {
                 nodes[node] = nodeWithPoseAt(20, 0.1f * static_cast<float>(node) + 0.05f * scan);
@@ -127,7 +141,9 @@ void wiiuport::tests::runNodePoseLocatorTests() {
         }
         const std::string body = locator.json();
         g_nodes = nullptr;
-        check::isTrue(field(body, "calls") == "15", "fifteen calls to the node draw");
+        check::isTrue(NodePoseLocator::kSubObjectOffset == 0xa1c,
+                      "and the node's sub-object sits 0xa1c from the node, which is the draw's "
+                      "own `addi r3,r28,0xa1c` -- so the binder's argument is the node");
         check::isTrue(field(body, "nodesTracked") == "5", "five distinct nodes tracked");
         check::isTrue(locator.bestOffset() == 80,
                       "and the offset five nodes agree on is named -- 20 floats is 80 bytes: " +
@@ -151,6 +167,7 @@ void wiiuport::tests::runNodePoseLocatorTests() {
         NodePoseLocator locator = makeLocator();
         g_nodes = &nodes;
         locator.install();
+        g_locator = &locator;
         for (uint32_t node = 1; node <= 3; node++) {
             for (int scan = 0; scan < 3; scan++) {
                 draw(node);
@@ -158,7 +175,9 @@ void wiiuport::tests::runNodePoseLocatorTests() {
         }
         const std::string body = locator.json();
         g_nodes = nullptr;
-        check::isTrue(field(body, "calls") == "9", "nine calls");
+        check::isTrue(field(body, "calls") == "0",
+                      "and nothing came through the probed entry, because the title dispatches "
+                      "the draw through the vtable's target instead");
         check::isTrue(field(body, "nodesNeeded") == "2", "two nodes would have been enough");
         check::isTrue(locator.bestOffset() == 0,
                       "and nothing is named, because no offset is held by two nodes");
@@ -174,6 +193,7 @@ void wiiuport::tests::runNodePoseLocatorTests() {
         NodePoseLocator locator = makeLocator();
         g_nodes = &nodes;
         locator.install();
+        g_locator = &locator;
         for (int scan = 0; scan < NodePoseLocator::kScansPerNode; scan++) {
             draw(1);
         }
@@ -184,6 +204,22 @@ void wiiuport::tests::runNodePoseLocatorTests() {
                       "and the nodes needed is zero, because a single node cannot settle a "
                       "cross-node question");
         check::isTrue(locator.bestOffset() == 0, "so nothing is named");
+    }
+
+    // The probed entry does reach the locator when something calls it, so `calls` is a real
+    // count and not a field nothing writes.
+    {
+        std::map<uint32_t, std::vector<float>> nodes;
+        nodes[1] = nodeWithPoseAt(20, 0.3f);
+        NodePoseLocator locator = makeLocator();
+        g_nodes = &nodes;
+        locator.install();
+        g_locator = &locator;
+        drawThroughProbe(1);
+        const std::string body = locator.json();
+        g_nodes = nullptr;
+        check::isTrue(field(body, "calls") == "1", "a call through the probed entry is counted");
+        check::isTrue(field(body, "nodesTracked") == "1", "and the node in r3 is tracked");
     }
 
     // A node whose memory does not read is counted, and contributes nothing.
@@ -211,6 +247,7 @@ void wiiuport::tests::runNodePoseLocatorTests() {
         NodePoseLocator locator = makeLocator();
         g_nodes = &nodes;
         locator.install();
+        g_locator = &locator;
         for (uint32_t node = 1; node <= NodePoseLocator::kNodes + 3; node++) {
             draw(node);
         }

@@ -37,8 +37,7 @@ std::string_view installationName(std::optional<GuestCallProbes::Installation> v
 
 UniformBlockCensus::UniformBlockCensus(Register registerProbe, ReadWord readWord,
                                        ObjectPoseHistory::ReadWords readWords,
-                                       const ObjectPoseLocator* locator,
-                                       const NodePoseLocator* nodes)
+                                       const ObjectPoseLocator* locator, NodePoseLocator* nodes)
     : m_register(registerProbe), m_readWord(readWord), m_poseHistory(readWords), m_locator(locator),
       m_nodes(nodes) {
 }
@@ -59,6 +58,12 @@ void UniformBlockCensus::Binder::OnCall(std::span<const uint32_t, 32> gpr,
 }
 
 void UniformBlockCensus::record(uint32_t object, bool second) {
+    // The node this binder belongs to, and the reason the node's own draw is not probed:
+    // the draw reaches the binder through its sub-object at `node + 0xa1c`, and the binder
+    // is called hundreds of thousands of times a run where the draw's entry is called never.
+    if (m_nodes != nullptr) {
+        m_nodes->observe(object - NodePoseLocator::kSubObjectOffset);
+    }
     // Counted before the lock: a binding on the display thread must not be able
     // to block behind a report being written.
     m_bindings.fetch_add(1, std::memory_order_relaxed);

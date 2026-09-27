@@ -27,7 +27,7 @@ namespace wiiuport::title {
 // bytes *into* the function. That address is not a safe probe site: its first instruction is
 // `beq 0x02160190` (0x41820010), and a probe resumes at "the instruction after the entry",
 // so a taken branch would make the stub re-run the code the branch was there to skip. The
-// function's own entry is safe -- its first word is `stwu r1,-0x148(r1)` (0x9422FEB8), which
+// function's own entry is safe -- its first word is `stwu r1,-0x148(r1)` (0x9421FEB8), which
 // does not branch -- and a second table in the image, at `0x10010648`, dispatches through it
 // as well, so a probe there sees the node's draw either way. **Which of the two the title
 // actually calls is measured**, not assumed: `calls` is in the report and a run where it
@@ -47,7 +47,7 @@ class NodePoseLocator {
   public:
     // The node's draw, its entry, and the word the image holds there.
     static constexpr uint32_t kDraw = 0x02160018;
-    static constexpr uint32_t kFirstInstruction = 0x9422feb8; // stwu r1,-0x148(r1)
+    static constexpr uint32_t kFirstInstruction = 0x9421feb8; // stwu r1,-0x148(r1)
     static constexpr uint32_t kNodeRegister = 3;
     // The vtable's target, which is 0x168 bytes in and is not probed. Reported so a run
     // says which address the title dispatches through.
@@ -85,12 +85,44 @@ class NodePoseLocator {
     NodePoseLocator(Register registerProbe, ReadWords readWords);
 
     // Registers the probe, before the title is linked.
+    //
+    // It installs, and it is never called: measured, the title dispatches the node's draw
+    // only through the vtable's target, which is inside the function and whose first
+    // instruction is a conditional branch, so it is not a relocatable probe site either.
+    // The probe is kept because `calls` being zero is that measurement, and a report that
+    // said "the node's draw was never entered" without saying so would read as a locator
+    // that found nothing rather than one that was never asked.
     void install();
+
+    // The node, at one of its draws. This is the way the locator is fed in practice: the
+    // node's draw calls its own sub-object at `node + 0xa1c`, so a probe on that sub-object's
+    // binder -- which is installed, and fires hundreds of thousands of times a run -- already
+    // holds the node, one fixed subtraction away.
+    //
+    // Measured, this is necessary and not a convenience: the node's draw is reached only
+    // through the vtable's target, which the fork refuses as a probe site because its first
+    // instruction is a branch, so the function's own entry is the only other candidate and it
+    // is never called.
+    void observe(uint32_t node);
+
+    // How far the node's sub-object sits from the node, as the draw's own code has it:
+    // `addi r3,r28,0xa1c` immediately before the call into it.
+    static constexpr uint32_t kSubObjectOffset = 0xa1c;
 
     std::string json() const;
 
     uint64_t calls() const {
         return m_calls;
+    }
+
+    // The word the entry held when the probe was asked for it, and the one the image has.
+    //
+    // The fork refuses the install when the entry does not hold the word the probe names,
+    // and calls that `entryHeldOther` -- which is true and says nothing about *why*. So
+    // both words are read and reported: a refusal that cannot say what it found is a
+    // refusal the reader has to go and reproduce.
+    uint32_t entryWordAtInstall() const {
+        return m_entryWord;
     }
 
     // The offset the report believes, or 0 when no offset was held by a majority of the
@@ -135,6 +167,7 @@ class NodePoseLocator {
     std::vector<Node> m_nodes;
     uint64_t m_refused = 0;
     uint64_t m_unreadable = 0;
+    uint32_t m_entryWord = 0;
     std::optional<GuestCallProbes::Installation> m_installation;
 };
 
