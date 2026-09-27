@@ -147,35 +147,42 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
                       "with every byte the same, so the two answers cannot be confused");
     }
 
-    // **Uncomparable is the answer a "blendable" count would hide.** The same node, two ticks,
-    // a different vertex count: there is no correspondence between the two samples' components
-    // to interpolate, and a lerp across it is arithmetic on unrelated numbers. That is neither
-    // "identical" nor "blendable", and the report keeps the three apart.
+    // **A node drawn with two shapes in one frame is two shapes, and each pairs with itself.**
+    // The first version of this kept the first draw of each frame per node, and the real title
+    // came back with six of eight objects "shape changed" -- because a node's first draw each
+    // frame is a single-vertex placeholder (36 bytes at a stride of 32, which is one vertex)
+    // and its real mesh comes later in the same frame. So the first sample was a placeholder and
+    // the second was a mesh. Matching by the draw's own shape is the fix, and this is the test
+    // for it: a placeholder and a mesh in each of two frames, with the *mesh* moving.
     {
         ObjectIdentityScope scope;
         std::atomic<uint64_t> frame{1};
         VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
         scope.bind(0x43e00000u);
-        history.onDrawRecorded(aMeshDraw(aMeshAt(0.0f)));
-        frame.store(2);
-        Mesh shorter;
-        shorter.positions = {1.0f, 2.0f, 3.0f};
-        shorter.stride = 12;
-        history.onDrawRecorded(aMeshDraw(shorter));
+        Mesh placeholder;
+        placeholder.positions = {0.0f, 0.0f, 0.0f};
+        placeholder.stride = 32;
+        for (int tick = 0; tick < 2; tick++) {
+            frame.store(static_cast<uint64_t>(tick) + 1);
+            history.onDrawRecorded(aMeshDraw(placeholder));
+            history.onDrawRecorded(aMeshDraw(aMeshAt(0.5f * static_cast<float>(tick))));
+        }
         const std::string body = history.json();
-        check::isTrue(field(body, "uncomparable") == "1" && field(body, "blendable") == "0" &&
-                          field(body, "identical") == "0",
-                      "a node whose vertex count changed between ticks is uncomparable, and is "
-                      "in none of the other two columns: " +
+        check::isTrue(field(body, "blendable") == "1",
+                      "a node whose mesh moved while its placeholder stood still is blendable: " +
                           body);
-        check::isTrue(body.find("\"verdict\":\"uncomparable\"") != std::string::npos,
-                      "and the per-node verdict says which, so the tally is not the only place "
-                      "the distinction exists");
+        check::isTrue(field(body, "shapes") == "2",
+                      "and both shapes are reported, because the placeholder pairing is evidence "
+                      "too -- it is the check that a stationary object stays stationary");
+        check::isTrue(body.find("\"compared\":true") != std::string::npos,
+                      "and the comparison is marked as having happened, which is the field the "
+                      "first version of this report could not distinguish from a zero");
     }
 
-    // **One sample is not a verdict.** A node seen once has nothing to be compared with, and
-    // the report must not let it be counted as identical -- which would read as "checked, found
-    // static" when nothing was checked.
+    // **Nothing paired is its own answer, and it is not "identical".** A node seen once in one
+    // frame has nothing to be compared with, and reporting it as identical would read as
+    // "checked, found static" when nothing was checked. The shapes it did sample are listed, so
+    // a reader can tell "under-sampled" from "sampled one shape of one".
     {
         ObjectIdentityScope scope;
         std::atomic<uint64_t> frame{1};
@@ -183,11 +190,55 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
         scope.bind(0x43e00000u);
         history.onDrawRecorded(aMeshDraw(aMeshAt(0.0f)));
         const std::string body = history.json();
-        check::isTrue(field(body, "oneSample") == "1" && field(body, "identical") == "0" &&
+        check::isTrue(field(body, "unpairedShapes") == "1" && field(body, "identical") == "0" &&
                           field(body, "blendable") == "0",
                       "one sample is its own column and is in neither of the other two: " + body);
         check::isTrue(field(body, "framesApart") == "0",
                       "and the frames apart is zero rather than a number nobody measured");
+        check::isTrue(body.find("\"compared\":false") != std::string::npos,
+                      "and the same null rather than zero applies here: one sample is not a "
+                      "measurement of no movement");
+        check::isTrue(body.find("\"sampledShapes\"") != std::string::npos &&
+                          field(body, "shapes") == "1",
+                      "and the shape it did sample is listed, so the under-sampling is visible "
+                      "as under-sampling");
+    }
+
+    // **A magnitude beyond any scene is a signal, not a result.** The first real run of this
+    // reported component deltas of 1.06e+38 and called them movement. That is what bytes that
+    // are not a position at that offset look like when read as a float -- the attribute was
+    // named across objects and a draw with a 152-byte stride packs something else at offset
+    // zero. A position does not move by 10^38 between two frames, so the magnitude is counted
+    // and the verdict says the magnitude is not believable, rather than a number that looks
+    // like evidence being printed as evidence.
+    {
+        ObjectIdentityScope scope;
+        std::atomic<uint64_t> frame{1};
+        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        scope.bind(0x43e00000u);
+        Mesh absurd = aMeshAt(0.0f);
+        // A plausible byte pattern that is not a position: large exponents.
+        const float wild[3] = {3.0e38f, -2.0e38f, 1.0e38f};
+        std::memcpy(absurd.positions.data(), wild, sizeof(wild));
+        history.onDrawRecorded(aMeshDraw(absurd));
+        frame.store(2);
+        Mesh moved = absurd;
+        moved.positions[0] = 3.1e38f;
+        history.onDrawRecorded(aMeshDraw(moved));
+        const std::string body = history.json();
+        check::isTrue(body.find("\"magnitudeBelievable\":false") != std::string::npos,
+                      "a component delta of 10^38 is counted and the magnitude is marked "
+                      "unbelievable: " +
+                          body);
+        check::isTrue(field(body, "componentsOutOfRange") != "0",
+                      "and the count of them is a number, so a reader can see how much of the "
+                      "comparison was unreadable rather than a magnitude that means nothing");
+        check::isTrue(field(body, "biggestComponentDelta") == "0",
+                      "and the reported magnitude is the largest BELIEVABLE one, which is none "
+                      "of them here -- not the 10^38 the first run printed as movement");
+        check::isTrue(VertexPoseHistory::kComponentCeiling > 1.0e5f,
+                      "and the ceiling is a stated number, generous on purpose: the point is to "
+                      "catch 10^38, not to bound a scene");
     }
 
     // **The sample schedule is per frame, and this is the test for it.** A node drawn forty
@@ -204,7 +255,7 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
             history.onDrawRecorded(aMeshDraw(aMeshAt(0.25f * static_cast<float>(draw))));
         }
         const std::string body = history.json();
-        check::isTrue(field(body, "oneSample") == "1" && field(body, "drawsSeen") == "40",
+        check::isTrue(field(body, "unpairedShapes") == "1" && field(body, "drawsSeen") == "40",
                       "forty draws inside one frame take one sample, so nothing is compared with "
                       "itself: " +
                           body);
