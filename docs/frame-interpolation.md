@@ -1111,6 +1111,50 @@ So the location of the fault within the stub is **not yet established**, and the
 one that settles it: a single run that reports both the counter and the window around the payload,
 which the fault harness now dumps in the same pass for exactly this reason.
 
+### The fault is one register: the frame is entered with no display
+
+With the CPU state's layout read out of the process rather than assumed, and the frame's own registers
+read alongside the counter:
+
+```
+OSSched[core=1]  hCPU=0x7ffe8538d580  via recompiled
+  guest pc=0x0274c27c  lr=0x0274c280
+  r0..r7=00e05884 0e275a38 10008000 00000000 0e275a24 0e275a28 0e275a30 44213980
+  r12=0274c27c  r29=10506898  r30=00000000  r31=43e08af8
+```
+
+**The layout is confirmed, so these are the guest's own registers.** `ptype /o PPCInterpreter_t`, printed
+by the running process: `instructionPointer` at 0, `uint32 gpr[32]` at 4 (128 bytes), `spr.LR` at 696 --
+the three offsets this harness has been using. `rsp` and `rdi` hold the *same* pointer, and the counter
+`0x0274c27c` is in this title's code segment, checked against both ranges rather than asserted.
+
+**And the whole fault is `r30 = 0`.**
+
+```
+0x0274c278  or    r30,r3,r3     the display pointer, from r3
+0x0274c27c  lwz   r3,0x18(r30)  <- where the fault is, dereferencing r30
+```
+
+`r30` is **zero**. So the frame's seventh word reads guest address `0x18`, and the guest faults. The
+frame has run its prologue and its sixth word and is executing normally -- with **no display.**
+
+**And the display is in `r31`: `0x43e08af8`, the very object the run's own report names.** So the
+object is not lost, it is in a different register than the frame copies from, and the register the
+frame reads is the one that came through as zero.
+
+This is not the HLE call disturbing things. `Dispatch` is handed `std::span<const uint32_t, 32>(cpu->gpr, 32)`
+-- the guest's registers are *memory* the C++ writes through a const span, so a C++ call cannot turn a
+non-zero `r3` into zero. **`r3` was zero before the probe's stub ran.**
+
+**So the value the stand-in routes the call with is zero, and the stand-in has no way to supply the
+display because it does not know it.** The mod already holds the frame's own `or r3,r30,r30` --
+`kRestoreDisplay`, lifted from `0x0274c294` -- but that rebuilds `r3` from `r30`, and outside the frame
+`r30` is not the display either.
+
+**The next question is one static read:** the title's own loop at `kDisplayLoopTop`, `0x0274c020`, has
+the display in a register when it loads vtable slot `0xcc` and dispatches. Which register that is says
+whether the stand-in must be given one, and which. Everything else about this fault is now accounted for.
+
 ### Correctly paired at last: the fault is in the title's own code, and the gdb window was a host read
 
 One run reporting both the counter and the window, which is the only way the two may be paired:
