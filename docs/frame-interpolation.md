@@ -1504,8 +1504,9 @@ Word 0 of a uniform block register is whatever last held the slot — the guest 
 registers by the index it passes to `GX2Set*UniformBlock` and the shader names them by its own
 group, so the two do not agree. **Word 1 is `size - 1` as the guest wrote it**, and a size the
 guest chose is a small constant that register state does not invent. The fork now hands both
-words over (`LatteFrameHooks::UniformAssembly::blockSizes`), and a slot whose word 1 equals the
-record's size minus one is a block the title put there.
+words over (`LatteFrameHooks::UniformAssembly::blockSizes`, cemu `cffee96`, pinned here by
+revision), and a slot whose word 1 equals the record's size minus one is a block the title put
+there.
 
 Measured on the real title, with the record's size word as the filter and never a guessed one:
 
