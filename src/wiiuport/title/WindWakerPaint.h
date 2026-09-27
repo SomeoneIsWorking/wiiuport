@@ -2,6 +2,7 @@
 
 #include "Cafe/HW/Espresso/GuestCallProbes.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -87,6 +88,22 @@ class WindWakerPaint {
     static constexpr uint32_t kIntervalOffset = 0x50;
     static constexpr uint32_t kFlagsOffset = 0x74;
     static constexpr uint32_t kCounterOffset = 0x78;
+
+    // The display fields the report names, with the offsets the title's own image puts them at. A
+    // table of the four, rather than one `static constexpr` array inside the report function, which
+    // the ownership rule is right to refuse: a function-local static's lifetime is not something a
+    // reader can see.
+    struct DisplayField {
+        uint32_t offset;
+        const char* name;
+    };
+
+    static constexpr std::array<DisplayField, 4> kDisplayFields{{
+        {kPhaseOffset, "phase"},
+        {kIntervalOffset, "interval"},
+        {kFlagsOffset, "flags"},
+        {kCounterOffset, "counter"},
+    }};
 
     // The fork's seams, injected so this is testable without a guest.
     // The flag says whether the probe keeps the entry. Every registration here is
