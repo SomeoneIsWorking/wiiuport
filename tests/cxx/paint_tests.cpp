@@ -412,6 +412,16 @@ void wiiuport::tests::runPaintTests() {
                 "\"swapIntervalAsked\":1,\"pacing\":2,\"titleSwapInterval\":2,\"paints\":1,"
                 "\"probe\":\"installed\",\"flagsAtLastPaint\":0,"
                 "\"phaseAtLastPaint\":0,"
+                "\"indirectBaseAtLastPaint\":268455560,"
+                "\"callTargetsAtLastPaint\":{\"108\":0,\"212\":0,\"220\":0,"
+                "\"236\":0,\"228\":0},"
+                "\"samplesValid\":false,"
+                "\"lastTwoPaints\":{\"0\":{\"flags\":0,\"phase\":0,\"target_108\":0,"
+                "\"target_212\":0,\"target_220\":0,\"target_236\":0,"
+                "\"target_228\":0,\"allTargetsInImage\":\"false\"},"
+                "\"1\":{\"flags\":0,\"phase\":0,\"target_108\":0,\"target_212\":0,"
+                "\"target_220\":0,\"target_236\":0,"
+                "\"target_228\":0,\"allTargetsInImage\":\"false\"}},"
                 "\"display\":\"0x43e08af8\","
                 "\"liveVTable\":\"0x10004e88\",\"fields\":{}}\n",
             "the report is one JSON object, spelled out");

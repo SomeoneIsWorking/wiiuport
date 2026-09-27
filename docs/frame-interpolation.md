@@ -515,12 +515,39 @@ test also caught a fourth thing: a first version checked word 1's branch displac
 *block's* address rather than *its own*, which makes the displacement four bytes long and lands four
 bytes past the frame. The same mistake the gate's counters were once read for, in a payload.
 
-**What this leaves.** The frame's five `bctrl` targets all come from the display object, so the second
-paint's near-null dereference is most likely one of those fields holding a value from the first
-paint rather than a call target. Reading the five fields -- `display+0x6c`, `+0xdc`, `+0xd4`, `+0xec`
-and the one behind `+0xe4` -- at the frame's entry on the first and the second paint, through the
-probe the paint mod already installs on the frame, would say which one differs. That is a
-measurement in the mechanism that already exists, and it is the next thing to do.
+### The five call targets, read, and they are the same on both paints
+
+The probe that already sits on the frame now reads all five at every paint and keeps the last two,
+so a pass's pair is visible side by side. **The offsets are on `*(display+0x24)`, not on the
+display** -- the frame does `lwz r10, 0x24(r30)` and every target load is `0x??(r10)`. A first
+version read them as `display + 0xd4` and got four zeroes and one `0x00400000`, which is what a
+wrong base looks like and not what a title with no call targets looks like.
+
+Read through the base, on the real title, at the last two paints:
+
+| field | value | |
+|---|---|---|
+| `*(display+0x24)+0x6c` | `0x02747818` | |
+| `+0xd4` | `0x0274c67c` | |
+| `+0xdc` | `0x02034ffc` | |
+| `+0xec` | `0x020350c4` | |
+| `+0xe4` | `0x0274c874` | **the address the objective names as the flip-wait test** |
+
+**All five are code addresses in the image, and all five are identical on the two paints**, as are
+`display+0x74` (0 on both) and the phase field `display+0x28` (2 on both). So the second paint finds
+the same call targets the first one did, and **the display object is not where the second paint
+diverges.** That is the hypothesis this measurement was built to test, and it is refuted by it.
+
+**What this leaves, and it is now a short list.** The guest's near-null dereference at address
+`0x198` on the second pass is not in the display's fields, its flag, its phase or its call targets.
+It is in state the frame's *callees* hold or leave: the five named callees are `0x0274b054`,
+`0x0274a5ec`, `0x0274c038`, `0x0274b06c` and `0x02760e58`, and the frame calls each of them once per
+paint. So the bounded next measurement is a probe on those five, reading the guest's registers on
+entry, and the question is which of them is entered on the second paint and with what.
+
+That is the same instrument at five more addresses, and it is the last place the divergence can be
+that the disassembly points at: after them the frame returns, and the payload's only remaining act
+is the branch back to the title's loop.
 
 ### A real bug found on the way, which is not this fault
 
