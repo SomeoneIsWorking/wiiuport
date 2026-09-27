@@ -54,7 +54,63 @@ void UniformBlockCensus::Binder::OnInstall(GuestCallProbes::Installation result)
 
 void UniformBlockCensus::Binder::OnCall(std::span<const uint32_t, 32> gpr,
                                         uint32_t /*returnAddress*/) {
+    // r3 is the sub-object whose descriptor the binder walks; **r4 is the material it binds it
+    // for**, and the block *index* lives in there rather than in the record. The binder reads
+    // `iVar3 = *(int *)(material + 0x10) + 0x28` when `*(uint *)(material + 0xc) > 2`, and the
+    // vertex, pixel and geometry indices are the shorts at `iVar3 + 0xc`, `+0xe` and `+0x10`.
+    // Handed over as read, because whether those shorts are register indices is a measurement
+    // and not a reading of the decompilation.
+    m_owner.readMaterial(gpr[4]);
     m_owner.record(gpr[3], m_second);
+}
+
+void UniformBlockCensus::readMaterial(uint32_t material) {
+    if (material == 0) {
+        m_materialUnread.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    // The two words that decide the base, and the three shorts off it. Read as the binder reads
+    // them: a count first, and the base only when the count says there is more than one entry.
+    uint32_t count = 0;
+    if (!m_readWord(material + 0x0c, count)) {
+        m_materialUnread.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    uint32_t offset = 0;
+    if (!m_readWord(material + 0x10, offset)) {
+        m_materialUnread.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    const uint32_t base = count > 2 ? offset + 0x28 : 0u;
+    Material read;
+    read.material = material;
+    read.count = count;
+    read.offset = offset;
+    read.base = base;
+    bool complete = true;
+    const uint32_t at = base + 0x0c;
+    complete = m_readWord(at, read.raw0) && complete;
+    complete = m_readWord(at + 4, read.raw1) && complete;
+    complete = m_readWord(at + 8, read.raw2) && complete;
+    if (!complete) {
+        m_materialUnread.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    // The three shorts the binder compares against -1, read as the low half of the three words.
+    // Signed, because -1 is the "this stage has no block" value and an unsigned 0xffffffff would
+    // read as a large index rather than as the absence.
+    read.vertexIndex = static_cast<int16_t>(read.raw0 & 0xffffu);
+    read.pixelIndex = static_cast<int16_t>(read.raw1 & 0xffffu);
+    read.geometryIndex = static_cast<int16_t>(read.raw2 & 0xffffu);
+    {
+        std::scoped_lock lock(m_mutex);
+        if (m_materials.size() < kMaxMaterials) {
+            m_materials.push_back(read);
+        } else {
+            m_materialsRefused.fetch_add(1, std::memory_order_relaxed);
+        }
+        ++m_materialsRead;
+    }
 }
 
 void UniformBlockCensus::setDrawAttributeCensus(const DrawAttributeCensus* draws) {
@@ -127,19 +183,19 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
             }
         }
         m_wordTests++;
-        // The ring, which needs a *place* to re-read. Placed here rather than before the mapping so
-        // that this binding has already counted towards the answer: the word that is the address is
-        // decided by measurement (`addressWordByMapping`) rather than assumed, so until a word has
-        // been shown to name guest memory in a majority of bindings the ring is told the size and
-        // nothing else and reports zero comparisons -- which is honest where naming an offset is
-        // not.
+        // The ring, which needs a *place* to re-read, and it is given the title's own two words.
+        //
+        // Not the mapping route's answer: that route refuses, correctly, because five of the
+        // record's seven words read as guest memory and it cannot tell which is meant. It is given
+        // `blockOf`, which is the pair the binder passes to `GX2Set*UniformBlock` -- the address
+        // and the size, straight from the record, with no base and no host interpretation between.
         if (m_ring != nullptr) {
-            const int word = addressWordByMapping();
-            if (word < 0) {
-                m_ring->bindSize(object, binding.entry[kEntryBlockSize / 4]);
+            uint32_t sizeInBytes = 0;
+            const uint32_t address = blockOf(binding.entry, sizeInBytes);
+            if (address != 0 && sizeInBytes != 0) {
+                m_ring->bind(object, address, sizeInBytes);
             } else {
-                m_ring->bind(object, binding.entry[static_cast<size_t>(word)],
-                             binding.entry[kEntryBlockSize / 4]);
+                m_ring->bindSize(object, binding.entry[kEntryBlockSize / 4]);
             }
         }
         // The other of the two, read the same way. This is the slot a blend
@@ -262,17 +318,22 @@ void UniformBlockCensus::readEntry(uint32_t object, uint32_t cursor,
 // stands and never used as a length.
 uint32_t UniformBlockCensus::blockOf(const std::array<uint32_t, kEntryWords>& entry,
                                      uint32_t& size) const {
-    // **There is no base.** The binder at 0x027ff88c / 0x027ff9c0 decompiles to
-    // `GX2SetVertexUniformBlock(iVar5, uVar4, uVar6)` with `uVar4 = entry[0x0c/4]` and
-    // `uVar6 = entry[0x04/4]`, and the fork's `_GX2SubmitUniformBlock` writes one of those two
-    // straight into the uniform block register as `memory_virtualToPhysical(...)` with nothing
-    // added to it. So the two words are the address and the size, in one order or the other, and
-    // the earlier reading of `+0x04` as a relative offset -- with a base to be found -- was the
-    // difference of a size and an address. The word that is the address is decided by measurement
-    // (`addressWordByMapping`, and `title::UniformBlockAddress` by a second route) and not here.
+    // **The binder's own two words, in the binder's own order, and nothing else.**
+    //
+    // The decompilation is `GX2SetVertexUniformBlock(iVar5, uVar4, uVar6)` with
+    // `uVar4 = entry[0x0c/4]` and `uVar6 = entry[0x04/4]`, so the record supplies the address and
+    // the size directly and **no base is added anywhere** -- which is what removed the relative-
+    // offset reading and the base hunt with it.
+    //
+    // Which word is the address is left to the record rather than to a host decision. The
+    // documented GX2 order is (index, address, size), so `+0x0c` is the address; the fork's export
+    // maps its `gpr[4]` to its own `size` and its `gpr[5]` to its `virtualAddress`, the reverse.
+    // **Both words read 0x40 for every object measured**, so the two readings differ in name and
+    // not in value, and this returns the title's pair as the title passes it rather than picking a
+    // winner. The size is the word that is 64 bytes whichever way round they are read, and the
+    // address is the other, and 0x40 is what the register ends up holding either way.
     size = entry[kEntryBlockSize / 4];
-    const int word = addressWordByMapping();
-    return word < 0 ? 0 : entry[static_cast<size_t>(word)];
+    return entry[kEntryBlockAddress / 4];
 }
 
 void UniformBlockCensus::mapWords(const std::array<uint32_t, kEntryWords>& entry,
@@ -338,6 +399,93 @@ std::string UniformBlockCensus::json() const {
     }
     body.raw("cursors", cursors.text());
     body.number("cursorsOutOfRange", m_cursorsOutOfRange);
+    // The material, and the block indices inside it. This is where the title names its block: not
+    // by address and not by the record, but by a register index read out of r4.
+    body.number("materialsRead", m_materialsRead.load());
+    body.number("materialsUnread", m_materialUnread.load());
+    body.number("materialsRefused", m_materialsRefused.load());
+    body.number("materialsDistinct", m_materials.size());
+    {
+        // **All three stages, because the empty one is not the answer.** The first version
+        // histogrammed only the vertex stage and reported "0 materials carry a vertex block
+        // index" -- true, and beside a geometry index of 3 sitting in the same record. -1 is the
+        // title's "this stage has no block", so a stage with none is an absence to count, not a
+        // stage to leave out.
+        //
+        // Signed, and printed signed: `JsonBody::number` takes a `uint64_t`, so a `-1` came out as
+        // 18446744073709551615 -- which reads as an enormous index and is precisely the value the
+        // decompilation says means "no block".
+        struct Stage {
+            const char* name;
+            int (*of)(const Material&);
+        };
+
+        const Stage stages[] = {
+            {"vertex",
+             [](const Material& one) {
+                 return one.vertexIndex;
+             }},
+            {"pixel",
+             [](const Material& one) {
+                 return one.pixelIndex;
+             }},
+            {"geometry",
+             [](const Material& one) {
+                 return one.geometryIndex;
+             }},
+        };
+        JsonBody byStage;
+        for (const Stage& stage : stages) {
+            uint64_t carrying = 0;
+            uint64_t absent = 0;
+            std::map<int, uint64_t> indices;
+            for (const Material& one : m_materials) {
+                const int index = stage.of(one);
+                if (index >= 0) {
+                    carrying++;
+                    indices[index]++;
+                } else {
+                    absent++;
+                }
+            }
+            JsonBody one;
+            one.number("carrying", carrying);
+            one.number("absent", absent);
+            one.number("distinct", indices.size());
+            // The claim is "small integers", and "small" needs the largest one stated. An index
+            // that were an address or a pointer would be enormous here, and that is the falsifier.
+            one.raw("largest", indices.empty() ? "null" : std::to_string(indices.rbegin()->first));
+            one.raw("smallest", indices.empty() ? "null" : std::to_string(indices.begin()->first));
+            JsonBody listed;
+            size_t shown = 0;
+            for (const auto& [index, seen] : indices) {
+                if (shown >= kExamples) {
+                    break;
+                }
+                JsonBody entry;
+                entry.number("index", index);
+                entry.number("materials", seen);
+                listed.object(std::to_string(shown), entry.text());
+                shown++;
+            }
+            one.object("byValue", listed.text());
+            byStage.object(stage.name, one.text());
+        }
+        body.object("blockIndicesByStage", byStage.text());
+        JsonBody sample;
+        for (size_t index = 0; index < m_materials.size() && index < kExamples; index++) {
+            JsonBody one;
+            one.string("material", hex(m_materials[index].material));
+            one.number("count", m_materials[index].count);
+            one.number("offset", m_materials[index].offset);
+            one.number("base", m_materials[index].base);
+            one.raw("vertexIndex", std::to_string(m_materials[index].vertexIndex));
+            one.raw("pixelIndex", std::to_string(m_materials[index].pixelIndex));
+            one.raw("geometryIndex", std::to_string(m_materials[index].geometryIndex));
+            sample.object(std::to_string(index), one.text());
+        }
+        body.object("sampleMaterials", sample.text());
+    }
     body.number("otherRecordsRead", m_otherRecordsRead.load());
     body.number("otherRecordsUnread", m_otherRecordsUnread.load());
     body.number("recordsPublished", m_recordsPublished.load());

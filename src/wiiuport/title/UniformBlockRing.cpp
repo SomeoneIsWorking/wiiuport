@@ -208,7 +208,39 @@ std::string UniformBlockRing::json() const {
     body.number("previousTickOverwritten", overwritten);
     body.number("comparisonsUnreadable", unreadable);
     // Double buffering, measured: consecutive samples of one object that differ in address.
+    //
+    // **Read with `blockOffsetFromObject` below, not on its own.** A title that names every object
+    // at a *different* address produces this count too -- one transition per object -- and 8
+    // objects at 8 addresses gives exactly 8. So the number is not evidence of double buffering by
+    // itself, and the offset from the object's own address is what says which of the two it is.
     body.number("consecutivePairsWithDifferentAddress", alternating);
+    // Where the block sits relative to the object that named it. A fixed offset means the block is
+    // inside the object's own allocation, and then "still present" is a statement about static
+    // descriptor memory rather than about a tick's residue.
+    {
+        std::map<int64_t, uint64_t> offsets;
+        for (const Tracked& one : m_tracked) {
+            for (const Sample& sample : one.samples) {
+                offsets[static_cast<int64_t>(sample.address) - static_cast<int64_t>(one.object)]++;
+            }
+        }
+        body.number("distinctBlockAddresses", [&] {
+            std::map<uint32_t, uint64_t> seen;
+            for (const Tracked& one : m_tracked) {
+                for (const Sample& sample : one.samples) {
+                    seen[sample.address]++;
+                }
+            }
+            return seen.size();
+        }());
+        body.number("distinctOffsetsFromObject", offsets.size());
+        if (!offsets.empty()) {
+            body.number("leadingOffsetFromObject", offsets.rbegin()->first);
+            body.number("leadingOffsetSeen", offsets.rbegin()->second);
+        } else {
+            body.raw("leadingOffsetFromObject", "null");
+        }
+    }
 
     JsonBody objects;
     size_t shown = 0;

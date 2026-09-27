@@ -227,6 +227,36 @@ class UniformBlockCensus {
     // Called on the display thread, once per binding, with the object.
     void record(uint32_t object, bool second);
 
+    // The material the binder is binding for -- its second argument -- read as the binder reads it.
+    //
+    // **This is where the title names its uniform block.** Not by address, and not in the
+    // descriptor record: the binder takes the block *index* from here, as the shorts at
+    // `*(int *)(material + 0x10) + 0x28 + {0xc, 0xe, 0x10}`, and only then calls
+    // `GX2Set*UniformBlock(index, address, size)`. The record supplies the address and the size --
+    // both reading 0x40 -- and this supplies the index that says *which* block. Read at run time
+    // and reported with its denominators, because whether those shorts are small register indices
+    // or something else is a measurement and not a reading of the decompilation.
+    void readMaterial(uint32_t material);
+
+    // One material, as read. `raw0..raw2` are the three words the shorts live in, kept whole so
+    // the report shows what was there rather than only the signed half that was interpreted.
+    struct Material {
+        uint32_t material = 0;
+        uint32_t count = 0;
+        uint32_t offset = 0;
+        uint32_t base = 0;
+        uint32_t raw0 = 0;
+        uint32_t raw1 = 0;
+        uint32_t raw2 = 0;
+        int vertexIndex = -1;
+        int pixelIndex = -1;
+        int geometryIndex = -1;
+    };
+
+    // How many materials' worth of reading are kept. Capped, and the overflow counted: a list of
+    // every material in a scene is a list of everything the title has ever drawn.
+    static constexpr size_t kMaxMaterials = 4096;
+
     // What the block's pose holds, binding after binding.
     //
     // Handed the two blocks the descriptor names at the moment the binder is about to
@@ -282,6 +312,10 @@ class UniformBlockCensus {
     // Why a record was not handed to the address measurement. A silent skip is a pairing that
     // went wrong without saying so, and the first version of this published nothing at all for
     // four minutes of a run before anyone could see why.
+    std::vector<Material> m_materials;
+    std::atomic<uint64_t> m_materialsRead{0};
+    std::atomic<uint64_t> m_materialUnread{0};
+    std::atomic<uint64_t> m_materialsRefused{0};
     std::atomic<uint64_t> m_otherRecordsRead{0};
     std::atomic<uint64_t> m_otherRecordsUnread{0};
     std::atomic<uint64_t> m_recordsPublished{0};
