@@ -58,11 +58,16 @@ void UniformBlockCensus::Binder::OnCall(std::span<const uint32_t, 32> gpr,
 }
 
 void UniformBlockCensus::record(uint32_t object, bool second) {
-    // The node this binder belongs to, and the reason the node's own draw is not probed:
-    // the draw reaches the binder through its sub-object at `node + 0xa1c`, and the binder
-    // is called hundreds of thousands of times a run where the draw's entry is called never.
+    // Both of the two things this binding names, each scored in its own table.
+    //
+    // The binder's argument is the node's **sub-object** -- the thing whose descriptor it
+    // walks -- and the node is that one fixed subtraction away, from the draw's own
+    // `addi r3,r28,0xa1c`. This is the production route, and it is necessary rather than
+    // convenient: the draw's entry is called zero times a run, because the title dispatches
+    // the draw through the vtable's target instead.
     if (m_nodes != nullptr) {
-        m_nodes->observe(object - NodePoseLocator::kSubObjectOffset);
+        m_nodes->observe(object, NodePoseLocator::Kind::SubObject);
+        m_nodes->observe(object - NodePoseLocator::kSubObjectOffset, NodePoseLocator::Kind::Node);
     }
     // Counted before the lock: a binding on the display thread must not be able
     // to block behind a report being written.

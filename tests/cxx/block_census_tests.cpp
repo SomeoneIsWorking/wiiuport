@@ -1,13 +1,17 @@
 #include "check.h"
 #include "suites.h"
+#include "wiiuport/title/NodePoseLocator.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 
 #include <array>
+#include <cmath>
+#include <cstring>
 #include <map>
 #include <span>
 #include <string>
 #include <vector>
 
+using wiiuport::title::NodePoseLocator;
 using wiiuport::title::UniformBlockCensus;
 
 namespace {
@@ -108,10 +112,26 @@ void writeEntry(FakeGuest& guest, uint32_t entry, uint32_t offset, uint32_t size
 
 void theOtherSlotIsReadAsWellAsTheBoundOne();
 void cursorSwitchesAreCountedAgainstTheBindsTheyCouldBeAmong();
+void theTwoAddressesABindingNamesAreBothFed();
+
+// The node locator's own registration, kept apart from the census's two: the census's sink
+// decides by address, and the node draw's entry is neither binder, so it would land in the
+// second slot and stand in for a probe that is not there.
+GuestCallProbes::Probe* g_nodeProbe = nullptr;
+
+void keepNodeRegistration(uint32_t, uint32_t, GuestCallProbes::Probe& probe, bool, uint32_t) {
+    g_nodeProbe = &probe;
+}
+
+NodePoseLocator makeNodeLocator() {
+    g_nodeProbe = nullptr;
+    return NodePoseLocator(&keepNodeRegistration, &readWords);
+}
 
 } // namespace
 
 void wiiuport::tests::runBlockCensusTests() {
+    theTwoAddressesABindingNamesAreBothFed();
     theOtherSlotIsReadAsWellAsTheBoundOne();
     cursorSwitchesAreCountedAgainstTheBindsTheyCouldBeAmong();
     // An object the binder would be handed, with its cursor naming the second
@@ -256,6 +276,78 @@ void cursorSwitchesAreCountedAgainstTheBindsTheyCouldBeAmong() {
                   "three of them could be compared, being bindings of an object already seen");
     check::isTrue(body.find("\"cursorSwitches\":2") != std::string::npos,
                   "and two of those moved the cursor");
+}
+
+// **The two addresses a binding names are both fed, and scored apart.** A binding's
+// argument is the node's sub-object; the node is that one `kSubObjectOffset` away. Four
+// sub-objects each hold a rigid transform at 80 bytes and their four nodes hold nothing, so
+// a run that shared one table would see 4 of 8, need 5, and name nothing. This is the
+// product's real path -- census to locator -- and it is the only place that wiring is
+// exercised at all, since the locator's own tests hand it addresses directly.
+void theTwoAddressesABindingNamesAreBothFed() {
+    NodePoseLocator nodes = makeNodeLocator();
+    g_fake = nullptr;
+    FakeGuest guest;
+    g_fake = &guest;
+
+    // Four sub-objects, each with a transform, each with a node that has none. The whole
+    // scanned range is written for both, because a read that stops at the first unmapped
+    // word is a refusal, and a fake with a hole in it would give one -- which is the right
+    // answer to the wrong question here.
+    const std::array<uint32_t, 4> objects = {0x43e10000u, 0x43e20000u, 0x43e30000u, 0x43e40000u};
+    // Rigid at every angle, so the pose can *move* between two draws without ceasing to be a
+    // transform. Adding a constant to a unit row would do the opposite: the first version of
+    // this test did that and the second scan no longer held a transform at all, so the
+    // candidate was never compared and nothing was named. A locator that cannot tell "the
+    // pose moved" from "the value stopped looking like a pose" is a locator that reports
+    // its own test fixture as the title.
+    const auto poseAt = [](float spin, uint32_t bits[12]) {
+        const float c = std::cos(spin);
+        const float s = std::sin(spin);
+        const float pose[12] = {c, s, 0.0f, -s, c, 0.0f, 0.0f, 0.0f, 1.0f, 2.0f, 3.0f, 4.0f};
+        for (size_t word = 0; word < 12; word++) {
+            std::memcpy(&bits[word], &pose[word], sizeof(uint32_t));
+        }
+    };
+    for (uint32_t object : objects) {
+        for (uint32_t word = 0; word < NodePoseLocator::kScanWords; word++) {
+            guest.writeWord(object + 4 * word, 0);
+            guest.writeWord(object - NodePoseLocator::kSubObjectOffset + 4 * word, 0);
+        }
+        uint32_t bits[12] = {};
+        poseAt(0.0f, bits);
+        for (size_t word = 0; word < 12; word++) {
+            guest.writeWord(object + 20 * 4 + 4 * word, bits[word]);
+        }
+    }
+
+    UniformBlockCensus census(&keepRegistration, &readWord, &readWords, nullptr, &nodes);
+    census.install();
+    linked();
+
+    // Two binds each, so an object is scanned more than once and a value that does not
+    // move can be told from one that does.
+    for (int pass = 0; pass < 2; pass++) {
+        for (uint32_t object : objects) {
+            guest.writeWord(object + UniformBlockCensus::kCursorOffset, 0);
+            uint32_t bits[12] = {};
+            poseAt(0.2f * static_cast<float>(pass + 1), bits);
+            for (size_t word = 0; word < 12; word++) {
+                guest.writeWord(object + 20 * 4 + 4 * word, bits[word]);
+            }
+            bind(g_first, object);
+        }
+    }
+
+    const std::string body = census.json();
+    const size_t at = body.find("\"nodePose\":{");
+    check::isTrue(at != std::string::npos, "the census carries the node pose locator: " + body);
+    const std::string node = body.substr(at);
+    check::isTrue(node.find("\"objectsTracked\":4") != std::string::npos,
+                  "and all four nodes were fed, the node being a fixed subtraction off the "
+                  "binding's argument");
+    check::isTrue(node.find("\"bestOffset\":80") != std::string::npos,
+                  "and the sub-object's field is named, 20 floats in: " + node);
 }
 
 } // namespace

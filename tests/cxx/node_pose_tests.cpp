@@ -1,10 +1,12 @@
-/// Which field of a node holds its pose.
+/// Which field of an object holds its pose.
 ///
-/// Two measurements in a row put the pose outside a uniform, so this looks in the node's own
-/// memory at the node's own draw. What makes the answer a locator rather than a coincidence
-/// is the cross-node test: a pose field is at one offset in *every* node, while a colour
-/// triple that happens to be near unit length is at a different offset in each. Every test
-/// here is about that, or about the probe site being somewhere the title actually enters.
+/// Three measurements in a row put the pose outside a uniform and outside the node, so this
+/// looks in the memory of the two things a binding names: the node and the sub-object at
+/// `node + 0xa1c`. What makes the answer a locator rather than a coincidence is the
+/// cross-object test: a pose field is at one offset in *every* object, while a colour triple
+/// that happens to be near unit length is at a different offset in each. Every test here is
+/// about that, about the two kinds being scored apart, or about the probe site being
+/// somewhere the title actually enters -- which measurement says it does not.
 #include "check.h"
 #include "suites.h"
 #include "wiiuport/title/NodePoseLocator.h"
@@ -22,6 +24,7 @@ using wiiuport::title::NodePoseLocator;
 
 std::map<uint32_t, std::vector<float>>* g_nodes = nullptr;
 GuestCallProbes::Probe* g_probe = nullptr;
+NodePoseLocator* g_locator = nullptr;
 uint32_t g_entry = 0;
 uint32_t g_first = 0;
 
@@ -53,30 +56,12 @@ void keepRegistration(uint32_t entry, uint32_t firstInstruction, GuestCallProbes
 NodePoseLocator makeLocator() {
     g_nodes = nullptr;
     g_probe = nullptr;
+    g_locator = nullptr;
     return NodePoseLocator(&keepRegistration, &readWords);
 }
 
-NodePoseLocator* g_locator = nullptr;
-
-// The route the product uses: a probe on the sub-object's binder, whose argument is the
-// sub-object, one fixed subtraction from the node. The probe is exercised too, because the
-// two paths are the same code reached two ways and the entry's being uncalled is a
-// measurement the report carries.
-void draw(uint32_t node) {
-    g_locator->observe(node);
-}
-
-// The other path, kept and counted: the probed entry, which installs and is never called
-// because the title dispatches the draw through the vtable's target. Exercised so the
-// report's `calls` is a number something tested rather than a field nothing reaches.
-void drawThroughProbe(uint32_t node) {
-    std::array<uint32_t, 32> gpr{};
-    gpr[NodePoseLocator::kNodeRegister] = node;
-    g_probe->OnCall(std::span<const uint32_t, 32>(gpr.data(), gpr.size()), 0);
-}
-
-// A node whose memory holds a rigid transform at a byte offset, and zeros elsewhere.
-std::vector<float> nodeWithPoseAt(size_t floatOffset, float spin) {
+// An object whose memory holds a rigid transform at a float offset, and zeros elsewhere.
+std::vector<float> withPoseAt(size_t floatOffset, float spin) {
     std::vector<float> words(NodePoseLocator::kScanWords, 0.0f);
     const float s = std::sin(spin);
     const float c = std::cos(spin);
@@ -87,6 +72,12 @@ std::vector<float> nodeWithPoseAt(size_t floatOffset, float spin) {
     return words;
 }
 
+std::vector<float> withNothing() {
+    return std::vector<float>(NodePoseLocator::kScanWords, 0.0f);
+}
+
+// A scalar field, read up to the next comma or brace. An object-valued field has to be
+// found whole, with `find`, because a value that begins with `{` ends at that brace.
 std::string field(const std::string& body, const std::string& name) {
     const size_t at = body.find("\"" + name + "\":");
     if (at == std::string::npos) {
@@ -98,6 +89,30 @@ std::string field(const std::string& body, const std::string& name) {
         end++;
     }
     return body.substr(start, end - start);
+}
+
+// One nested object out of the report, so a field can be read inside it and not confused
+// with the same name in the other kind. Both kinds carry `objectsTracked` and `bestOffset`,
+// and a reader that cannot tell them apart reads whichever it finds first.
+std::string section(const std::string& body, const std::string& name) {
+    const std::string key = "\"" + name + "\":{";
+    const size_t at = body.find(key);
+    if (at == std::string::npos) {
+        return "";
+    }
+    size_t depth = 0;
+    size_t index = at + name.size() + 2;
+    for (; index < body.size(); index++) {
+        if (body[index] == '{') {
+            depth++;
+        } else if (body[index] == '}') {
+            depth--;
+            if (depth == 0) {
+                return body.substr(at + name.size() + 3, index - (at + name.size() + 3));
+            }
+        }
+    }
+    return "";
 }
 
 } // namespace
@@ -120,14 +135,18 @@ void wiiuport::tests::runNodePoseLocatorTests() {
         check::isTrue(NodePoseLocator::kNodeRegister == 3,
                       "the node is in r3 at the entry, where the prologue has not yet copied it "
                       "to r28");
+        check::isTrue(NodePoseLocator::kSubObjectOffset == 0xa1c,
+                      "and the node's sub-object sits 0xa1c from the node, which is the draw's "
+                      "own `addi r3,r28,0xa1c` -- so one subtraction off a binding's argument "
+                      "is the node");
     }
 
-    // A pose at the same offset in several nodes is named, and the count of nodes is what
-    // names it.
+    // A pose at the same offset in several objects is named, and the count of objects is
+    // what names it.
     {
         std::map<uint32_t, std::vector<float>> nodes;
         for (uint32_t node = 1; node <= 5; node++) {
-            nodes[node] = nodeWithPoseAt(20, 0.1f * static_cast<float>(node));
+            nodes[node] = withPoseAt(20, 0.1f * static_cast<float>(node));
         }
         NodePoseLocator locator = makeLocator();
         g_nodes = &nodes;
@@ -135,34 +154,31 @@ void wiiuport::tests::runNodePoseLocatorTests() {
         g_locator = &locator;
         for (uint32_t node = 1; node <= 5; node++) {
             for (int scan = 0; scan < 3; scan++) {
-                nodes[node] = nodeWithPoseAt(20, 0.1f * static_cast<float>(node) + 0.05f * scan);
-                draw(node);
+                nodes[node] = withPoseAt(20, 0.1f * static_cast<float>(node) + 0.05f * scan);
+                locator.observe(node);
             }
         }
         const std::string body = locator.json();
+        const std::string mine = section(body, "node");
         g_nodes = nullptr;
-        check::isTrue(NodePoseLocator::kSubObjectOffset == 0xa1c,
-                      "and the node's sub-object sits 0xa1c from the node, which is the draw's "
-                      "own `addi r3,r28,0xa1c` -- so the binder's argument is the node");
-        check::isTrue(field(body, "nodesTracked") == "5", "five distinct nodes tracked");
+        check::isTrue(field(mine, "objectsTracked") == "5", "five distinct objects tracked");
         check::isTrue(locator.bestOffset() == 80,
-                      "and the offset five nodes agree on is named -- 20 floats is 80 bytes: " +
-                          body);
-        check::isTrue(field(body, "nodesNeeded") == "3",
-                      "with the number of nodes needed stated, so the bar is not a mystery");
-        check::isTrue(field(body, "moved") != "0",
-                      "and the value moved between scans of a node, which is what separates a "
+                      "and the offset five objects agree on is named -- 20 floats is 80 bytes");
+        check::isTrue(field(mine, "objectsNeeded") == "3",
+                      "with the number of objects needed stated, so the bar is not a mystery");
+        check::isTrue(field(mine, "moved") != "0",
+                      "and the value moved between scans of an object, which is what separates a "
                       "pose from a constant: " +
-                          body);
+                          mine);
     }
 
-    // The same shape at a *different* offset in each node is not a field. Three nodes, three
-    // offsets, nothing named -- which is the case a "found a transform" report would call a
-    // pass and a cross-node locator calls nothing.
+    // The same shape at a *different* offset in each object is not a field. Three objects,
+    // three offsets, nothing named -- which is the case a "found a transform" report would
+    // call a pass and a cross-object locator calls nothing.
     {
         std::map<uint32_t, std::vector<float>> nodes;
         for (uint32_t node = 1; node <= 3; node++) {
-            nodes[node] = nodeWithPoseAt(static_cast<size_t>(node) * 7, 0.2f);
+            nodes[node] = withPoseAt(static_cast<size_t>(node) * 7, 0.2f);
         }
         NodePoseLocator locator = makeLocator();
         g_nodes = &nodes;
@@ -170,39 +186,88 @@ void wiiuport::tests::runNodePoseLocatorTests() {
         g_locator = &locator;
         for (uint32_t node = 1; node <= 3; node++) {
             for (int scan = 0; scan < 3; scan++) {
-                draw(node);
+                locator.observe(node);
             }
         }
         const std::string body = locator.json();
         g_nodes = nullptr;
         check::isTrue(field(body, "calls") == "0",
-                      "and nothing came through the probed entry, because the title dispatches "
-                      "the draw through the vtable's target instead");
-        check::isTrue(field(body, "nodesNeeded") == "2", "two nodes would have been enough");
+                      "nothing came through the probed entry, because the title dispatches the "
+                      "draw through the vtable's target instead");
+        check::isTrue(field(section(body, "node"), "objectsNeeded") == "2",
+                      "two objects would have been enough");
         check::isTrue(locator.bestOffset() == 0,
-                      "and nothing is named, because no offset is held by two nodes");
-        check::isTrue(field(body, "bestOffset") == "null",
+                      "and nothing is named, because no offset is held by two objects");
+        check::isTrue(field(section(body, "node"), "bestOffset") == "null",
                       "and the report says null rather than the best candidate it saw");
     }
 
-    // One node cannot agree with another, so it names nothing however many times it is
+    // **The two kinds are scored apart.** Four sub-objects each hold a transform at 80
+    // bytes; four nodes hold nothing. Named in the sub-object table, nothing in the node
+    // table. A single table over both would have seen 4 of 8 and needed 5, and named
+    // nothing -- so this is the difference between a measurement and a diluted one, and it
+    // is why the two tables exist.
+    {
+        std::map<uint32_t, std::vector<float>> memory;
+        for (uint32_t sub = 1; sub <= 4; sub++) {
+            // The node and its sub-object are the two addresses a binding names, one
+            // kSubObjectOffset apart, which is how the product reaches both.
+            const uint32_t node = 0x1000u * sub;
+            memory[node] = withNothing();
+            memory[node + NodePoseLocator::kSubObjectOffset] = withPoseAt(20, 0.3f * sub);
+        }
+        NodePoseLocator locator = makeLocator();
+        g_nodes = &memory;
+        locator.install();
+        g_locator = &locator;
+        for (uint32_t sub = 1; sub <= 4; sub++) {
+            const uint32_t node = 0x1000u * sub;
+            for (int scan = 0; scan < 3; scan++) {
+                // The pose changes between draws of the same object, because that is what a
+                // pose does and because the bar requires it: a rigid triple at the same
+                // offset in every object that never moves is a basis, and the locator says so.
+                memory[node + NodePoseLocator::kSubObjectOffset] =
+                    withPoseAt(20, 0.3f * sub + 0.05f * scan);
+                locator.observe(node + NodePoseLocator::kSubObjectOffset,
+                                NodePoseLocator::Kind::SubObject);
+                locator.observe(node, NodePoseLocator::Kind::Node);
+            }
+        }
+        const std::string body = locator.json();
+        g_nodes = nullptr;
+        const std::string asNode = section(body, "node");
+        const std::string asSub = section(body, "subObject");
+        check::isTrue(field(asSub, "objectsTracked") == "4" &&
+                          field(asNode, "objectsTracked") == "4",
+                      "both kinds tracked four objects each");
+        check::isTrue(field(asSub, "bestOffset") == "80" &&
+                          locator.bestOffset(NodePoseLocator::Kind::SubObject) == 80,
+                      "and the sub-object's field is named: four sub-objects hold it");
+        check::isTrue(field(asNode, "bestOffset") == "null" && locator.bestOffset() == 0,
+                      "while the node's own table names nothing, because no node held it: " +
+                          asNode);
+        check::isTrue(field(asNode, "objectsNeeded") == "3" && field(asSub, "objectsNeeded") == "3",
+                      "and both tables state their own denominator, so neither bar is a mystery");
+    }
+
+    // One object cannot agree with another, so it names nothing however many times it is
     // scanned. Reported, not silent.
     {
         std::map<uint32_t, std::vector<float>> nodes;
-        nodes[1] = nodeWithPoseAt(20, 0.3f);
+        nodes[1] = withPoseAt(20, 0.3f);
         NodePoseLocator locator = makeLocator();
         g_nodes = &nodes;
         locator.install();
         g_locator = &locator;
-        for (int scan = 0; scan < NodePoseLocator::kScansPerNode; scan++) {
-            draw(1);
+        for (int scan = 0; scan < static_cast<int>(NodePoseLocator::kScansPerObject); scan++) {
+            locator.observe(1);
         }
         const std::string body = locator.json();
         g_nodes = nullptr;
-        check::isTrue(field(body, "nodesTracked") == "1", "one node tracked");
-        check::isTrue(field(body, "nodesNeeded") == "0",
-                      "and the nodes needed is zero, because a single node cannot settle a "
-                      "cross-node question");
+        check::isTrue(field(section(body, "node"), "objectsTracked") == "1", "one object tracked");
+        check::isTrue(field(section(body, "node"), "objectsNeeded") == "0",
+                      "and the objects needed is zero, because a single object cannot settle a "
+                      "cross-object question");
         check::isTrue(locator.bestOffset() == 0, "so nothing is named");
     }
 
@@ -210,65 +275,205 @@ void wiiuport::tests::runNodePoseLocatorTests() {
     // count and not a field nothing writes.
     {
         std::map<uint32_t, std::vector<float>> nodes;
-        nodes[1] = nodeWithPoseAt(20, 0.3f);
+        nodes[1] = withPoseAt(20, 0.3f);
         NodePoseLocator locator = makeLocator();
         g_nodes = &nodes;
         locator.install();
         g_locator = &locator;
-        drawThroughProbe(1);
+        std::array<uint32_t, 32> gpr{};
+        gpr[NodePoseLocator::kNodeRegister] = 1;
+        g_probe->OnCall(std::span<const uint32_t, 32>(gpr.data(), gpr.size()), 0);
         const std::string body = locator.json();
         g_nodes = nullptr;
         check::isTrue(field(body, "calls") == "1", "a call through the probed entry is counted");
-        check::isTrue(field(body, "nodesTracked") == "1", "and the node in r3 is tracked");
+        check::isTrue(field(section(body, "node"), "objectsTracked") == "1",
+                      "and the node in r3 is tracked as a node, not as a sub-object");
     }
 
-    // A node whose memory does not read is counted, and contributes nothing.
+    // An object whose memory does not read is counted, and contributes nothing.
     {
         std::map<uint32_t, std::vector<float>> nodes;
-        nodes[1] = nodeWithPoseAt(20, 0.3f);
-        NodePoseLocator locator = makeLocator();
-        g_nodes = &nodes;
-        locator.install();
-        draw(1);
-        draw(0x7fffffff); // not in the map
-        const std::string body = locator.json();
-        g_nodes = nullptr;
-        check::isTrue(field(body, "readsUnreadable") == "1",
-                      "a node whose memory does not read is counted as unreadable: " + body);
-    }
-
-    // The scan is bounded, and the refusal is counted: a node list that grew with the scene
-    // would be a list of every object the title has ever drawn.
-    {
-        std::map<uint32_t, std::vector<float>> nodes;
-        for (uint32_t node = 1; node <= NodePoseLocator::kNodes + 3; node++) {
-            nodes[node] = nodeWithPoseAt(20, 0.1f);
-        }
+        nodes[1] = withPoseAt(20, 0.3f);
         NodePoseLocator locator = makeLocator();
         g_nodes = &nodes;
         locator.install();
         g_locator = &locator;
-        for (uint32_t node = 1; node <= NodePoseLocator::kNodes + 3; node++) {
-            draw(node);
+        locator.observe(1);
+        locator.observe(0x7fffffff); // not in the map
+        const std::string body = locator.json();
+        g_nodes = nullptr;
+        check::isTrue(field(body, "readsUnreadable") == "1",
+                      "an object whose memory does not read is counted as unreadable: " + body);
+    }
+
+    // The scan is bounded per kind, and the refusals are counted per kind: a tracked list
+    // that grew with the scene would be a list of every object the title has ever drawn,
+    // and a refusal counted only in total would hide which kind filled up.
+    {
+        std::map<uint32_t, std::vector<float>> memory;
+        for (uint32_t sub = 1; sub <= NodePoseLocator::kObjects + 3; sub++) {
+            const uint32_t node = 0x1000u * sub;
+            memory[node] = withPoseAt(20, 0.1f);
+            memory[node + NodePoseLocator::kSubObjectOffset] = withPoseAt(20, 0.1f);
+        }
+        NodePoseLocator locator = makeLocator();
+        g_nodes = &memory;
+        locator.install();
+        g_locator = &locator;
+        for (uint32_t sub = 1; sub <= NodePoseLocator::kObjects + 3; sub++) {
+            const uint32_t node = 0x1000u * sub;
+            locator.observe(node + NodePoseLocator::kSubObjectOffset,
+                            NodePoseLocator::Kind::SubObject);
+            locator.observe(node, NodePoseLocator::Kind::Node);
         }
         const std::string body = locator.json();
         g_nodes = nullptr;
-        check::isTrue(field(body, "nodesTracked") == std::to_string(NodePoseLocator::kNodes),
-                      "the tracked set stops at its stated size");
-        check::isTrue(field(body, "nodesRefused") == "3",
-                      "and the nodes beyond it are refused and counted");
+        const std::string asNode = section(body, "node");
+        const std::string asSub = section(body, "subObject");
+        check::isTrue(
+            field(asNode, "objectsTracked") == std::to_string(NodePoseLocator::kObjects) &&
+                field(asSub, "objectsTracked") == std::to_string(NodePoseLocator::kObjects),
+            "each kind's tracked set stops at its stated size");
+        check::isTrue(field(asNode, "objectsRefused") == "3" &&
+                          field(asSub, "objectsRefused") == "3",
+                      "and the objects beyond it are refused and counted, per kind: " + asNode);
     }
 
-    // The report is one object that ends, because a client parses it.
+    // **A rigid triple at the same offset in every object that never moves is not a pose.**
+    // This is the case the first run of the instrument got wrong: it reported `moved 18`
+    // beside `biggest delta 0.000000` -- values differing in the last mantissa bit -- and
+    // named a static triple at three offsets 1020 bytes apart. The bar now needs a change
+    // bigger than `kMotionEpsilon` between two draws, and this is the test for it: a
+    // bitwise-different but immovable triple is reported, counted as `still`, and named
+    // nothing.
+    {
+        std::map<uint32_t, std::vector<float>> memory;
+        for (uint32_t object = 1; object <= 6; object++) {
+            memory[object] = withPoseAt(20, 0.4f);
+        }
+        NodePoseLocator locator = makeLocator();
+        g_nodes = &memory;
+        locator.install();
+        g_locator = &locator;
+        for (uint32_t object = 1; object <= 6; object++) {
+            for (int scan = 0; scan < 3; scan++) {
+                // One part in 10^7 of a unit: different as bits, identical as a pose.
+                memory[object] = withPoseAt(20, 0.4f + 1e-7f * static_cast<float>(scan + 1));
+                locator.observe(object);
+            }
+        }
+        const std::string body = locator.json();
+        g_nodes = nullptr;
+        const std::string mine = section(body, "node");
+        check::isTrue(mine.find("\"objects\":6") != std::string::npos,
+                      "six objects hold a rigid triple at the same offset: " + mine);
+        check::isTrue(mine.find("\"moving\":false") != std::string::npos,
+                      "and the report says it does not move");
+        check::isTrue(mine.find("\"moved\":0") != std::string::npos &&
+                          mine.find("\"still\":") != std::string::npos,
+                      "with nothing counted as moved and every comparison counted as still, "
+                      "which is the difference a bitwise test could not see");
+        check::isTrue(locator.bestOffset() == 0 && field(mine, "bestOffset") == "null",
+                      "and nothing is named, because a basis is the same shape as a pose and "
+                      "is not one");
+    }
+
+    // A pose that moves is named, and the delta says by how much rather than printing as
+    // zero: the first run's `biggest delta 0.000000` beside `moved 18` was the tell that the
+    // bar was a bit test.
+    {
+        std::map<uint32_t, std::vector<float>> memory;
+        for (uint32_t object = 1; object <= 4; object++) {
+            memory[object] = withPoseAt(20, 0.1f * object);
+        }
+        NodePoseLocator locator = makeLocator();
+        g_nodes = &memory;
+        locator.install();
+        g_locator = &locator;
+        for (uint32_t object = 1; object <= 4; object++) {
+            for (int scan = 0; scan < 3; scan++) {
+                memory[object] = withPoseAt(20, 0.1f * object + 0.2f * scan);
+                locator.observe(object);
+            }
+        }
+        const std::string body = locator.json();
+        g_nodes = nullptr;
+        const std::string mine = section(body, "node");
+        check::isTrue(field(mine, "moved") == "8",
+                      "four objects saw their pose move, twice each over three scans, which is "
+                      "the eight the denominator implies: " +
+                          mine);
+        check::isTrue(field(mine, "biggestDelta") != "0",
+                      "and the delta is a number a reader can see, not a zero beside a "
+                      "movement count");
+        check::isTrue(locator.bestOffset() == 80, "so the offset is named");
+    }
+
+    // **The two windows are disjoint, and that is a fix, not a detail.** The sub-object is a
+    // field *of* the node, at `+0xa1c`, so a node window wide enough to be useful reaches
+    // into the sub-object's memory and a pose there is reported at the node's offset too --
+    // one measurement counted twice, which is what the separate tables exist to prevent. The
+    // first run did exactly that: the sub-object's `+80` appeared at the node's `+2668`.
+    // So the node's window ends where the sub-object begins, and this is the test: a pose in
+    // the sub-object must not appear in the node's table at all.
+    {
+        std::map<uint32_t, std::vector<float>> memory;
+        for (uint32_t sub = 1; sub <= 3; sub++) {
+            const uint32_t node = 0x2000u * sub;
+            memory[node] = withNothing();
+            memory[node + NodePoseLocator::kSubObjectOffset] = withPoseAt(20, 0.5f);
+        }
+        NodePoseLocator locator = makeLocator();
+        g_nodes = &memory;
+        locator.install();
+        g_locator = &locator;
+        for (uint32_t sub = 1; sub <= 3; sub++) {
+            const uint32_t node = 0x2000u * sub;
+            for (int scan = 0; scan < 3; scan++) {
+                memory[node + NodePoseLocator::kSubObjectOffset] =
+                    withPoseAt(20, 0.5f + 0.2f * scan);
+                locator.observe(node + NodePoseLocator::kSubObjectOffset,
+                                NodePoseLocator::Kind::SubObject);
+                locator.observe(node, NodePoseLocator::Kind::Node);
+            }
+        }
+        const std::string body = locator.json();
+        g_nodes = nullptr;
+        const std::string asNode = section(body, "node");
+        const std::string asSub = section(body, "subObject");
+        check::isTrue(field(asSub, "bestOffset") == "80",
+                      "the sub-object's field is at its own offset, 80: " + asSub);
+        check::isTrue(asNode.find("\"offsets\":{}") != std::string::npos,
+                      "and the node's table is empty, because its window stops where the "
+                      "sub-object begins: " +
+                          asNode);
+        check::isTrue(
+            field(asNode, "scanBytes") == std::to_string(NodePoseLocator::kSubObjectOffset) &&
+                field(asSub, "scanBytes") == std::to_string(NodePoseLocator::kScanWords * 4),
+            "and each table states its own window, so a reader can see the two are "
+            "apart rather than being told it");
+    }
+
+    // The report is one object that ends, because a client parses it, and it names both
+    // kinds and the vtable's target -- three addresses a reader would otherwise have to
+    // find in the code.
     {
         NodePoseLocator locator = makeLocator();
         locator.install();
         const std::string body = locator.json();
         check::isTrue(body.front() == '{' && body.find("}\n") != std::string::npos,
-                      "and the body is one object that ends");
-        check::isTrue(body.find("\"vtableTargetNotProbed\"") != std::string::npos,
-                      "and it names the vtable's target as well as the probed entry, because "
-                      "they are different addresses and a reader should not have to find that "
-                      "out from the code");
+                      "the body is one object that ends");
+        check::isTrue(body.find("\"vtableTargetNotProbed\"") != std::string::npos &&
+                          body.find("\"subObject\"") != std::string::npos &&
+                          body.find("\"subObjectOffset\"") != std::string::npos,
+                      "and it names the vtable's target and both kinds, because they are "
+                      "different addresses and a reader should not have to find that out from "
+                      "the code");
+        check::isTrue(field(body, "entryWordMatches") == "false",
+                      "and it says the entry's word did not match the image's, which is the "
+                      "reason a refused install is reported -- the fake guest has no code at "
+                      "the draw, and a report that hid the mismatch would hide the refusal's "
+                      "cause: " +
+                          body);
     }
 }
