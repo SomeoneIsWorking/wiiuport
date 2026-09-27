@@ -307,6 +307,14 @@ std::string UniformBlockCensus::json() const {
     } else {
         body.object("nodePose", m_nodes->json());
     }
+    // The correlation's own coverage and error rate, in the same report as the numbers it
+    // qualifies. A reader who has to go and find it cannot check it, and a correlation whose
+    // error rate is not beside its results is one that gets believed.
+    if (m_scope == nullptr) {
+        body.raw("objectIdentity", "null");
+    } else {
+        body.object("objectIdentity", m_scope->json());
+    }
     if (!m_refusal.empty()) {
         body.string("refusal", m_refusal);
     }

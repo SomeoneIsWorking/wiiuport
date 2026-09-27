@@ -250,6 +250,17 @@ void aBindingPublishesItsObjectForTheAssemblyHook() {
     // number is not an error count, it is the count of bindings the slot is standing for. A
     // value above one would mean something else bound in between and the identity read here
     // would be the wrong object's, which is worse than a missing one.
+    // And the census carries the correlation's own coverage and error rate, in the same report
+    // as the numbers it qualifies -- a reader who has to go and find it cannot check it.
+    const std::string body = census.json();
+    check::isTrue(body.find("\"objectIdentity\":{") != std::string::npos,
+                  "the census report carries the identity scope, so the correlation's error "
+                  "rate sits beside the counts it qualifies: " +
+                      body);
+    check::isTrue(body.find("\"identitySource\":\"binderObject\"") != std::string::npos &&
+                      body.find("\"assemblyQueriesWithObject\":1") != std::string::npos,
+                  "with the source named and the coverage counted, so a run where the slot was "
+                  "empty says so instead of implying the assemblies have no object");
     check::isTrue(r.bindsSinceLastQuery == 1,
                   "and the slot was written once since the previous read -- that one binding is "
                   "what these assemblies belong to, and a count above one would mean the "
