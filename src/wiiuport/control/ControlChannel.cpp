@@ -884,7 +884,16 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
     // itself advertises and no request can reach.
     if (request.method == "POST" && request.path() == "/logic") {
         const bool wanted = requestedFlag(std::string(request.query()), "on", true);
-        const std::string refusal = wanted ? m_logic.enable() : m_logic.disable();
+        // `through=1` installs the pass-through control: a payload of one word
+        // that branches back to the tick and keeps no state, so a tick rate that
+        // holds says a direct branch into the arena executed and a tick rate that
+        // stops says it did not -- with the census as the observer, so nothing in
+        // the answer rests on the gate's own payload or its own counters.
+        const bool through = requestedFlag(std::string(request.query()), "through", false);
+        const int flavour = static_cast<int>(requestedCount(std::string(request.query()),
+                                                            "flavour", 2));
+        const std::string refusal =
+            wanted ? m_logic.enable(through, flavour) : m_logic.disable();
         if (!refusal.empty()) {
             return lucent::http::Response::text(409, "Conflict", refusal + "\n");
         }

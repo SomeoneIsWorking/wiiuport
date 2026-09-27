@@ -227,7 +227,16 @@ void wiiuport::tests::runPaintTests() {
     }
     {
         check::isTrue(!WindWakerPaint::modeFrom(0).has_value(), "mode 0 names no stand-in");
-        check::isTrue(!WindWakerPaint::modeFrom(7).has_value(), "mode 7 names no stand-in");
+        check::isTrue(!WindWakerPaint::modeFrom(8).has_value(), "mode 8 names no stand-in");
+        // Mode 7 is the branch-entry control: the same payload, reached by a
+        // direct branch at the frame instead of through the vtable, so that the
+        // one difference between it and mode 1 is the kind of branch.
+        check::isTrue(WindWakerPaint::modeFrom(7).has_value() &&
+                          *WindWakerPaint::modeFrom(7) == WindWakerPaint::Mode::BranchEntry,
+                      "mode 7 is the branch-entry control");
+        check::isTrue(WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::BranchEntry)
+                          .has_value(),
+                      "and it builds a payload");
         check::isTrue(WindWakerPaint::modeFrom(6) == WindWakerPaint::Mode::OneAtSixty,
                       "mode 6 is one paint at one vblank a flip");
         check::isTrue(WindWakerPaint::modeFrom(5) == WindWakerPaint::Mode::IntervalField,

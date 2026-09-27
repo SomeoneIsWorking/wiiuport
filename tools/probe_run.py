@@ -79,7 +79,7 @@ def measure(
         on = name == "on"
         try:
             set_paint(on, port=args.port, mode=args.mode)
-            set_gate(on, port=args.port)
+            set_gate(on, port=args.port, through=args.through, flavour=args.flavour)
         except ControlUnavailable as unavailable:
             print(f"  refused to arm {name}: {str(unavailable)[:80]}", flush=True)
             return
@@ -149,6 +149,22 @@ def main(argv: list[str] | None = None) -> int:
         default=6,
         help="which stand-in to install: 1 paints once, 2 twice, 3 twice at two vblanks a "
         "flip, 6 twice at one",
+    )
+    parser.add_argument(
+        "--through",
+        action="store_true",
+        help="install the gate's pass-through control instead: one word that branches "
+        "back to the tick and keeps no state. The control for whether a direct branch "
+        "out of recompiled code into the loader's arena runs at all, with the caller "
+        "census as the observer",
+    )
+    parser.add_argument(
+        "--flavour",
+        type=int,
+        default=2,
+        help="how the pass-through control reaches the gate's block: 1 by a direct "
+        "branch, 2 through the count register, which is the mechanism the "
+        "recompiler's jump table serves",
     )
     parser.add_argument("--window", type=float, default=6.0, help="seconds per window")
     parser.add_argument("--windows", type=int, default=3, help="how many, alternating off and on")

@@ -769,8 +769,25 @@ def read_gate(port: int = DEFAULT_PORT, timeout: float = 2.0) -> GateState:
     )
 
 
-def set_gate(on: bool, port: int = DEFAULT_PORT, timeout: float = 5.0) -> GateState:
-    body = request_bytes("POST", f"/logic?on={1 if on else 0}", port, timeout)
+def set_gate(
+    on: bool,
+    port: int = DEFAULT_PORT,
+    timeout: float = 5.0,
+    through: bool = False,
+    flavour: int = 2,
+) -> GateState:
+    """Arm or disarm the logic gate.
+
+    `through` installs the pass-through control instead: one word that branches
+    back to the tick and keeps no state. It exists to ask whether a direct branch
+    out of recompiled code into the loader's arena runs at all, and the observer is
+    the caller census, which keeps counting the tick either way -- so nothing in the
+    answer rests on the gate's own payload or its own counters.
+    """
+    query = f"/logic?on={1 if on else 0}"
+    if through:
+        query += f"&through=1&flavour={flavour}"
+    body = request_bytes("POST", query, port, timeout)
     try:
         payload = json.loads(body.decode("utf-8"))
     except json.JSONDecodeError as malformed:

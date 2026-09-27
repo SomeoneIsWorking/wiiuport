@@ -146,6 +146,8 @@ std::string_view WindWakerPaint::modeName(Mode mode) {
         return "intervalField";
     case Mode::OneAtSixty:
         return "oneAtSixty";
+    case Mode::BranchEntry:
+        return "branchEntry";
     }
     return "unknown";
 }
@@ -164,6 +166,8 @@ std::optional<WindWakerPaint::Mode> WindWakerPaint::modeFrom(long long number) {
         return Mode::IntervalField;
     case 6:
         return Mode::OneAtSixty;
+    case 7:
+        return Mode::BranchEntry;
     default:
         return std::nullopt;
     }
@@ -346,6 +350,9 @@ std::string WindWakerPaint::enable(Mode mode) {
             return m_refusal;
         }
     }
+    // Kept for the report: the vtable the display was found to hold, whether or
+    // not this mode writes through it.
+    m_vtableFound = vtable;
     const uint32_t slot = vtable + kFrameSlot;
     uint32_t frame = 0;
     if (!m_readWord(slot, frame)) {
@@ -447,16 +454,55 @@ std::string WindWakerPaint::enable(Mode mode) {
             return m_refusal;
         }
     }
-    if (!m_writeWord(slot, m_block)) {
+    if (mode == Mode::BranchEntry) {
+        // The frame's own entry, not the vtable's slot: a direct branch out of the
+        // title's own code into this block. The check above still runs, so a
+        // revision whose vtable points elsewhere is still refused by name -- the
+        // vtable is read to learn the frame is the one this title has, not
+        // because this mode writes there.
+        const uint32_t frameEntry = kDisplayFrame;
+        uint32_t there = 0;
+        if (!m_readWord(frameEntry, there) || there != kDisplayFrameFirst) {
+            m_refusal = "the frame's entry at " + hex(frameEntry) + " holds " + hex(there) +
+                        ", not " + hex(kDisplayFrameFirst) +
+                        "; this stand-in is written for this title's frame";
+            return m_refusal;
+        }
+        if (!withinReach(frameEntry, m_block)) {
+            m_refusal = "the stand-in's block at " + hex(m_block) +
+                        " is out of a branch's reach "
+                        "of " +
+                        hex(frameEntry);
+            return m_refusal;
+        }
+        const uint32_t branch = branchTo(frameEntry, m_block, false);
+        if (!m_writeWord(frameEntry, branch)) {
+            m_refusal = "the frame's entry at " + hex(frameEntry) + " would not take the branch";
+            return m_refusal;
+        }
+        m_patched = frameEntry;
+        m_original = there;
+        m_patchedIsSlot = false;
+    } else if (!m_writeWord(slot, m_block)) {
         m_refusal = "vtable slot " + hexField(kFrameSlot) + " would not take the write";
         return m_refusal;
     }
     m_installed = true;
     m_mode = mode;
-    m_patched = slot;
+    if (mode != Mode::BranchEntry) {
+        m_patched = slot;
+        m_patchedIsSlot = true;
+    }
     m_refusal.clear();
-    lucent::info("paint", "{} slot {:#04x} now {}; the display thread paints {}", hex(vtable),
-                 kFrameSlot, hex(m_block), modeName(mode));
+    if (mode == Mode::BranchEntry) {
+        lucent::info("paint",
+                     "the frame's own entry at {} now branches to {}; the display "
+                     "thread paints {}",
+                     hex(kDisplayFrame), hex(m_block), modeName(mode));
+    } else {
+        lucent::info("paint", "{} slot {:#04x} now {}; the display thread paints {}", hex(vtable),
+                     kFrameSlot, hex(m_block), modeName(mode));
+    }
     return {};
 }
 
@@ -480,8 +526,15 @@ std::string WindWakerPaint::disableLocked() {
     // patched and leave the patch in place -- the mod installed with no way out
     // and a second vtable damaged.
     if (m_patched == 0 || !m_writeWord(m_patched, m_original)) {
-        m_refusal = "vtable slot " + hexField(kFrameSlot) + " at " + hex(m_patched) +
-                    " would not take the title's own " + hex(kDisplayFrame) + " back";
+        // Named by what was written, not by "vtable slot": the branch-entry mode
+        // writes a different word in a different place, and a refusal that said
+        // "vtable slot" for it would send a reader to look in the vtable.
+        m_refusal = std::string(m_patchedIsSlot ? "vtable slot " + hexField(kFrameSlot) +
+                                                      " at "
+                                                      "the live vtable"
+                                                : "the frame's own entry") +
+                    " at " + hex(m_patched) + " would not take the title's own " +
+                    hex(m_original == 0 ? kDisplayFrame : m_original) + " back";
         return m_refusal;
     }
     m_installed = false;
@@ -515,8 +568,11 @@ std::string WindWakerPaint::json() const {
     std::scoped_lock lock(m_mutex);
     JsonBody body;
     body.string("frame", hex(kDisplayFrame));
+    // The vtable the slot lives in, and only for a patch that went through the
+    // slot: the branch-entry mode writes a word in the title's code and has no
+    // slot at all, so it says the vtable it found and nothing else.
     body.string("vtable",
-                hex(m_installed && m_patched != 0 ? m_patched - kFrameSlot : kDisplayVTable));
+                hex(m_patchedIsSlot && m_patched != 0 ? m_patched - kFrameSlot : m_vtableFound));
     body.string("patchedSlot", hex(m_patched));
     body.string("slot", hexField(kFrameSlot));
     body.raw("installed", m_installed ? "true" : "false");

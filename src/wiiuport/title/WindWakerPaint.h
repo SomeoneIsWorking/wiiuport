@@ -152,6 +152,21 @@ class WindWakerPaint {
         // so one vblank a flip is what doubles the picture, and the second
         // paint is what will carry the blend.
         OneAtSixty = 6,
+        // The control for how a stand-in is *reached*. Every other mode is
+        // reached through the vtable: the display thread calls the frame, the
+        // call goes through the vtable's slot, and the slot holds the stand-in's
+        // address -- an indirect call the CPU resolves at the call. This one is
+        // reached by writing a direct branch at the frame's entry instead, one
+        // word in the title's own code, which is exactly how the logic gate
+        // reaches its own block and exactly the thing that does not work there.
+        //
+        // So this mode is a falsifier with a known-good control in the same
+        // mechanism: the payload, the interval and the rate are all unchanged, and
+        // the only difference is the kind of branch. If the picture still reaches
+        // sixty, a direct branch into the arena runs and the gate's difficulty is
+        // somewhere else; if it does not, a direct branch out of recompiled code
+        // into the loader's arena is the fault, and it is the emulator's.
+        BranchEntry = 7,
     };
     // The name a refusal or a report uses for a mode.
     static std::string_view modeName(Mode mode);
@@ -261,6 +276,13 @@ class WindWakerPaint {
     // The word actually written, which is the live vtable's slot and not
     // necessarily the one out of the image.
     uint32_t m_patched = 0;
+    // Whether the patched word is the live vtable's slot. It is for every mode
+    // but the branch-entry one, which writes a word in the title's own code, and a
+    // report or a refusal that called that a slot would name a place where
+    // nothing was written.
+    bool m_patchedIsSlot = false;
+    // The vtable the display was found to hold, reported whatever was patched.
+    uint32_t m_vtableFound = 0;
     // The display's own interval field, when this mod changed it, and what it
     // was: the title's state, put back on the way out.
     uint32_t m_savedInterval = 0;
