@@ -26,7 +26,7 @@ namespace wiiuport::title {
 // **A single slot, and that is a limitation rather than a design choice.** The binder runs on
 // the display thread inside the draw, and the draw's own uniform uploads follow it, so last-bound
 // is the right answer for them. Whether anything else binds in between is not assumed -- it is
-// measured. `assemblyQueries` counts every read, `assemblyQueriesWithObject` how many found a
+// measured. `reads` counts every read, `readsWithObject` how many found a
 // slot filled, and `bindsSinceLastQuery` how many *different* objects were bound between
 // consecutive reads. That last one is the number of identities that might be wrong, and a
 // correlation whose error rate is not reported is a correlation nobody can trust. It is
@@ -37,15 +37,17 @@ class ObjectIdentityScope {
     // address, so zero is the "nothing bound" answer and needs no separate flag.
     void bind(uint32_t object);
 
-    // The object bound most recently, or zero. Read once per assembly.
+    // The object bound most recently, or zero. Read once per uniform assembly and once per
+    // draw -- both are points where the title's own code knows which object it is in the
+    // middle of, and the report counts every read so the coverage is the coverage of both.
     uint32_t current() const;
 
-    // How many bindings were published, how many reads found a filled slot, and how many reads
-    // saw a different object bound since the previous read -- the possible-error count.
+    // How many bindings were published, how many reads found a filled slot, and how many binds
+    // the slot stood for when the last read happened -- the possible-error count.
     struct Report {
         uint64_t binds = 0;
-        uint64_t assemblyQueries = 0;
-        uint64_t assemblyQueriesWithObject = 0;
+        uint64_t reads = 0;
+        uint64_t readsWithObject = 0;
         uint64_t bindsSinceLastQuery = 0;
         uint32_t lastObject = 0;
     };

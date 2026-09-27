@@ -242,7 +242,7 @@ void aBindingPublishesItsObjectForTheAssemblyHook() {
     check::isTrue(scope.current() == kObject,
                   "the object a binding named is what the assembly hook would read back");
     const wiiuport::title::ObjectIdentityScope::Report r = scope.report();
-    check::isTrue(r.binds == 1 && r.assemblyQueriesWithObject == 1,
+    check::isTrue(r.binds == 1 && r.readsWithObject == 1,
                   "one bind, one read, and the read found the object -- with the two sides of "
                   "the join agreeing on the address rather than on a description of it");
     // One, not zero, and the difference matters. The first read after a single binding sees
@@ -258,7 +258,7 @@ void aBindingPublishesItsObjectForTheAssemblyHook() {
                   "rate sits beside the counts it qualifies: " +
                       body);
     check::isTrue(body.find("\"identitySource\":\"binderObject\"") != std::string::npos &&
-                      body.find("\"assemblyQueriesWithObject\":1") != std::string::npos,
+                      body.find("\"readsWithObject\":1") != std::string::npos,
                   "with the source named and the coverage counted, so a run where the slot was "
                   "empty says so instead of implying the assemblies have no object");
     check::isTrue(r.bindsSinceLastQuery == 1,

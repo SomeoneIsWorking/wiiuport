@@ -31,6 +31,7 @@
 #include "wiiuport/interp/TransformSubstitution.h"
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
+#include "wiiuport/title/DrawAttributeCensus.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/NodePoseLocator.h"
 #include "wiiuport/title/ObjectIdentityScope.h"
@@ -140,6 +141,10 @@ class Runtime {
     // Which object the title's own code is binding, published by the binder and read by the
     // assembly hook. The node is one step from both and in neither, and this is the step.
     title::ObjectIdentityScope m_objectScope;
+    // Which of a draw's attributes is the position, measured from the title's own attribute
+    // tables. The pose is not a transform anywhere, so the blend writes vertex bytes at the
+    // game's own draw, and this is what tells it where they are.
+    title::DrawAttributeCensus m_drawAttributes{&m_objectScope};
     interp::ObjectBlend m_objectBlend{interp::ContinuousInterpolator::kBlendPoint};
     interp::ReplayBlend m_replayBlend{m_objectBlend, m_substitution};
     guest::BufferWriters m_writers;

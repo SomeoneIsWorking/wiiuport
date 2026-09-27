@@ -46,6 +46,7 @@ int main(int argc, char** argv) {
     wiiuport::tests::runNodePoseLocatorTests();
     wiiuport::tests::runJsonBodyTests();
     wiiuport::tests::runObjectIdentityScopeTests();
+    wiiuport::tests::runDrawAttributeCensusTests();
     wiiuport::tests::runReplayTests();
     wiiuport::tests::runSearchTests();
     wiiuport::tests::runInputTests();

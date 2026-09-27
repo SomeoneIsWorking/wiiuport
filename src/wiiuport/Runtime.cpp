@@ -108,6 +108,8 @@ void Runtime::installHooks() {
     // call sites, and the slot is the whole of the join.
     m_blocks.setIdentityScope(&m_objectScope);
     m_recorder.setObjectScope(&m_objectScope);
+    m_recorder.addDrawRecordedListener(&m_drawAttributes);
+    m_blocks.setDrawAttributeCensus(&m_drawAttributes);
     m_nodePose.install();
     m_paint.install();
     m_blocks.install();

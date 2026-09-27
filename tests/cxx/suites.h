@@ -18,6 +18,7 @@ void runObjectPoseLocatorTests();
 void runNodePoseLocatorTests();
 void runJsonBodyTests();
 void runObjectIdentityScopeTests();
+void runDrawAttributeCensusTests();
 void runReplayTests();
 void runSearchTests();
 void runInputTests();

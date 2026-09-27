@@ -57,6 +57,10 @@ void UniformBlockCensus::Binder::OnCall(std::span<const uint32_t, 32> gpr,
     m_owner.record(gpr[3], m_second);
 }
 
+void UniformBlockCensus::setDrawAttributeCensus(const DrawAttributeCensus* draws) {
+    m_drawAttributes = draws;
+}
+
 void UniformBlockCensus::setIdentityScope(ObjectIdentityScope* scope) {
     m_scope = scope;
 }
@@ -315,6 +319,10 @@ std::string UniformBlockCensus::json() const {
     } else {
         body.object("objectIdentity", m_scope->json());
     }
+    // The draw attribute census, served here because this is the report a reader already has
+    // open when they ask where the position is: three places the pose was looked for, and the
+    // attribute table that says where it now is.
+    body.object("drawAttributes", m_drawAttributes == nullptr ? "null" : m_drawAttributes->json());
     if (!m_refusal.empty()) {
         body.string("refusal", m_refusal);
     }
