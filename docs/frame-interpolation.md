@@ -758,6 +758,41 @@ place in the scene graph with its parents' — which is a thing a local transfor
 which a scene keeps on the node that has no parent. Both are bounded reads with the same
 instrument.
 
+### Two things the first scan got right by accident, and how they were found
+
+The locator is fed from the binder, which names **two** addresses: the node's sub-object, and
+the node one `kSubObjectOffset` away. They are scored in separate tables, because one table
+over both would let a field at the same offset in a node and in its sub-object count twice
+towards the bar. The first run of the two tables produced a *positive*, and it was wrong twice
+over. Both defects are in the instrument, not the title, and both are the kind a green test
+cannot see.
+
+**"Moved" was a bitwise test, not a motion test.** The report said `moved 18` beside `biggest
+delta 0.000000`. The values differed in the last mantissa bit and in no way a pose moves, and
+`%.6f` printed the difference as zero -- so the report claimed movement while showing no
+magnitude at all. Three offsets in the node's table and one in the sub-object's were "held by
+6 of 8 objects" on that basis: node 320, 1340, 2360, 3380 and sub-object 792, each 24 scans,
+18 comparisons, 18 "moved", 0.000000. A static basis matrix, a normal, a colour basis -- the
+same shape as a pose, at the same offset in every object, for ever.
+
+The bar is now stated rather than tuned: a candidate must change by more than
+`kMotionEpsilon = 1e-3` between two draws of the same object, which are a frame apart, and an
+offset is named only if it both crosses the cross-object bar *and* has been seen to move. The
+report carries `moved`, `still`, `moving` and `biggestDelta` at nine significant digits, and
+`motionEpsilon` itself, because it is the one number here a reader could reasonably want to
+argue with.
+
+**The two windows overlapped, so the "separate" tables were one measurement counted twice.**
+`kSubObjectOffset` is 0xa1c — 2588 bytes — and the scan window was 4096 bytes, so a node's
+window reached 1508 bytes into its own sub-object. The run said so itself: the sub-object's
+`+80` was reported in the node's table at `+2668`, which is 2588 + 80. That is the exact
+failure the separate tables were built to prevent, reintroduced through the addressing.
+
+The node is now read over its own leading fields only, `kNodeScanWords = kSubObjectOffset / 4`
+= 647 words = 2588 bytes, ending exactly where the sub-object begins, and a `static_assert`
+holds that line. Each table reports its own `scanBytes`, so the two being apart is visible
+rather than asserted in prose.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It
