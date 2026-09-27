@@ -1394,6 +1394,60 @@ labelled as the pass rate, not as the tick. **The `display+0x74` / `+0x28` toggl
 it was measured over roughly 300 paints with the pair sampled at every paint, and it is unaffected by
 the reservation fix, which moved no field the frame reads.
 
+### The analysis project's data area is empty, and that is what three instruments were reporting
+
+Chasing where the title writes its view matrix produced three static searches that all reported zero,
+and the fourth step -- reading the bytes -- found the reason. **It is not the title and not the disc
+image.**
+
+| source | 0x0274c264 (the display frame) | 0x10163bb4 | 0x10163d00 |
+|---|---|---|---|
+| the running guest, via `/memory` | `7c0802a6 9421ffe8 ...` | `"cWorldViewMatrix[0]"`, 91 of 96 bytes non-zero | `"cWorldViewProjectionMatrix[0]"`, 78 of 96 |
+| the converted ELF, from its own section table | `7c0802a6 9421ffe8 ...` | `cWorldViewMatrix[0]`, file offset `0xa5c3f4` | `cWorldViewProjectionMatrix[0]`, file offset `0xa5c540` |
+| the Ghidra project `wwhd` | *(correct, as it always was)* | **all zeroes** | **all zeroes** |
+
+**The address arithmetic is exact, so the two good sources cannot be describing different things.**
+`.rodata` is at file offset `0x8f8840` mapped to `0x10000000`; the string is at file offset
+`0xa5c3f4`; `0x10000000 + (0xa5c3f4 - 0x8f8840)` = `0x10163BB4`. The second name is `0x14c` bytes
+further on and `0x10163d00` is `0x14c` bytes further on. The guest, the ELF, and the objective all
+name the same two addresses, and the project reads zeros at both.
+
+**So the three zeros were the project, and this withdraws a long-standing blocker in the direction
+that matters.** The document has said "the running guest's memory is not shown to be the disc image's
+-- and until that is settled no disassembly-derived claim about the running title holds". **That is
+wrong in the direction it pointed:** the guest and the disc image agree, on the frame's words and on
+both uniform name strings alike. What is empty is the *analysis project's data area*, which is a
+maintainer tool's copy and not the product.
+
+**What is therefore sound and what is not, and the line is not the one the document drew:**
+
+- **Sound:** anything read from the running guest through `/memory` -- which is every block scan, every
+  uniform assembly, every pose measurement in this project. `ObjectPoseHistory`'s 239 whole-block
+  scans and 202,064 observations are guest reads and stand.
+- **Not sound:** anything about the *data* area read out of the Ghidra project. The three searches
+  that reported zero -- a `lis`+`addi`/`ori` pair materialising `0x10163bb4` (**0 places** in
+  0x6f87d4 bytes of `.text`), the value `0x10163bb4` stored as a word (**0 in 2,883,535 words**), and
+  the bytes at the address (**zero, in a block marked readable, writable and initialised**) -- were all
+  reading it, and none of them was a statement about the title.
+
+**The four instruments in a row here all failed the same way, and that is the lesson worth keeping:**
+each reported a confident zero, and each was asked a question whose answer lived somewhere other than
+where it looked. The first assumed a literal address; the second assumed a pointer; the third read a
+block that had the right extent and no content. **A zero from a search that has not been shown a
+positive is not a finding**, and the positive in this case was one HTTP request away the whole time.
+
+**And the uniform names being strings settles what they are.** `0x10163bb4` reads
+`"cWorldViewMatrix[0]"` and is followed immediately by `uBlurOffset`, `uOneMinusNearDiv` and
+`cViewLightDir` -- **a NUL-terminated name table, walked by pointer**, which is what `FUN_02786520`
+does: it builds a table base with `lis`/`subi` and indexes it. So no instruction ever materialises
+`0x10163bb4`, because nothing needs to; the search for one was looking for a shape the data does not
+have.
+
+**A fourth instrument failed in the same session and is deleted rather than left:** the re-import
+script produced a program that read zeroes even at `0x0274c264`, which the project has always read
+correctly, so it imported nothing and says nothing about the project. An instrument that cannot read
+the one address it is known to get right is not evidence about the address it cannot.
+
 ### The gate was never a backstop: the tick is one-for-one with the paint, and the gate is what
 ### holds the logic at thirty
 
