@@ -59,15 +59,20 @@ class LogicGate {
     // The block's shape: the gate's own words. `kThroughWord` is where the gate's
     // through path starts, after the skipped path's return.
     //
-    // The through path is one word, a branch to kTickBody, and nothing else: the
-    // probe's stub has already run the entry's first instruction, so the title
-    // runs every remaining one itself. It used to be three words that supplied
-    // the tick's prologue and branched to the word *after* it -- correct for a
-    // gate that replaced the tick's second instruction, wrong for a gate entered
-    // at it. It skipped the tick's `stw r0,0x4(r1)`, so the tick returned
-    // through a link register it had never saved and the title spun in a wait
-    // loop at 0x027f09d8, forever, with a control channel still answering.
-    static constexpr size_t kThroughWord = 13;
+    // The through path is where the ticks counter is incremented -- the path that
+    // runs the tick -- followed by a branch to the word *after* the gate's
+    // boundary, and the probe's stub has already run the entry's first
+    // instruction, so the title runs every remaining one itself. The path used to
+    // be three words that supplied the tick's prologue and branched to the word
+    // after it -- correct for a gate that replaced the tick's second instruction,
+    // wrong for a gate entered at it. It skipped the tick's `stw r0,0x4(r1)`, so
+    // the tick returned through a link register it had never saved and the title
+    // spun in a wait loop at 0x027f09d8, forever, with a control channel still
+    // answering.
+    //
+    // And the ticks counter used to be incremented on the *skipped* path, so the
+    // count the report calls ticks counted the calls that did not run.
+    static constexpr size_t kThroughWord = 8;
     static constexpr size_t kGateWords = 14;
     // The code block holds only the sixteen instructions; the two counters the
     // guest writes are in a block of their own, in memory it may write.

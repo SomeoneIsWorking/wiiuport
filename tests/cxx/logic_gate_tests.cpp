@@ -177,20 +177,27 @@ void wiiuport::tests::runLogicGateTests() {
                       "and testing one bit of it: andi. r4,r4,1");
         check::isTrue(words[6] == (0x40800000u | ((through - (kBlock + 4 * 6)) & 0xfffc)),
                       "an odd call branches over the tick");
-        check::isTrue(words[7] == (0x3c000000u | (5u << 21) | ((ticks >> 16) & 0xffff)),
-                      "an even one counts the tick it lets through: lis r5");
-        check::isTrue(words[8] == (0x60000000u | (5u << 21) | (5u << 16) | (ticks & 0xffff)),
-                      "and loads its low half into r5: ori r5,r5");
-        check::isTrue(words[9] == (0x80000000u | (6u << 21) | (5u << 16)),
-                      "reads it: lwz r6,0(r5)");
-        check::isTrue(words[10] == (0x38000000u | (6u << 21) | (6u << 16) | 1u),
-                      "adds one: addi r6,r6,1");
-        check::isTrue(words[11] == (0x90000000u | (6u << 21) | (5u << 16)),
-                      "stores it: stw r6,0(r5)");
         // A skipped call returns with the link register as the caller left it:
         // the gate has not touched r0 or r1 on this path.
-        check::isTrue(words[12] == 0x4e800020, "and a skipped call returns: blr");
-        // The through path is one branch, to the title's own *second* instruction.
+        check::isTrue(words[7] == 0x4e800020, "and a skipped call returns: blr");
+        // The through path begins *after* that return, and the ticks counter is
+        // in it. It used to be on the skipped path, so the count the report calls
+        // ticks counted the calls that did not run -- and a gate letting every
+        // call through reported zero.
+        check::isTrue(LogicGate::kThroughWord == 8,
+                      "the through path starts after the skipped call's return, so a skipped "
+                      "call cannot fall into the counter");
+        check::isTrue(words[8] == (0x3c000000u | (5u << 21) | ((ticks >> 16) & 0xffff)),
+                      "the path that runs the tick counts it: lis r5");
+        check::isTrue(words[9] == (0x60000000u | (5u << 21) | (5u << 16) | (ticks & 0xffff)),
+                      "and loads its low half into r5: ori r5,r5");
+        check::isTrue(words[10] == (0x80000000u | (6u << 21) | (5u << 16)),
+                      "reads it: lwz r6,0(r5)");
+        check::isTrue(words[11] == (0x38000000u | (6u << 21) | (6u << 16) | 1u),
+                      "adds one: addi r6,r6,1");
+        check::isTrue(words[12] == (0x90000000u | (6u << 21) | (5u << 16)),
+                      "stores it: stw r6,0(r5)");
+        // The through path ends in a branch to the title's own *second* instruction.
         // The probe's stub has already run the first one, so the title runs the
         // rest itself. Branching to the word after the second is what froze the
         // title: the tick's epilogue returns through the link register its second
@@ -199,6 +206,38 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(words[13] == (18u << 26) | ((LogicGate::kTickBody - through) & 0x03fffffcu),
                       "and a call it lets through continues at the tick's own second instruction, "
                       "0x025d42f0, with the title running every instruction after it");
+    }
+    // The pass-through control has to reach the same instruction the gate's own
+    // through path does. The indirect flavour used to load the *block's* address,
+    // which branches the payload to itself: a loop with no exit, measured as the
+    // display painting 0 times in an 8-second window.
+    {
+        const auto direct = LogicGate::throughPayload(kBlock, 1);
+        check::isTrue(direct.size() == 1, "the direct pass-through is one word");
+        check::isTrue(direct.size() == 1 &&
+                          direct[0] == (18u << 26) |
+                                           ((LogicGate::kTickBody - kBlock) & 0x03fffffcu),
+                      "and it branches to the tick's own second instruction");
+        for (int flavour = 1; flavour <= 2; flavour++) {
+            const auto words = LogicGate::throughPayload(kBlock, flavour);
+            check::isTrue(!words.empty(), "the pass-through control is built");
+            if (words.empty()) {
+                continue;
+            }
+            // Where each form actually branches, read back out of its own words.
+            // The direct form is a primary branch: the target is the block plus
+            // its displacement. The indirect form loads the address in two
+            // instructions, so the target is the half in each of them.
+            const uint32_t target = (flavour == 1)
+                                        ? kBlock + (words[0] & 0x03fffffc)
+                                        : ((words[0] & 0xffffu) << 16) | (words[1] & 0xffffu);
+            check::isTrue(target != kBlock,
+                          "no pass-through flavour branches to the block it lives in, which "
+                          "would be a loop with no exit");
+            check::isTrue(target == LogicGate::kTickBody,
+                          "and every flavour reaches the tick's own second instruction, the "
+                          "same place the direct form does");
+        }
     }
     // A block the tick and the gate cannot both reach is refused rather than
     // written with a displacement that lands elsewhere.
