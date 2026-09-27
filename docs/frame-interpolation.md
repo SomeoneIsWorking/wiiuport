@@ -242,6 +242,11 @@ Four modes run identically, arming only the paint mod:
 | 3 `TwiceAtSixty` | set pacing, `bl` the frame twice | **faulted once, then 60.12 paints/s** |
 | 6 `OneAtSixty` | single branch, one paint at one vblank | survives |
 
+The two mechanisms are independent: the gate runs, and the paint mod's second mode does not.
+That is also why they are now armed separately (`probe_run.py --arm paint|gate|both`) — they
+are two different questions, whether the picture rate reaches sixty and whether the logic rate
+follows it, and a run that arms both has measured neither on its own.
+
 **The fault is intermittent, not a property of a payload.** Mode 3 killed the product in one
 run and presented at sixty in the next, with the same binary and the same request sequence.
 That is the honest reading of this table, and it retracts what the first version of it said:
@@ -258,20 +263,39 @@ and the fault is a segmentation fault inside recompiled code on the display thre
 (`OSSched[core=1]`). It does not happen every time, and it is not tied to a payload: mode 3
 faulted in one run and presented at sixty in the next.
 
-Two captures taken with the stand-in in, on a run that survived, differ in 3,515,979 of
-6,220,816 bytes, first at offset 2665. So two consecutive paints are **not** the same
-picture, which is expected here and is why the null case is not yet in hand: the title is
-animating between the two paints of a pass, so consecutive captures straddle a tick. Two
-paints from the *same* pass is the comparison condition 1 asks for, and the capture route
-takes whole frames rather than individual paints, so that comparison needs the capture to
-land inside one pass. Not yet built.
+### The null case, and it fails
 
-So the two are independent: the gate runs, and the paint mod's second mode does not. That is
-also why the two are now armed separately (`probe_run.py --arm paint|gate|both`). They are two
-different questions — whether the picture rate reaches sixty, and whether the logic rate
-follows it — and a run that arms both has measured neither on its own.
+Two paints of one pass must be the same picture; if they are not, a blend built on "the
+in-between frame is between the neighbours" has no meaning. This needed a capture capability
+that did not exist: the renderer holds one screenshot request at a time, so two arms of one
+is not two presents — the second waits a whole frame, and a title that animates gives a
+different picture. That is what the first attempt measured, 3,515,979 of 6,220,816 bytes
+differing between two captures a frame apart, which says nothing about two paints of one
+pass. The fork's capture now takes a count and re-arms as each image lands, so a run is
+consecutive by construction. Three tests cover the count reaching the fork, the images landing
+in consecutive slots, and a run that will not fit being refused by name.
 
-What is established about the fault, and what is not:
+Measured on the real title with the stand-in in, three rounds, each a run of two consecutive
+presents over 6,220,816 bytes:
+
+    round 0: 1625688 bytes differ (26.1%), first at 109096: 0x03 against 0x00
+    round 1: 1625688 bytes differ (26.1%), first at 109096: 0x03 against 0x00
+    round 2: 1287146 bytes differ (20.7%), first at 132121: 0x23 against 0x07
+
+**0 of 3 identical. The null case fails: two paints of one pass are not the same picture on
+this title.** The captures are genuinely consecutive — one paint between the pair in two of
+the three rounds — so this is not the old straddling-a-tick measurement with new numbers: it
+was 3,515,979 bytes differing before, 1,287,146 to 1,625,688 now, and the capability is what
+changed.
+
+The mechanism is not established and is not guessed at here. A title that updates its HUD or a
+water animation between the two paints of a pass would look exactly like this, and at sixty
+paints a second the two are 16.67 ms of title time apart. What it means for the blend is not
+yet decided: either the null case is a limitation of the comparison rather than a property of
+the mechanism, or the two paints have to be taken close enough together that the title's own
+animation between them is below the comparison's sensitivity. Neither has been tried.
+
+### What is established about the fault, and what is not
 
 - The payload is correct. The product logs the words it wrote, because arming is the step
   after which nothing may survive to be asked: `0x499469e5 0x499469e1 0x49946798` at
