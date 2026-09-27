@@ -98,7 +98,7 @@ class UniformBlockCensus {
     UniformBlockCensus(Register registerProbe, ReadWord readWord,
                        ObjectPoseHistory::ReadWords readWords,
                        const ObjectPoseLocator* locator = nullptr,
-                       const NodePoseLocator* nodes = nullptr);
+                       NodePoseLocator* nodes = nullptr);
 
     // Registers both binder probes, before the title is linked.
     void install();
@@ -202,7 +202,7 @@ class UniformBlockCensus {
     ReadWord m_readWord;
     ObjectPoseHistory m_poseHistory;
     const ObjectPoseLocator* m_locator = nullptr;
-    const NodePoseLocator* m_nodes = nullptr;
+    NodePoseLocator* m_nodes = nullptr;
     Binder m_first{*this, false};
     Binder m_second{*this, true};
     std::atomic<uint64_t> m_bindings{0};
