@@ -4,6 +4,7 @@
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/frame/VertexChanges.h"
 #include "wiiuport/title/ObjectIdentityScope.h"
+#include "wiiuport/title/UniformBlockBase.h"
 
 #include <array>
 #include <cstddef>
@@ -123,6 +124,14 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     // and `RecordedUniformAssembly::objectAddress` reads as "unknown", which is what it is.
     void setObjectScope(const title::ObjectIdentityScope* scope) {
         m_objectScope = scope;
+    }
+
+    // The base the title's relative uniform-block offset is relative to, measured by pairing
+    // each binding with the draw's real block addresses. The observer is the one place that sees
+    // both, because the assembly it records is the one that follows the binding. Null is allowed
+    // and means the base is not measured.
+    void setBlockBase(title::UniformBlockBase* base) {
+        m_blockBase = base;
     }
 
     RecordingObserver() = default;
@@ -327,6 +336,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     // hook, because it is the same answer for every assembly in the frame and the frame is
     // hundreds of thousands of them.
     const title::ObjectIdentityScope* m_objectScope = nullptr;
+    title::UniformBlockBase* m_blockBase = nullptr;
     RecordedUniformAssembly m_assemblyScratch;
     FrameRecording m_previous;
     std::array<uint64_t, LatteFrameHooks::kWithheldEffectCount> m_runtimeWithheld{};
