@@ -594,18 +594,43 @@ time.
 1,854 paints at rest: 1,854 at 68.0s and 1,854 at 97.1s, the gate reading 1,854 calls at the probe
 and nothing in it, and the capture refused with no image reaching its slot in 25 seconds.
 
-**So the objective's payload is not self-sufficient, and the reason is in its own second word.**
-`lwz r12, 0xcc(r0)` loads the frame out of the vtable *held in `r0`*. The stand-in is entered
-through vtable slot `0xcc` by the title's own `bctrl`, and the title's loop does not leave the
-vtable pointer in `r0` -- so the load reads some other structure's field `0xcc`, `mtspr CTR` takes
-that, and the payload's `bctrl` dispatches through a call target that is not the frame. The title
-never comes back through the payload, the paint count does not move, and nothing faults because the
-target it did jump to was a real one.
+**And the reason is not a missing register -- it is that the payload's second word reads the slot
+the mod has just rewritten.** The vtable the mod reports is `0x10004e88`, and the frame is at slot
+`0xcc` of it:
 
-The same applies to the first word: `lwzu r3, 0x24(r30)` presumes `r30` already holds the display,
-and `r30` is non-volatile, so the title restores it on the way in -- but the first entry arrives
-with whatever the title's loop had in it, and the update form then leaves `r30` advanced by `0x24`,
-so the second group would read `display + 0x48` rather than the same place the first did.
+```
+0x10004e88 + 0xcc = 0x10004f54
+```
+
+**`0x10004f54` is the address the objective itself names as the slot to rewrite with the stand-in's
+address.** So `lwz r12, 0xcc(r0)` -- `r0` holding the vtable, which is the register convention the
+objective's own `0xcc` displacement implies -- reads the stand-in's address, not the frame's.
+`mtspr CTR, r12` then takes the stand-in, and `bctrl` calls the stand-in again.
+
+**That is a measured self-reference, and it is a contradiction inside the objective's own
+specification.** Condition 1 asks for two things at once: *reach the frame by rewriting vtable slot
+`0xcc`*, and *re-read the frame from the title's own vtable*. Those are the same word. The payload
+re-reads slot `0xcc` and gets the stand-in, so a stand-in that reaches the frame through that slot
+calls itself.
+
+It also fits the measurement precisely, and where the fit is informative. The run did not fault and
+did not paint: 1,854 paints at 68.0s and 1,854 at 97.1s. A self-call would recurse, and a
+recursion that never reached the frame would leave the paint count exactly where it was -- which is
+what happened, and is a different signature from the `0x198` load that the literal-`bl` modes fault
+on. **So the two payload families fail differently**, and the objective's is the one that does not
+reach the frame at all.
+
+The first word has a second problem of its own: `lwzu r3, 0x24(r30)` presumes `r30` holds the
+display, and the update form leaves `r30` advanced by `0x24`, so the second group would read
+`display + 0x48` rather than the place the first read.
+
+**What the mod has that the payload does not: the frame's address, before the rewrite.** The mod
+reads the vtable out of the running display on every arming, reads slot `0xcc` to know what the
+title was going to call, and checks the frame's entry word against the image before it will install
+anything. So it knows `0x0274c264` as the original contents of the slot it is about to overwrite,
+and that value -- not the rewritten one -- is what a payload reaching the frame through the vtable
+needs. The contradiction is therefore resolvable from inside the mechanism, and the resolution is
+one value, not a new mechanism: the payload's call target has to be the slot's *original* contents.
 
 **That is a finding about the payload, not about the fault**, and it is the kind the objective
 should have: reaching the frame through the vtable needs the vtable *somewhere the payload can read
