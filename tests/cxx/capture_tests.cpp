@@ -91,8 +91,7 @@ void aRunThatOverflowsDropsItsImagesAndNeverWritesPastTheSlots() {
     FrameCapture capture(&recordArming);
     // A run that would not fit is refused outright, so the overflow case is
     // reached by asking for exactly the slots that remain.
-    check::isTrue(capture.armRun(1, FrameCapture::kSlotCount - 1),
-                  "a run in the last slot arms");
+    check::isTrue(capture.armRun(1, FrameCapture::kSlotCount - 1), "a run in the last slot arms");
     check::isTrue(!capture.armRun(2, FrameCapture::kSlotCount - 1),
                   "and a run of two in the last slot is refused rather than half-kept");
     deliver(0x40);

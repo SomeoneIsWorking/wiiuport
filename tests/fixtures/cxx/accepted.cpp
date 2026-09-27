@@ -17,7 +17,12 @@ public:
     void note(const int& value, const int* pointee) {
         int running = value;
         const int* still_fine = pointee;
+        // Computed values are ordinary locals, const or not. The rule flagged every block-scope
+        // const and so found 376 of them across the tree, all of them correct.
+        const int doubled = value * 2;
+        const int* followed = still_fine + 1;
         running += (still_fine == nullptr) ? 0 : 1;
+        running += doubled + (followed == nullptr ? 0 : 1);
         capacity_ = running;
     }
 

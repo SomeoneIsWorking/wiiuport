@@ -307,7 +307,11 @@ std::string UniformBlockAddress::json() const {
                                                                static_cast<double>(paired)));
     } else {
         body.number("addressWord", word);
-        body.number("addressWordOffset", static_cast<uint32_t>(word) * 4);
+        // Widened before the multiply, not after: the product is 64 bits here and the
+        // register index is 32, so multiplying first would lose the upper half on a
+        // word index above a million -- which no title has, and which is exactly the
+        // kind of thing that reads as fine until it is not.
+        body.number("addressWordOffset", static_cast<uint64_t>(word) * 4u);
         body.number("addressWordHits", m_wordHits[static_cast<size_t>(word)]);
     }
 
@@ -367,7 +371,7 @@ std::string UniformBlockAddress::json() const {
     body.raw("baseShare", JsonBody::real(kBaseShare));
     if (named) {
         body.number("baseWord", bases.front().first.first);
-        body.number("baseWordOffset", static_cast<uint32_t>(bases.front().first.first) * 4);
+        body.number("baseWordOffset", static_cast<uint64_t>(bases.front().first.first) * 4u);
         body.number("base", bases.front().first.second);
         body.number("baseSeen", bases.front().second);
         body.raw("baseSeenShare", JsonBody::real(static_cast<double>(bases.front().second) /

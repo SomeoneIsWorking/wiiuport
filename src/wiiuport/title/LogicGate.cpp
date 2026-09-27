@@ -23,12 +23,12 @@ namespace {
 //   `andi. r0,r7,0xfd` 0x70e000fd
 //   `bne 0x0200004c` 0x40820014, without its absolute bit 0x40820000
 //   `blr` 0x4e800020 from 0x025f0950
-constexpr uint32_t kLoadUpper = 0x3c000000;      // lis rD, hi
-constexpr uint32_t kOrImmediate = 0x60000000;    // ori rS, rS, lo
-constexpr uint32_t kLoadWord = 0x80000000;       // lwz rD, disp(rA)
-constexpr uint32_t kAddImmediate = 0x38000000;   // addi rD, rA, simm
-constexpr uint32_t kStoreWord = 0x90000000;      // stw rS, disp(rA)
-constexpr uint32_t kAndImmediate = 0x70000000;   // andi. rS, rA, K
+constexpr uint32_t kLoadUpper = 0x3c000000;    // lis rD, hi
+constexpr uint32_t kOrImmediate = 0x60000000;  // ori rS, rS, lo
+constexpr uint32_t kLoadWord = 0x80000000;     // lwz rD, disp(rA)
+constexpr uint32_t kAddImmediate = 0x38000000; // addi rD, rA, simm
+constexpr uint32_t kStoreWord = 0x90000000;    // stw rS, disp(rA)
+constexpr uint32_t kAndImmediate = 0x70000000; // andi. rS, rA, K
 // `bne` is 0x40820000, and it was 0x40800000 here while the comment above named
 // 0x40820014 as the instruction it came from. A conditional branch is one opcode
 // with its condition in BO (bits 6-10) and BI (bits 11-15): BO=4 branches when the
@@ -312,7 +312,7 @@ std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t counter
         kLoadWord | (6 << 21) | (5 << 16),                       // lwz  r6, 0(r5)
         kAddImmediate | (6 << 21) | (6 << 16) | 1,               // addi r6, r6, 1
         kStoreWord | (6 << 21) | (5 << 16),                      // stw  r6, 0(r5)
-        branchTo(branchAt, kTickBody, false),                     // b    the tick's own body
+        branchTo(branchAt, kTickBody, false),                    // b    the tick's own body
     };
 }
 
@@ -337,8 +337,8 @@ std::vector<uint32_t> LogicGate::throughPayload(uint32_t blockAddress, int flavo
     return {
         kLoadUpper | (12 << 21) | ((kTickBody >> 16) & 0xffff),        // lis  r12,hi
         kOrImmediate | (12 << 21) | (12 << 16) | (kTickBody & 0xffff), // ori  r12,r12,lo
-        kMoveToCounter | (12 << 21),                                    // mtctr r12
-        kBranchCount,                                                   // bctr
+        kMoveToCounter | (12 << 21),                                   // mtctr r12
+        kBranchCount,                                                  // bctr
     };
 }
 

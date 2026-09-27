@@ -45,9 +45,21 @@ class UniformBlockRing {
 
     UniformBlockRing(ReadWords readWords, Frame frame);
 
+    // Where a block is and how big it is, as one value.
+    //
+    // **Not three adjacent `uint32_t`s.** `bind(object, address, size)` takes three of the same
+    // type and `address` and `size` are both plausible small integers, so a transposed pair
+    // compiles, runs, and reads a block of the wrong length at the wrong place -- which is exactly
+    // what happened twice in this project's history with a neighbouring two-word call. A struct
+    // makes the swap unrepresentable and names the two values at the call site.
+    struct Block {
+        uint32_t address = 0;
+        uint32_t sizeInBytes = 0;
+    };
+
     // One binding: which object, which block, and what was in it. Called by the census on the
     // display thread, so the counters are atomic and the shared state is under the lock.
-    void bind(uint32_t object, uint32_t address, uint32_t sizeInBytes);
+    void bind(uint32_t object, Block block);
 
     // **What the title actually gives, and it is not an address.** The census reads two words
     // from a binding's descriptor entry and they are not both usable: the one at +0x0c is the

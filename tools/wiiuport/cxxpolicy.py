@@ -63,6 +63,89 @@ _FUNCTION_SCOPES = frozenset(
     }
 )
 
+# The leaves of an initializer that is a constant expression rather than a computation. Used to tell
+# a *named constant* -- which belongs in the owning header as an `inline constexpr` member -- from a
+# *computed value*, which the rules explicitly keep as an ordinary local.
+_CONSTANT_LEAVES = frozenset(
+    {
+        CursorKind.INTEGER_LITERAL,
+        CursorKind.FLOATING_LITERAL,
+        CursorKind.STRING_LITERAL,
+        CursorKind.CHARACTER_LITERAL,
+        CursorKind.CXX_BOOL_LITERAL_EXPR,
+        # A unary minus over a literal, and parentheses, are still constants.
+        CursorKind.CXX_UNARY_EXPR,
+        CursorKind.UNARY_OPERATOR,
+        CursorKind.PAREN_EXPR,
+    }
+)
+
+
+def _reference_is_constant(cursor: Cursor) -> bool:
+    """True when a `DECL_REF_EXPR` names something that is itself a constant.
+
+    An enum constant, or a variable that is itself `const`/`constexpr` -- a named constant from the
+    owning header, or a constant the block above already established. **Not** a parameter, a field
+    or an ordinary local: `const int doubled = value * 2;` is a computed value, and a parameter is
+    the usual thing being computed from.
+    """
+    referenced = cursor.referenced
+    if referenced is None:
+        return False
+    if referenced.kind == CursorKind.ENUM_CONSTANT_DECL:
+        return True
+    if referenced.kind == CursorKind.VAR_DECL:
+        return referenced.type.is_const_qualified()
+    return False
+
+
+def _initializer_is_constant(cursor: Cursor) -> bool:
+    """True when every leaf of the initializer is a literal or a constant reference."""
+    saw_leaf = False
+    stack = list(cursor.get_children())
+    while stack:
+        child = stack.pop()
+        kind = child.kind
+        if kind in _CONSTANT_LEAVES:
+            saw_leaf = True
+            continue
+        if kind == CursorKind.DECL_REF_EXPR:
+            if not _reference_is_constant(child):
+                return False
+            saw_leaf = True
+            continue
+        if kind == CursorKind.CALL_EXPR:
+            # A call is never a constant, however constant its arguments look.
+            return False
+        if kind in (CursorKind.BINARY_OPERATOR, CursorKind.CONDITIONAL_OPERATOR):
+            # `1 << 4` and `kA ? kB : kC` are constants; the leaves decide.
+            stack.extend(child.get_children())
+            continue
+        if not child.get_children():
+            return False
+        stack.extend(child.get_children())
+    return saw_leaf
+
+
+def _is_forbidden_local(cursor: Cursor) -> bool:
+    """True for the two block-scope declarations the rules actually forbid.
+
+    A function-local **`static`** is forbidden outright: it is state that outlives the call and is
+    shared between threads that think they each have their own.
+
+    A block-scope **`const`** is only forbidden when it is a *named constant* -- an initializer that
+    is a literal or a constant expression. A `const` whose initializer is computed is exactly what
+    the rules say to keep as an ordinary local, and flagging it produced 376 findings on correct
+    code across 193 translation units, which made this gate impossible to pass and so impossible to
+    read.
+    """
+    if cursor.storage_class == StorageClass.STATIC:
+        return True
+    if not cursor.type.is_const_qualified():
+        return False
+    return _initializer_is_constant(cursor)
+
+
 _DECLARATION_KINDS = frozenset({CursorKind.FUNCTION_DECL, CursorKind.VAR_DECL})
 
 _ABI_EXEMPT_NAMES = frozenset({"main"})
@@ -145,7 +228,7 @@ def _check_cursor(cursor: Cursor, relative: str) -> list[Finding]:
         cursor.kind == CursorKind.VAR_DECL
         and semantic is not None
         and semantic.kind in _FUNCTION_SCOPES
-        and (cursor.storage_class == StorageClass.STATIC or cursor.type.is_const_qualified())
+        and _is_forbidden_local(cursor)
     ):
         kind = "static" if cursor.storage_class == StorageClass.STATIC else "const or constexpr"
         findings.append(

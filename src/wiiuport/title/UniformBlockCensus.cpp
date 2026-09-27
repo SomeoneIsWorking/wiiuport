@@ -193,7 +193,7 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
             uint32_t sizeInBytes = 0;
             const uint32_t address = blockOf(binding.entry, sizeInBytes);
             if (address != 0 && sizeInBytes != 0) {
-                m_ring->bind(object, address, sizeInBytes);
+                m_ring->bind(object, UniformBlockRing::Block{address, sizeInBytes});
             } else {
                 m_ring->bindSize(object, binding.entry[kEntryBlockSize / 4]);
             }
@@ -521,7 +521,8 @@ std::string UniformBlockCensus::json() const {
                                                                   static_cast<double>(tests)));
         } else {
             body.number("addressWord", named);
-            body.number("addressWordOffset", static_cast<uint32_t>(named) * 4);
+            // Widened before the multiply: see the same report field in UniformBlockAddress.
+            body.number("addressWordOffset", static_cast<uint64_t>(named) * 4u);
             body.number("addressWordReads", m_wordReads[static_cast<size_t>(named)].load());
         }
         body.raw("addressWordShare", JsonBody::real(kMappedWordShare));
