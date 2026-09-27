@@ -370,7 +370,9 @@ void wiiuport::tests::runPaintTests() {
     }
     {
         check::isTrue(!WindWakerPaint::modeFrom(0).has_value(), "mode 0 names no stand-in");
-        check::isTrue(!WindWakerPaint::modeFrom(12).has_value(), "mode 12 names no stand-in");
+        check::isTrue(WindWakerPaint::modeFrom(12) == WindWakerPaint::Mode::LoopDispatchTwice,
+                      "mode 12 is the loop's own dispatch twice, and it is reachable by number");
+        check::isTrue(!WindWakerPaint::modeFrom(13).has_value(), "mode 13 names no stand-in");
         // Mode 8 is the tail-branch twin, and the pair is the discriminator: 3 calls the frame
         // twice and faults, 8 paints twice with the second paint returning through the title's own
         // loop. Both exist, and the number reaches the payload builder.
@@ -618,6 +620,46 @@ void wiiuport::tests::runPaintTests() {
                       "cannot displace it");
         check::isTrue(!reads_link_register(WindWakerPaint::kDisplayFrameProbeFirst),
                       "and the word the probe does displace does not");
+    }
+    {
+        // **The loop's own dispatch, twice.** Eleven words, ten of them the loop's verbatim and the
+        // eleventh the branch back to the loop.
+        //
+        // The point of the test is the *fourth* word. The frame is a method on the display: it
+        // takes it in r3, copies it to r30, dereferences r30 for every field, and treats r3 as
+        // scratch for the rest of its body. So the loop rebuilds r3 from r31 before every dispatch,
+        // and a stand-in that does not hands the second paint a scratch register where the display
+        // belongs. Measured at the fault: the frame's r30 was zero and the display object was in
+        // r31.
+        //
+        // Asserted word for word against the values lifted from 0x0274c020, and asserted to be the
+        // loop's own -- which is the same as saying the objective's five words with their register
+        // fields, which is the correction the fault turned on.
+        const auto eleven =
+            WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::LoopDispatchTwice);
+        check::isTrue(eleven.has_value(),
+                      "the loop's dispatch is built where the loop is in reach");
+        if (eleven.has_value()) {
+            check::isTrue(eleven->size() == 11,
+                          "and it is eleven words, as the objective specifies -- " +
+                              std::to_string(eleven->size()));
+            const std::array<uint32_t, 5> dispatch{0x819f0024, 0x800c00cc, 0x7c0903a6, 0x7fe3fb78,
+                                                   0x4e800421};
+            bool verbatim = true;
+            for (size_t index = 0; index < dispatch.size(); index++) {
+                verbatim = verbatim && (*eleven)[index] == dispatch[index] &&
+                           (*eleven)[dispatch.size() + index] == dispatch[index];
+            }
+            check::isTrue(verbatim,
+                          "both groups are the loop's own five words, verbatim and in its order -- "
+                          "the same opcodes and the same displacements as the objective's payload, "
+                          "with the registers the loop actually has");
+            // The word the fault turned on, singled out, because a payload with the right opcodes
+            // and the wrong registers is exactly what went wrong before.
+            check::isTrue((*eleven)[3] == 0x7fe3fb78 && (*eleven)[8] == 0x7fe3fb78,
+                          "and the fourth word of each group is the loop's own `or r3,r31,r31`, "
+                          "which rebuilds the display into r3 before each paint: 7fe3fb78");
+        }
     }
     {
         // The one-vblank payload is a single branch. The pacing is the

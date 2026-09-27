@@ -303,6 +303,36 @@ class WindWakerPaint {
         // is the one word here that is not verbatim, because a fixed displacement can only reach
         // one address.
         ObjectivePayload = 11,
+        // **The objective's eleven words with the loop's own register fields, and the fault is
+        // why.**
+        //
+        // The display thread's loop is `FUN_0274c00c`, eleven instructions, and its dispatch is
+        // five words at `0x0274c020`:
+        //
+        //     0x819f0024  lwz   r12,0x24(r31)   the vtable
+        //     0x800c00cc  lwz   r0,0xcc(r12)     slot 0xcc, the frame
+        //     0x7c0903a6  mtspr CTR,r0
+        //     0x7fe3fb78  or    r3,r31,r31      the display into r3, before the call
+        //     0x4e800421  bctrl                the frame
+        //
+        // **The objective's five words are these five, with every register field shifted along by
+        // one**: `lwz r12` became `lwzu r3` off `r30`, `lwz r0` off `r12` became `lwz r12` off
+        // `r0`, `mtspr CTR,r0` became `mtspr CTR,r12`, and `or r3,r31,r31` became `or r31,r3,r3`.
+        // Every opcode and every displacement is identical and every register is wrong, which is
+        // what that payload does when it is run: it reads the slot the mod rewrote and calls
+        // itself.
+        //
+        // The `or r3,r31,r31` is the word the fault turns on. The frame is a method on the display
+        // and takes it in `r3`, which it copies into `r30` and then dereferences for every field --
+        // and it treats `r3` as scratch for the rest of its body. So the loop **rebuilds `r3` from
+        // `r31` immediately before every dispatch**, and a stand-in that does not does not have a
+        // display to hand the second paint: measured at the fault, the frame's `r30` is **zero**
+        // and the display object is in `r31`.
+        //
+        // So this mode is the loop's dispatch, lifted word for word from the title's own image,
+        // twice, and then a branch back to the loop. Eleven words, and every one of the ten is
+        // verbatim.
+        LoopDispatchTwice = 12,
     };
     // The name a refusal or a report uses for a mode.
     static std::string_view modeName(Mode mode);
