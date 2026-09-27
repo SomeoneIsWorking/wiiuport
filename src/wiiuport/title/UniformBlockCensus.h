@@ -2,6 +2,7 @@
 
 #include "Cafe/HW/Espresso/GuestCallProbes.h"
 #include "wiiuport/title/ObjectPoseHistory.h"
+#include "wiiuport/title/ObjectPoseLocator.h"
 
 #include <array>
 #include <atomic>
@@ -88,8 +89,14 @@ class UniformBlockCensus {
                               GuestCallProbes::Probe& probe, bool holdsEntry, uint32_t resume);
     using ReadWord = bool (*)(uint32_t guestAddress, uint32_t& value);
 
+    // `locator` is the other half of the same question, from the other place it could be
+    // answered: the census reads the guest block the binder names, the locator reads the
+    // uniform buffer the game assembled for a named node's draw. Null is allowed and
+    // reported as null, because a census that requires a locator cannot be built without
+    // one and there is no reason it should have to be.
     UniformBlockCensus(Register registerProbe, ReadWord readWord,
-                       ObjectPoseHistory::ReadWords readWords);
+                       ObjectPoseHistory::ReadWords readWords,
+                       const ObjectPoseLocator* locator = nullptr);
 
     // Registers both binder probes, before the title is linked.
     void install();
@@ -192,6 +199,7 @@ class UniformBlockCensus {
     Register m_register;
     ReadWord m_readWord;
     ObjectPoseHistory m_poseHistory;
+    const ObjectPoseLocator* m_locator = nullptr;
     Binder m_first{*this, false};
     Binder m_second{*this, true};
     std::atomic<uint64_t> m_bindings{0};

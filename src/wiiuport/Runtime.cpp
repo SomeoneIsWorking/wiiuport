@@ -55,6 +55,7 @@ Runtime::Runtime()
     // Frame complete, before the guest's swap: everything that reads the
     // frame first, and the continuous interpolator last, because it needs the
     // view tracker and the object blend to have taken this frame in.
+    m_recorder.addAssemblyRecordedListener(&m_poseLocator);
     m_recorder.addAssemblyRecordedListener(&m_objectBlend);
     m_recorder.addAssemblyRecordedListener(&m_vertexBlend);
     m_recorder.addDrawRecordedListener(&m_vertexBlend);

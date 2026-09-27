@@ -32,6 +32,7 @@
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
 #include "wiiuport/title/LogicGate.h"
+#include "wiiuport/title/ObjectPoseLocator.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
@@ -128,6 +129,9 @@ class Runtime {
     frame::SearchFeed m_searchFeed{m_search};
     frame::FrameShapeLog m_shapeLog;
     interp::TransformSubstitution m_substitution;
+    // Where in an assembled uniform buffer the pose is, found by shape. Registered
+    // before the blends so its counts are the same draws they see.
+    title::ObjectPoseLocator m_poseLocator;
     interp::ObjectBlend m_objectBlend{interp::ContinuousInterpolator::kBlendPoint};
     interp::ReplayBlend m_replayBlend{m_objectBlend, m_substitution};
     guest::BufferWriters m_writers;
@@ -139,7 +143,7 @@ class Runtime {
                              &GuestPatching::AllocateData, &GuestPatching::WriteWord,
                              &GuestPatching::ReadWord};
     title::UniformBlockCensus m_blocks{&GuestCallProbes::Register, &GuestPatching::ReadWord,
-                                      &GuestPatching::ReadWords};
+                                       &GuestPatching::ReadWords, &m_poseLocator};
     title::WindWakerPaint m_paint{&GuestCallProbes::Register,      &GuestPatching::AllocateCode,
                                   &GuestPatching::WriteWord,       &GuestPatching::ReadWord,
                                   &GuestPatching::SetSwapInterval, &GuestPatching::SwapInterval};
