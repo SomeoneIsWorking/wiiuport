@@ -372,7 +372,9 @@ void wiiuport::tests::runPaintTests() {
         check::isTrue(!WindWakerPaint::modeFrom(0).has_value(), "mode 0 names no stand-in");
         check::isTrue(WindWakerPaint::modeFrom(12) == WindWakerPaint::Mode::LoopDispatchTwice,
                       "mode 12 is the loop's own dispatch twice, and it is reachable by number");
-        check::isTrue(!WindWakerPaint::modeFrom(13).has_value(), "mode 13 names no stand-in");
+        check::isTrue(WindWakerPaint::modeFrom(13) == WindWakerPaint::Mode::LoopFrameLiteralTwice,
+                      "mode 13 carries the frame as a literal, and it is reachable by number");
+        check::isTrue(!WindWakerPaint::modeFrom(14).has_value(), "mode 14 names no stand-in");
         // Mode 8 is the tail-branch twin, and the pair is the discriminator: 3 calls the frame
         // twice and faults, 8 paints twice with the second paint returning through the title's own
         // loop. Both exist, and the number reaches the payload builder.
@@ -659,6 +661,53 @@ void wiiuport::tests::runPaintTests() {
             check::isTrue((*eleven)[3] == 0x7fe3fb78 && (*eleven)[8] == 0x7fe3fb78,
                           "and the fourth word of each group is the loop's own `or r3,r31,r31`, "
                           "which rebuilds the display into r3 before each paint: 7fe3fb78");
+        }
+    }
+    {
+        // **The frame carried as a literal, twice.** This is the shape that can call the frame
+        // rather than whatever slot 0xcc holds, and slot 0xcc holds the stand-in once this mod is
+        // installed.
+        //
+        // The two words that carry the address are checked by *reconstructing* it, not by asserting
+        // two constants: a pair of encodings can be wrong in a way a constant check repeats, and
+        // this project has measured what a hand-derived encoding costs twice.
+        const auto words =
+            WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::LoopFrameLiteralTwice);
+        check::isTrue(words.has_value(),
+                      "the literal dispatch is built where the loop is in reach");
+        if (words.has_value()) {
+            check::isTrue(words->size() == 11, "and it is eleven words, the objective's count -- " +
+                                                   std::to_string(words->size()));
+            // `lis`/`ori` are the upper and lower halves; together they must be the frame.
+            auto rebuild = [](uint32_t upper, uint32_t lower) {
+                const uint32_t half = (upper & 0x7FFF) << 16; // addis puts the immediate at 16
+                return half | (lower & 0xFFFF);
+            };
+            for (size_t pass = 0; pass < 2; pass++) {
+                const size_t at = pass * 5;
+                check::isTrue(
+                    rebuild((*words)[at], (*words)[at + 1]) == WindWakerPaint::kDisplayFrame,
+                    "group " + std::to_string(pass) + " carries the frame itself: " + [&] {
+                        char buffer[32];
+                        std::snprintf(buffer, sizeof(buffer), "%08x",
+                                      rebuild((*words)[at], (*words)[at + 1]));
+                        return std::string(buffer);
+                    }());
+                check::isTrue(
+                    (*words)[at + 2] == 0x7c0903a6 && (*words)[at + 3] == 0x7fe3fb78 &&
+                        (*words)[at + 4] == 0x4e800421,
+                    "and then mtspr CTR,r0, or r3,r31,r31 and bctrl, the loop's own three");
+            }
+            // No word may load slot 0xcc: that is the word this mod rewrote, and a stand-in that
+            // re-reads it calls itself. Checked as a displacement, not as "differs from mode 12".
+            bool readsTheSlot = false;
+            for (uint32_t word : *words) {
+                if (((word >> 26) & 0x3F) == 34 && (word & 0xFFFF) == 0x00CC) {
+                    readsTheSlot = true;
+                }
+            }
+            check::isTrue(!readsTheSlot,
+                          "and no word of it loads displacement 0xcc, the slot this mod rewrote");
         }
     }
     {

@@ -116,6 +116,29 @@ constexpr uint32_t kLoopMoveToCounter = 0x7c0903a6;  // mtspr CTR,r0
 constexpr uint32_t kLoopRestoreDisplay = 0x7fe3fb78; // or    r3,r31,r31
 constexpr uint32_t kLoopCallFrame = 0x4e800421;      // bctrl
 
+// `lis` and `ori` against a 32-bit address, so a payload can carry an address as two lifted
+// instructions rather than re-read it through a pointer the guest may have had changed.
+//
+// The *forms* are the title's own: the image holds `addis r12,r0,0x0027` (`3d80027f`) and
+// `ori r12,r12,0x5890` (`618c5890`) in a loader trampoline. Only the immediate is computed, and it
+// is an address this mod already holds -- the frame it read out of the vtable slot before rewriting
+// it -- not a value searched for. That is the same kind of computation the payload's branch
+// displacements already are, and the test asserts the encoding against a hand-worked value so a
+// slip is caught by arithmetic rather than by a run.
+constexpr uint32_t kAddisImmediate = 0x3C000000; // addis rD,rA,simm
+constexpr uint32_t kOriImmediate = 0x60000000;   // ori rA,rS,uimm
+constexpr uint32_t kTargetRegister = 0;          // r0, which the loop's own `mtspr CTR,r0` consumes
+
+constexpr uint32_t loadUpperImmediate(uint32_t address) {
+    return kAddisImmediate | (static_cast<uint32_t>(kTargetRegister) << 21) |
+           ((address >> 16) & 0xFFFF);
+}
+
+constexpr uint32_t orImmediate(uint32_t address) {
+    return kOriImmediate | (static_cast<uint32_t>(kTargetRegister) << 21) |
+           (static_cast<uint32_t>(kTargetRegister) << 16) | (address & 0xFFFF);
+}
+
 constexpr uint32_t kReadDisplayPhase = 0x801e0074;  // lwz  r0,0x74(r30)  from 0x0274c2c4
 constexpr uint32_t kWriteDisplayPhase = 0x901e0074; // stw  r0,0x74(r30)  from 0x0274c38c
 
@@ -253,6 +276,8 @@ std::string_view WindWakerPaint::modeName(Mode mode) {
         return "objectivePayload";
     case Mode::LoopDispatchTwice:
         return "loopDispatchTwice";
+    case Mode::LoopFrameLiteralTwice:
+        return "loopFrameLiteralTwice";
     }
     return "unknown";
 }
@@ -283,6 +308,8 @@ std::optional<WindWakerPaint::Mode> WindWakerPaint::modeFrom(long long number) {
         return Mode::ObjectivePayload;
     case 12:
         return Mode::LoopDispatchTwice;
+    case 13:
+        return Mode::LoopFrameLiteralTwice;
     default:
         return std::nullopt;
     }
@@ -348,7 +375,28 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
     // word between the two calls is the fix, and a step list that appended a third paint would
     // undo the finding it exists to test.
     std::vector<Step> steps;
-    if (mode == Mode::LoopDispatchTwice) {
+    if (mode == Mode::LoopFrameLiteralTwice) {
+        // **The loop's dispatch with the frame built into the payload instead of read from the slot
+        // this mod rewrote.** Everything else is the loop's own words, lifted: the counter move,
+        // the display restore, and the call.
+        //
+        // `or r3,r31,r31` is the word the fault turned on. The frame is a method on the display: it
+        // takes it in `r3`, copies it to `r30` and dereferences `r30` for every field, and then
+        // treats `r3` as scratch. The loop rebuilds `r3` from `r31` before every dispatch for
+        // exactly that reason, and a stand-in that does not hands the second paint a scratch
+        // register where the display belongs -- measured: the frame's `r30` was zero, with the
+        // display in `r31`.
+        //
+        // `r31` is available without being told: the display arrives in `r3`, the loop's third word
+        // keeps it in `r31`, and the stand-in is reached through the slot that dispatch reads.
+        for (int pass = 0; pass < 2; pass++) {
+            steps.push_back({false, 0, loadUpperImmediate(kDisplayFrame)});
+            steps.push_back({false, 0, orImmediate(kDisplayFrame)});
+            steps.push_back({false, 0, kLoopMoveToCounter});
+            steps.push_back({false, 0, kLoopRestoreDisplay});
+            steps.push_back({false, 0, kLoopCallFrame});
+        }
+    } else if (mode == Mode::LoopDispatchTwice) {
         // **The display thread's own dispatch, twice, verbatim.** These are the five words at
         // 0x0274c020, lifted from the title's image and not encoded here -- every one of them is
         // the word the loop itself executes, and this project has measured what a hand-derived
@@ -684,8 +732,14 @@ std::string WindWakerPaint::enable(Mode mode) {
     // includes the two-paint shapes. It used to be written for the single-paint ones and reached by
     // a *call* for the two-paint ones -- and that call went to a zero-filled hole, so the
     // distinction was the fault rather than a feature.
+    // The shapes that paint at all want one vblank a flip, which is what takes the picture rate to
+    // sixty; the shapes that do not are the ones kept for comparison. `LoopFrameLiteralTwice` is
+    // the one that reaches the frame twice and comes back, and it is what condition 1 is about, so
+    // it is here with the rest rather than left measuring a thirty-hertz picture twice.
     const bool wantsOneVblank = mode == Mode::IntervalField || mode == Mode::OneAtSixty ||
-                                mode == Mode::TwiceAtSixty || mode == Mode::TailTwiceAtSixty;
+                                mode == Mode::TwiceAtSixty || mode == Mode::TailTwiceAtSixty ||
+                                mode == Mode::LoopDispatchTwice ||
+                                mode == Mode::LoopFrameLiteralTwice;
     if (wantsOneVblank) {
         // The field the title's own `GX2SetSwapInterval` call was handed, written
         // to one. Recorded and restored on the way out, because it is the
@@ -710,11 +764,17 @@ std::string WindWakerPaint::enable(Mode mode) {
         }
         m_wroteInterval = true;
         lucent::info("paint", "display interval field {} -> {}", hex(field), hex(kSwapInterval));
-        if (mode == Mode::OneAtSixty) {
+        if (wantsOneVblank) {
             // And the pacing itself, which is the emulator's and not the title's
             // memory. Both, so the title's record and the thing it records agree:
             // a field saying one while the flip still takes two vblanks would be
             // a claim nothing backs.
+            //
+            // **This is what takes the picture rate to sixty, and the field alone does not.**
+            // Measured with the field written and the pacing left alone: the report read `interval
+            // 1` and the paints still ran at thirty a second. The gate that opens the display
+            // thread is the emulator's flip pacing, and the title's own record of the interval it
+            // asked for is a statement about it rather than a thing that causes it.
             m_savedPacing = m_swapInterval();
             const uint32_t now = m_setSwapInterval(kSwapInterval);
             if (now != kSwapInterval) {
