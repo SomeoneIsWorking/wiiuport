@@ -58,12 +58,30 @@ class UniformBlockCensus {
     static constexpr uint32_t kFirstInstruction = 0x7c0802a6;
     // The object's own layout, read out of its constructor: the descriptor array
     // at +0x10, the cursor at +0x4c, entries of 0x1c bytes, and within an entry
-    // the block's size at +0x04 and offset at +0x0c.
+    // the block's SIZE at +0x0c and its ADDRESS at +0x04.
+    //
+    // **The names here were backwards, and the measurement is what corrected them.** The
+    // earlier sentence said "size at +0x04 and offset at +0x0c", and this file's own
+    // `blockOf` said the opposite in a comment -- that the +0x04 word "read 0x3e634300 on a
+    // real binding, a pointer, not a length", and that a tool taking it for a byte count "asked
+    // the product for a gigabyte and the product died". Two contradictory stories about the
+    // same two words, in one file, and I followed the header twice: a hand-off passed the
+    // +0x0c word as an address and the +0x04 word as a size, and the run reported 186,133
+    // bindings "past the bound of 4096" with nothing read at all.
+    //
+    // Measured, once, on the real title: **the word at +0x0c reads 0x40 for every object, and
+    // 0x40 is 64 bytes**, which agrees with 233 whole-block scans of a 64-byte block finding no
+    // rigid transform in one. So +0x0c is the size. The word at +0x04 is the address, and
+    // `blockOf` says it is *relative to a base the title set elsewhere*.
+    //
+    // The names now say which is which. `kEntryBlockSize` is the one a caller may use as a
+    // length; `kEntryBlockAddress` is a relative offset and reading it as a guest address is
+    // the mistake this comment now exists to prevent.
     static constexpr uint32_t kEntriesOffset = 0x10;
     static constexpr uint32_t kCursorOffset = 0x4c;
     static constexpr uint32_t kEntrySize = 0x1c;
-    static constexpr uint32_t kEntrySizeOffset = 0x04;
-    static constexpr uint32_t kEntryOffsetOffset = 0x0c;
+    static constexpr uint32_t kEntryBlockAddress = 0x04;
+    static constexpr uint32_t kEntryBlockSize = 0x0c;
     // How many words a descriptor entry is, all of them reported.
     static constexpr size_t kEntryWords = kEntrySize / sizeof(uint32_t);
     // The list is allocated with two entries; a cursor above that is a reading

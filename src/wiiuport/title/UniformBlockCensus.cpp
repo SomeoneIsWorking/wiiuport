@@ -100,18 +100,20 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
     Binding binding;
     binding.object = object;
     binding.read = m_readWord(object + kCursorOffset, binding.cursor);
-    // The block this binding names, handed to the ring. The entry's own two words are the
-    // address and the size -- measured earlier: the word at +0x0c reading 0x40 for every object
-    // is the block's SIZE, not an offset.
-    if (binding.read && m_ring != nullptr) {
-        m_ring->bind(object, binding.entry[UniformBlockCensus::kEntryOffsetOffset / 4],
-                     binding.entry[UniformBlockCensus::kEntrySizeOffset / 4]);
-    }
     if (binding.read) {
         // The whole entry, word for word. A partial read is a partial answer and
         // is reported as unread rather than as zeroes, because a block that was
         // dumped from zeroes would look like a real one.
         readEntry(object, binding.cursor, binding.entry, binding.read);
+    }
+    // The block's SIZE, handed to the ring. Not its address: the +0x04 word is a *relative*
+    // offset (this file's own `blockOf` says so, and says that reading it as a length once
+    // asked the product for a gigabyte), and the base the title set elsewhere has not been
+    // identified. So the size goes over -- 64 bytes, measured, agreeing with 233 whole-block
+    // scans of a 64-byte block -- and the address does not, because a relative offset read as a
+    // guest address is a wrong answer rather than a missing one.
+    if (binding.read && m_ring != nullptr) {
+        m_ring->bindSize(object, binding.entry[UniformBlockCensus::kEntryBlockSize / 4]);
     }
     if (binding.read) {
         mapWords(object, binding.entry, binding.mapped);
@@ -137,8 +139,8 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
         // every one of them, a constant and so an offset within the block rather than
         // a size. Read before the lock, because a binding on the display thread must
         // not queue behind a report being written.
-        m_poseHistory.observe(object, binding.entry[kEntrySizeOffset / 4],
-                              binding.otherEntry[kEntrySizeOffset / 4]);
+        m_poseHistory.observe(object, binding.entry[kEntryBlockSize / 4],
+                              binding.otherEntry[kEntryBlockSize / 4]);
     }
     std::scoped_lock lock(m_mutex);
     if (std::find(m_seen.begin(), m_seen.end(), object) == m_seen.end()) {
@@ -214,8 +216,8 @@ void UniformBlockCensus::readEntry(uint32_t object, uint32_t cursor,
 // stands and never used as a length.
 uint32_t UniformBlockCensus::blockOf(const std::array<uint32_t, kEntryWords>& entry,
                                      std::array<bool, kEntryWords>& mapped, uint32_t& size) const {
-    const uint32_t offset = entry[kEntryOffsetOffset / 4];
-    size = entry[kEntrySizeOffset / 4];
+    const uint32_t offset = entry[kEntryBlockAddress / 4];
+    size = entry[kEntryBlockSize / 4];
     (void)mapped;
     // The offset is relative to a base the title set elsewhere, and the only
     // bases in hand are the other slot of the same ring and the object itself.
@@ -234,7 +236,7 @@ void UniformBlockCensus::mapWords(uint32_t object, const std::array<uint32_t, kE
     // reported rather than the first one that happened to work.
     uint32_t probe = 0;
     for (size_t word = 0; word < kEntryWords; word++) {
-        const uint32_t base = entry[word] + entry[kEntryOffsetOffset / 4];
+        const uint32_t base = entry[word] + entry[kEntryBlockAddress / 4];
         mapped[word] = m_readWord(base, probe) && m_readWord(base + 4, probe);
     }
 }
@@ -263,8 +265,8 @@ std::string UniformBlockCensus::json() const {
         JsonBody one;
         one.number("cursor", binding.cursor);
         one.string("object", hex(binding.object));
-        one.number("offset", binding.entry[kEntryOffsetOffset / 4]);
-        one.number("size", binding.entry[kEntrySizeOffset / 4]);
+        one.number("offset", binding.entry[kEntryBlockAddress / 4]);
+        one.number("size", binding.entry[kEntryBlockSize / 4]);
         JsonBody words;
         for (size_t word = 0; word < kEntryWords; word++) {
             words.number(std::to_string(word).c_str(), binding.entry[word]);
@@ -279,8 +281,8 @@ std::string UniformBlockCensus::json() const {
         // still in memory when this tick binds is the question a blend rests on
         // and it is answered by reading that slot and not by assuming a ring.
         one.number("otherCursor", binding.otherCursor);
-        one.number("otherOffset", binding.otherEntry[kEntryOffsetOffset / 4]);
-        one.number("otherSize", binding.otherEntry[kEntrySizeOffset / 4]);
+        one.number("otherOffset", binding.otherEntry[kEntryBlockAddress / 4]);
+        one.number("otherSize", binding.otherEntry[kEntryBlockSize / 4]);
         JsonBody otherWords;
         for (size_t word = 0; word < kEntryWords; word++) {
             otherWords.number(std::to_string(word).c_str(), binding.otherEntry[word]);
@@ -342,6 +344,10 @@ std::string UniformBlockCensus::json() const {
     // node, with the four answers kept apart. A report that only said "blendable: 3" would not
     // say what happened to the other five.
     body.object("vertexHistory", m_vertexHistory == nullptr ? "null" : m_vertexHistory->json());
+    // The objective's second question about the pose: whether tick N-1's uniform block contents
+    // are still there when tick N paints. Measured by re-reading the earlier address, so it is
+    // in the report rather than in a note beside it.
+    body.object("blockRing", m_ring == nullptr ? "null" : m_ring->json());
     if (!m_refusal.empty()) {
         body.string("refusal", m_refusal);
     }

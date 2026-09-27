@@ -20,8 +20,21 @@ uint64_t UniformBlockRing::hashOf(const std::vector<uint32_t>& words) {
     return hash;
 }
 
+void UniformBlockRing::bindSize(uint32_t object, uint32_t sizeInBytes) {
+    m_bindings.fetch_add(1, std::memory_order_relaxed);
+    m_sizesKnown.fetch_add(1, std::memory_order_relaxed);
+    // A bounded ring of sizes, not a tracked set: `m_sizes` is pre-sized, so a "is there room"
+    // test on its length is never true and the size was never recorded. The object's own index
+    // picks the slot, which keeps the report stable per object.
+    if (object != 0 && sizeInBytes != 0) {
+        std::scoped_lock lock(m_mutex);
+        m_sizes[object % kObjects] = sizeInBytes;
+    }
+}
+
 void UniformBlockRing::bind(uint32_t object, uint32_t address, uint32_t sizeInBytes) {
     m_bindings.fetch_add(1, std::memory_order_relaxed);
+    m_addressesKnown.fetch_add(1, std::memory_order_relaxed);
     if (object == 0 || address == 0) {
         return;
     }
@@ -139,6 +152,19 @@ std::string UniformBlockRing::json() const {
     std::scoped_lock lock(m_mutex);
     JsonBody body;
     body.number("bindings", m_bindings.load());
+    // The two halves, because only one of them is usable: the title's size word is the block's
+    // size, and its address word is a relative offset whose base has not been identified.
+    body.number("sizesKnown", m_sizesKnown.load());
+    body.number("addressesKnown", m_addressesKnown.load());
+    body.string("addressState", "relativeOffsetBaseNotIdentified");
+    JsonBody sizes;
+    for (size_t index = 0; index < m_sizes.size(); index++) {
+        if (m_sizes[index] == 0) {
+            continue;
+        }
+        sizes.number(std::to_string(index), m_sizes[index]);
+    }
+    body.object("blockSizes", sizes.text());
     body.number("blocksOversize", m_oversize.load());
     body.number("blocksUnreadable", m_unreadable.load());
     body.number("objectsRefused", m_refused.load());

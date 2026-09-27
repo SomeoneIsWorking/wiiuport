@@ -49,6 +49,21 @@ class UniformBlockRing {
     // display thread, so the counters are atomic and the shared state is under the lock.
     void bind(uint32_t object, uint32_t address, uint32_t sizeInBytes);
 
+    // **What the title actually gives, and it is not an address.** The census reads two words
+    // from a binding's descriptor entry and they are not both usable: the one at +0x0c is the
+    // block's SIZE -- 0x40, which is 64 bytes, for every object -- and the one at +0x04 is a
+    // *relative* offset, because this project's own census says so and says that reading it as
+    // a length once asked the product for a gigabyte and the product died. The base the title
+    // set elsewhere has not been identified, so a relative offset read as a guest address is a
+    // wrong answer rather than a missing one.
+    //
+    // So the size is recorded and the address is not, and the report says which: `sizesKnown`
+    // and `addressesKnown`. A ring test needs the address -- it is a re-read of a place -- and
+    // until the base is found this class can say the block is 64 bytes and nothing more. That is
+    // the honest state, and a run that reported a re-read against a relative offset would be
+    // reporting a number about memory the title never named.
+    void bindSize(uint32_t object, uint32_t sizeInBytes);
+
     std::string json() const;
 
     // The answer, with its denominator: how many consecutive pairs were re-read, how many still
@@ -108,7 +123,14 @@ class UniformBlockRing {
     const std::atomic<uint64_t>* m_frameCounter = nullptr;
     mutable std::mutex m_mutex;
     std::vector<Tracked> m_tracked;
+    // The block sizes the title named, which is the one half of the descriptor entry that is
+    // usable without a base.
+    std::vector<uint32_t> m_sizes = std::vector<uint32_t>(kObjects, 0);
     std::atomic<uint64_t> m_bindings{0};
+    std::atomic<uint64_t> m_sizesKnown{0};
+    // Bindings that carried an address this class was willing to re-read. Zero, and it is zero
+    // for a reason: the title's address word is a relative offset whose base is not identified.
+    std::atomic<uint64_t> m_addressesKnown{0};
     std::atomic<uint64_t> m_oversize{0};
     std::atomic<uint64_t> m_unreadable{0};
     std::atomic<uint64_t> m_refused{0};

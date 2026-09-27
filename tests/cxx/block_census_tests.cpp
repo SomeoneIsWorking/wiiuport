@@ -98,10 +98,13 @@ constexpr uint32_t kObject = 0x43e00000;
 void writeEntry(FakeGuest& guest, uint32_t entry, uint32_t offset, uint32_t size) {
     for (uint32_t word = 0; word < UniformBlockCensus::kEntryWords; word++) {
         uint32_t value = 0;
-        if (word == UniformBlockCensus::kEntryOffsetOffset / 4) {
-            value = offset;
-        } else if (word == UniformBlockCensus::kEntrySizeOffset / 4) {
+        // The measured places: the SIZE at +0x0c and the ADDRESS at +0x04. The names were
+        // backwards for a while and the header said so in one sentence while the census's own
+        // `blockOf` said the opposite in a comment, so this fixture follows the measurement.
+        if (word == UniformBlockCensus::kEntryBlockSize / 4) {
             value = size;
+        } else if (word == UniformBlockCensus::kEntryBlockAddress / 4) {
+            value = offset;
         } else {
             value = 0x1000 + word;
         }
