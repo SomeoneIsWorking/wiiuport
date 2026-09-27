@@ -127,6 +127,78 @@ The obvious later optimisation — replaying only the passes that depend on the
 substituted transforms and reusing the rest — is an optimisation, not the design. It is
 only safe once the null-interpolation gate below holds for the full replay.
 
+## The logic gate, and the four things that had to be true for it to run
+
+The logic tick is at 0x025d42ec. A gate in front of it skips every other call, so the
+picture can be painted twice per tick while the simulation still runs at its own rate.
+It is reached by the probe that already holds the tick's entry: the probe's stub builds
+the gate's block address in a register and branches through the count register, so a call
+arrives at the gate and the title's own code is never written at all.
+
+That last part is the point. Nothing is written into 0x025d42ec, and a branch there does
+not work anyway: a branch written by the host into a guest function's *interior* is
+compiled to a jump to a host address the recompiler never produced, so it does not
+arrive. Not as `b`, not as `mtctr`/`bctr`, not after forcing translation. The probe's own
+stub branch is the one way into the trampoline area that is known to arrive, and the
+caller census has counted 2020 calls a run through it.
+
+Four defects stood between that and a working gate, and each is worth stating because each
+read as something else:
+
+**The through path skipped an instruction.** It supplied the tick's prologue and branched
+to the word *after* the tick's second instruction. Correct for a gate entered at that
+instruction, wrong for one entered at the entry, where the stub has already run the first.
+It skipped `stw r0,0x4(r1)`, and the tick's epilogue returns through the link register
+that instruction saves. The title then spun in a wait loop at 0x027f09d8 forever, with the
+control channel still answering and the paint count stopped at one. Found by reading the
+guest's own words through the channel: the block held 0x497cea64, a branch to 0x025d42f4,
+where the instruction is at 0x025d42f0.
+
+**An unfilled block is not a disabled gate.** The probe sends every call to the block
+whether the gate is in or out, and a freshly allocated block is zeroes, and a zero word is
+an illegal instruction. So an un-gated gate did not run the tick, it raised a guest
+exception inside the simulation and the product died in the scheduler, naming nothing of
+this. "Out" is a payload of its own now: one branch to the instruction after the entry.
+
+**The counters were in memory the guest cannot touch.** They came from the emulator's
+system area, which is host bookkeeping. A gate that had been unreachable reported no calls
+and no fault; the first run that reached its own stores died on the first one. A counter
+that never moved and a counter that faults look the same from outside, which is why the
+block's address space is now stated rather than left to be discovered.
+
+**A probe's stub branched to its resume directly, so a rewritten block never ran.** That
+branch compiles to a jump to the target's *host* code, resolved once when the branch was
+translated. Rewriting the target afterwards produces new host code at a new address and
+leaves the branch jumping to the old one; nothing invalidates it, because nothing was
+written where the branch is. The guest runs the payload that was there when the branch was
+first translated, forever.
+
+The discriminator for that last one could not be argued with: a payload whose final word
+branches to its own first word — an infinite loop if it runs — was installed, and the
+title carried on at 30 paints a second for four seconds. The words in guest memory were the
+ones just written, and the counter read zero. With the branch indirect, the same payload
+stops the title dead (2025 calls to 2025, paints unmoved) and the gate's own counter
+begins to climb.
+
+Measured on the real title through the control channel, in one driven run: 30.17 paints a
+second (181 over 6.0s) with the gate out, 30.00 (180) with the gate in, and the gate's own
+counter from 30 to 151 in 3.0s against a probe call rate of 40.33 a second over the same
+window.
+
+### What is still open, and it is not the gate
+
+Installing the paint mod and then the gate, in that order, kills the product: a
+segmentation fault in recompiled code on the display thread's core, at `movbe
+0x48(%r13,%rax,1),%ecx`. The reverse order survives 240 seconds. The paint stand-in is at
+0x00e05880 and the gate's block at 0x00e058e4 — 36 bytes apart, disjoint, both inside the
+trampoline area's single 2 MiB `CODE_TRAMPOLINE` range. The gate's install rewrites its
+block, which invalidates the recompiled function covering those bytes, and
+`PPCRecompiler_deleteFunction` unlinks the jump table under whatever is executing that
+function. So the fault is a recompiler lifetime defect in the fork — an invalidation racing
+another core — not a gate defect, and not a paint-mod defect. It is recorded here rather
+than worked around: arming the two in the other order is a measurement dodge, and a run
+that needs its order chosen to survive is not a measurement.
+
 ## The gate that comes before any blending
 
 **Null interpolation.** With the blend forced to the identity at t=1, the replayed frame
