@@ -1100,6 +1100,48 @@ value of 1.0 rounds straight back to 1.0 -- the float epsilon there is 1.19e-7 -
 comparing identical bytes and reporting `identical` for what should have been `valueUnchanged`.
 The smallest nudge that changes the bits at all is 1e-7, and the test says so.
 
+### The falsifier's answer, and the layouts that explain the earlier nonsense
+
+    493,839 draws seen, 194,999 with no position named, 8 nodes tracked (224,099 refused)
+    of those 8:  1 blendable, 6 identical (compared, byte for byte),
+                 1 whose bytes differ but whose values did not move, 0 with nothing paired
+
+    node 1046050528: identical,     24 vertices, stride 64,  0 differing bytes, delta 0
+    node 1046048488: identical,      4 vertices, stride 32,  0 differing bytes, delta 0
+    node 1046042368: identical,      4 vertices, stride 32,  0 differing bytes, delta 0, 124 frames apart
+    node 1046045428: identical,      3 vertices, stride 32,  0 differing bytes, delta 0
+    node 1046046448: valueUnchanged, 10 vertices, stride 32, 30 differing bytes, delta 2.79e-19
+    node 1046041348: blendable,       4 vertices, stride 20, 36 differing bytes, delta 15.38,
+                                      magnitude believable=false, 20 components out of range
+
+**So: of eight tracked objects, none has a believable moving position.** Six are byte-for-byte
+identical across 4 to 124 frames, one differs in 30 bytes with a largest component delta of
+2.8e-19 -- the mantissa-bit case, caught and named rather than called a pose -- and the single
+`blendable` is not believable either, with 20 of its components out of range. **The vertex-stream
+blend has no ingredient here**, and the reason is specific rather than a shrug: the title's
+positions either do not change, or change in ways that are not positions.
+
+And the layouts explain every unreadable magnitude this session produced:
+
+    layout stride 20: 7 objects, semantic 0, 12 bytes, buffer 0, offset  0
+    layout stride 28: 1 object,  positionKnown=false
+    layout stride 32: 7 objects, semantic 0, 12 bytes, buffer 0, offset  0
+    layout stride 48: 3 objects, semantic 0, 12 bytes, buffer 0, offset 16
+    layout stride 64: 7 objects, semantic 0, 12 bytes, buffer 0, offset 16
+
+**The position is at offset 0 in two layouts and offset 16 in two others.** A single global
+offset -- which is what the census named before the stride went into its key -- is right for
+half the title's layouts and nonsense for the rest, and reading a 64-byte stride's offset 0 as a
+position is where every 1e+38 came from. That is the whole of the earlier nonsense, accounted
+for.
+
+**The limit on the negative, stated.** These are eight objects of the 224,107 the binder
+published, and they are the *first* eight. A sea, a sky and a particle system are all plausible
+for a wind game's opening frame, and "6 of 8 identical" is a statement about those eight and not
+about the title. The next measurement is a *strided* sample -- objects spread across the whole
+run rather than the first few -- because a negative about eight objects of one kind is not a
+negative about the game.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It
