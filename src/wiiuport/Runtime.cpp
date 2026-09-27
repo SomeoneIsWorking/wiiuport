@@ -113,6 +113,8 @@ void Runtime::installHooks() {
     m_recorder.addDrawRecordedListener(&m_vertexHistory);
     m_blocks.setDrawAttributeCensus(&m_drawAttributes);
     m_blocks.setVertexPoseHistory(&m_vertexHistory);
+    m_blockRing.setFrameCounter(&m_paint.paintCounter());
+    m_blocks.setBlockRing(&m_blockRing);
     m_nodePose.install();
     m_paint.install();
     m_blocks.install();

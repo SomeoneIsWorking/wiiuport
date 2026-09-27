@@ -65,6 +65,10 @@ void UniformBlockCensus::setVertexPoseHistory(const VertexPoseHistory* history) 
     m_vertexHistory = history;
 }
 
+void UniformBlockCensus::setBlockRing(UniformBlockRing* ring) {
+    m_ring = ring;
+}
+
 void UniformBlockCensus::setIdentityScope(ObjectIdentityScope* scope) {
     m_scope = scope;
 }
@@ -96,6 +100,13 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
     Binding binding;
     binding.object = object;
     binding.read = m_readWord(object + kCursorOffset, binding.cursor);
+    // The block this binding names, handed to the ring. The entry's own two words are the
+    // address and the size -- measured earlier: the word at +0x0c reading 0x40 for every object
+    // is the block's SIZE, not an offset.
+    if (binding.read && m_ring != nullptr) {
+        m_ring->bind(object, binding.entry[UniformBlockCensus::kEntryOffsetOffset / 4],
+                     binding.entry[UniformBlockCensus::kEntrySizeOffset / 4]);
+    }
     if (binding.read) {
         // The whole entry, word for word. A partial read is a partial answer and
         // is reported as unread rather than as zeroes, because a block that was

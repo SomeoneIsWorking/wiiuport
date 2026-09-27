@@ -149,6 +149,10 @@ class Runtime {
     // vertex-stream blend, and it is a separate class because a history that also did the
     // blending could not be asked whether blending was possible.
     title::VertexPoseHistory m_vertexHistory{&m_objectScope, &m_drawAttributes, nullptr};
+    // Whether tick N-1's uniform block contents are still there when tick N paints. The
+    // objective's own second question, and the census is the one place that knows which block a
+    // binding names.
+    title::UniformBlockRing m_blockRing{&GuestPatching::ReadWords, nullptr};
     interp::ObjectBlend m_objectBlend{interp::ContinuousInterpolator::kBlendPoint};
     interp::ReplayBlend m_replayBlend{m_objectBlend, m_substitution};
     guest::BufferWriters m_writers;
