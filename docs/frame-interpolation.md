@@ -343,13 +343,59 @@ assumed:
   of them holding a cursor in the display object or in a global is the same fault seen from further
   out.
 
-**The next read is a guest-side backtrace at the fault, not another payload.** Three payloads have
-now been built and measured -- two `bl`s, a tail branch, and the title's own pointer restoration --
-and the first and third fault while the second paints nothing, so the shape of the fault is bounded
-and what is missing is *where* the guest goes. The product's own crash handler prints three host
-addresses and no guest ones, and `scratch/frame-loop/gdb_run.py` replaces that with a backtrace --
-but it survived a mode 3 arming where `null_pair.py` faults reliably, so the workload matters and
-the harness has to drive the capture path too.
+### The backtrace, and it is not the guest's fault
+
+The harness had to drive the **capture** path to make the fault reproduce under a debugger -- a mode
+3 arming with no capture survives under gdb and kills the product under `null_pair.py` -- so
+`gdb_run.py` grew a `--capture` count that arms and reads frames after the mod is held. Every read
+in that loop can fail the same way, because the product being gone *is* the outcome the harness
+exists to catch, and an exception out of the loop skipped the teardown and took gdb's buffered
+backtrace with it. The log it prints as `gdb.log` is a path it never opens; the output is
+`run.log`.
+
+With mode 9 armed and four captures requested, the fault reproduced, and this is what it is:
+
+```
+Thread 70 "OSSched[core=1]" received signal SIGSEGV
+0x00007ffebcb7177d in ?? ()
+    0x7ffebcb7177d: movbe 0x3c(%r13,%r13...)   -- movbe 0x3c(%r13,%rax,1),%eax
+
+OSSched[core=1]  hCPU=0x7ffe8538d7a0
+  guest pc=0x00e05884  lr=0x02747c84
+  r0..r7 = 0274a508 0e275a10 10008000 0000015c 0e275a24 0e275a28 0e275a30 44213980
+```
+
+**The guest is not lost.** Its program counter is `0x00e05884` -- the stand-in's own block, which is
+where the title's `bctrl` on the rewritten vtable slot lands, and where it should be. Its link
+register is `0x02747c84`, in the title's display loop. `r0` is `0x0274a508`, a callee of the frame.
+None of that is a guest that has wandered; it is a guest doing exactly what the stand-in asks.
+
+**The fault is a host instruction.** `movbe` is how Cemu's recompiler reads a big-endian guest word
+out of its own code cache, and the faulting form indexes it by `%rax` off the cache base in `%r13`.
+The block index the harness printed beside it, `(rsi << 2) / 0x400000`, is **`0x7ffe792`**, against a
+reserved-block mask of `0x749` -- eleven bits, so indices 0 to 2047. **The block index is four
+orders of magnitude outside the table it indexes.**
+
+So the two candidates this section weighed -- the payload clobbering `r3`, and the frame not being
+re-entrant -- are **both refuted by the guest state**, and the fault is in the emulator's handling
+of arena-resident code: the stand-in lives in the loader's trampoline arena, and the recompiler's
+block bookkeeping for that region is computing an index the table cannot hold. It is the same
+family as the fork's `23eb318`, which moved the mask publication *after* the mapping it promises;
+this is the block index itself, and it is out of range rather than early.
+
+**That redirects the work.** Four payloads were built to test shapes, and the shape is no longer
+the question: every payload that actually paints twice faults, and it faults in the emulator's code
+cache with a healthy guest. Mode 6 and mode 8 survive precisely because they never reach a second
+pass through the stand-in. The next step is in `external/cemu`, not in a payload, and it is
+bounded: instrument the recompiler's block-index computation for a guest address in
+`mmuRange_TRAMPOLINE_AREA` and report the index and the table's size together, refusing a block
+whose index the table cannot address.
+
+**The earlier reading of this fault is withdrawn.** It was recorded as "the display thread's PC is
+outside the title's code, `0x02c12ffc` and `0x00e000b28` in two runs" and as "what remains
+unestablished is why that leaves the program counter outside the title's code". The program counter
+is not outside the title's code; it is in the arena, which is where the stand-in is, and the frame
+that read it as a lost guest was reading a host fault address as a guest one.
 
 **A note on how the repair word was found, because the wrong turns are the useful part.** Three
 attempts to compute the `or`/`mr` encoding by hand each found *nothing* in nine megabytes of
