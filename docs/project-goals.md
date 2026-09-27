@@ -60,10 +60,27 @@ title's modules are linked.
 **Non-goals.** Image-space frame generation, optical flow, or an external presentation
 layer. **Changing the guest's simulation rate** — which is not what this does: the logic
 keeps its own rate, and the picture's rate comes from the flip. What it does change, and
-says so here rather than leaving it to be discovered: one word of a vtable the display
-thread already calls, the title's own record of the interval it asked for, and the
-emulator's flip pacing. Which of those a given title needs is the title project's
-decision, and the title-neutral capability that offers them says what each one is.
+says so here rather than leaving it to be discovered, is the complete list of what a
+stand-in in a display path touches:
+
+- one word of a vtable the display thread already calls, so the display thread paints
+  through the stand-in;
+- **the first word of the frame being stood in for**, replaced by a relative branch into
+  a stub this runtime allocated, with the title's own instruction preserved inside that
+  stub and executed there before the frame resumes. A change to the guest's *code*, not
+  to a pointer to it, and therefore the one that needs the recompiler told;
+- **executable memory in the loader's trampoline area**, through the loader's own
+  allocator. That area's base is the HLE function registry's code, then its symbol
+  names, then zero padding, so the capability has to say where in the area it is safe to
+  place code, and a consumer that does not is one branch away from executing data;
+- the title's own record of the interval it asked for;
+- and the emulator's flip pacing.
+
+The logic-path gate this runtime also offers is a **backstop, not a finding**: measured on
+the real title, the logic keeps 30.12 a second while the picture reaches 60, so the logic
+is not slaved to the flip on this title. Which of these a given title needs is the title
+project's decision, and the title-neutral capability that offers them says what each one
+is — including, for the third, that the loader's arena is not uniformly executable.
 
 ## GOAL-DRIVE — The runtime is drivable and measurable by an agent
 
