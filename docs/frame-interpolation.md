@@ -938,6 +938,56 @@ fails three checks. Ten assemblies of one object with ten *different* block addr
 comparisons and nine movements under the node, and no comparisons at all under the address --
 which is the whole of what the node buys, and the number the earlier run could not produce.
 
+### The node identity works, and it makes the rigid negative well-powered
+
+Same run, same bars, identity switched from the block address to the node:
+
+    before:  source blockSources,  1 distinct identity,      63 repeat comparisons
+    after:   source objectAddress, 8 distinct identities, 75,703 repeat comparisons
+
+A thousandfold more comparison, from one join between the binder and the assembly hook. And the
+strict bar's answer, which was previously resting on 63 comparisons, is now resting on tens of
+thousands and does not move:
+
+    rigid bar: 4 offsets ever in this class, 0 held often enough, 0 seen to move,
+                over 809,682 assembled buffers and 397,534 with no block sources
+
+**So: with a working identity, no rigid 3x4 is present in 20% of the title's assembled uniform
+buffers and changes between draws of one object.** That is now a well-powered negative rather
+than a 63-comparison one, and it is the strongest single result in the search.
+
+The loose bar still names an offset, and still should not be believed: `rows off unit by 9`,
+`3.9`, `12.5`, `81`. Those pass the ceiling of 100 and are still not poses. But the loose class
+was added to answer one question -- *is the transform here at all, or is it absent* -- and it has
+answered: **present, not rigid, and at no plausible scale.** It has done its work. It is not a
+pose detector and should not be read as one, which is why the rigid bar is the one the question
+"where is the pose" is answered from.
+
+### What that means for the question the objective asks
+
+The objective asks for "which node field holds the pose". Four places have now been read with a
+working identity and a frame-apart schedule, and the answer is that **no field holds it**: the
+node's own 2588 bytes, the sub-object's 4096, the binder's 64-byte block, and 809,682 assembled
+uniform buffers all hold transforms, and every one of them is static. The only things that move
+are the values at scales of 4 to 81, which are arithmetic and not transforms.
+
+That is consistent with the title's own behaviour and with what the shipped mechanism had to do:
+`VertexBlend` existed because the title positions geometry **on the CPU each frame** and hands
+GX2 a display list of already-transformed vertices. There is no pose left in the object at draw
+time, because the pose has already been consumed into vertex bytes. "The picture reaches sixty
+without the logic following it" and "a blend cannot read N-1 out of the ring" are both true and
+both consequences of the same fact.
+
+So the blend's landing place is the vertex stream at the game's own draw, not a field to
+lerp -- and the fork already has both halves of that: `LatteFrameHooks::UniformAssembly::data`
+is writable at the last point before the buffer is uploaded, and
+`LatteFrameHooks::Observer::OnDrawPrepared` hands over `VertexReplacements` at the draw. Identity
+is the node, which the objective names and which the binder already publishes.
+
+That is a change of mechanism, not a smaller version of the same one, and it is recorded here as
+the finding it is: the question "which node field holds the pose" has an answer, and the answer
+is that the pose is not held anywhere as a transform.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It
