@@ -293,20 +293,74 @@ works precisely because it branches *once*, leaving the title's own `bctrl`-set 
 the one the frame uses.
 
 So **the second paint must be a call**, and the second call is what faults. That is narrower than
-"painting twice breaks the product", and it is the exact shape conditions 3 and 4 need. Two
-mechanisms remain, and this did not separate them:
+"painting twice breaks the product", and it is the exact shape conditions 3 and 4 need.
 
-- **The payload clobbers `r3`.** The frame is a method on the display object and takes that
-  pointer in `r3`, and mode 3's first two words are `li r3,1` and the game's own
-  `GX2SetSwapInterval` -- so the frame is entered with whatever the setter left, and a frame that
-  dereferences its own `r3` walks a tree of garbage. **Mode 2 calls the frame twice *without* the
-  setter and faults too**, which is the evidence against this being the whole cause.
-- **The frame is not re-entrant.** It may hold a per-pass cursor in a register it assumes it owns
-  for the whole pass, so the second entry continues from the first entry's end.
+### The frame's first five instructions, and a fix that did not fix it
 
-The first is cheaper to test and the test is bounded: mode 8 is the skeleton already built, and it
-needs `mr r4, r3` before the setter and `mr r3, r4` after it -- **lifted from the title's image,
-not assembled**, because a derived word is a word nobody checked and one has already cost a run.
+The frame's own body was disassembled, and its second instruction is the whole of what it does with
+the display pointer:
+
+```
+0x0274c264  0x7c0802a6  mfspr r0,LR
+0x0274c268  0x9421ffe8  stwu r1,-0x18(r1)
+0x0274c26c  0x93c10010  stw r30,0x10(r1)
+0x0274c270  0x93e10014  stw r31,0x14(r1)
+0x0274c274  0x9001001c  stw r0,0x1c(r1)
+0x0274c278  0x7c7e1b78  or r30,r3,r3
+0x0274c27c  0x4bffedd9  bl 0x0274b054
+0x0274c280  0x807e0018  lwz r3,0x18(r30)
+```
+
+**The frame moves the display pointer into `r30` on entry and dereferences `r30` for everything** --
+`display+0x74`, the field the objective names, is read as `lwz r0, 0x74(r30)` at `0x0274c2c4` --
+while treating `r3` as a scratch register it overwrites repeatedly. So `r3` is not the display
+pointer after a paint, and that is measured from the image rather than inferred.
+
+Mode 9 is the repair, and the word is **the title's own**: `or r3, r30, r30` (`0x7fc3f378`), which
+the frame itself uses five times in its own body, once immediately before each of its own `bctrl`
+calls. Mode 9's payload is four words -- paint, restore the pointer, paint, back to the loop -- and
+it deliberately has no `li r3,1` and no swap-interval call, since putting a one in `r3` in front of
+the frame is putting a one in the display pointer.
+
+**It does not fix it.** Measured on the real title, arming mode 9 over a run that had reached
+1,845 paints at rest:
+
+```
+at rest:      1845 paints, display 0x43e08af8 (interval 2, phase 2)
+armed mode 9: installed True (restoreDisplayTwice), block 0x00e05898
+then:         the product stopped answering
+```
+
+So **the pointer is not the cause**, or not the whole of it, and the `r3`/`r30` reading above is a
+true statement about the frame that does not reach the fault. What that leaves, stated rather than
+assumed:
+
+- **The frame is not re-entrant.** It holds per-pass state -- `li r31, 0x1` and
+  `rlwinm r31, r31, 0, 0x18, 0x1f` at `0x0274c2c8` is one -- and the second entry continues from
+  whatever the first entry left, in the display object and in its callees at `0x0274c038`,
+  `0x0274a5ec` and `0x0274b054`. A frame that assumes one pass per call would do exactly this.
+- **Something the first pass leaves outside the frame.** The paint walk is in the callees, and any
+  of them holding a cursor in the display object or in a global is the same fault seen from further
+  out.
+
+**The next read is a guest-side backtrace at the fault, not another payload.** Three payloads have
+now been built and measured -- two `bl`s, a tail branch, and the title's own pointer restoration --
+and the first and third fault while the second paints nothing, so the shape of the fault is bounded
+and what is missing is *where* the guest goes. The product's own crash handler prints three host
+addresses and no guest ones, and `scratch/frame-loop/gdb_run.py` replaces that with a backtrace --
+but it survived a mode 3 arming where `null_pair.py` faults reliably, so the workload matters and
+the harness has to drive the capture path too.
+
+**A note on how the repair word was found, because the wrong turns are the useful part.** Three
+attempts to compute the `or`/`mr` encoding by hand each found *nothing* in nine megabytes of
+PowerPC. `mr` is everywhere and the image holds 141,339 `or` instructions, so an encoding matching
+nothing is an encoding that is wrong. The two bugs were the extended opcode's field position and
+then the register fields' offsets, and what caught the second was not reasoning but the shape of
+the answer. The word came from the disassembler's own listing, with its address printed beside it,
+and two controls -- the frame's first word and the swap-interval call -- decide whether the scan is
+reading this title at all. One of those controls was itself wrong at first: the payload's leading
+word `0x819f0024` is not the frame's first instruction, and treating it as one is how a control ends
+up checking a claim instead of the file.
 
 ### The null case, and it fails
 

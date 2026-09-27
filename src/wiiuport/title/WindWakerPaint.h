@@ -202,6 +202,24 @@ class WindWakerPaint {
         // own `bctrl` returned to its loop once per pass, and this is the stand-in doing the
         // same thing twice.
         TailTwiceAtSixty = 8,
+        // Two paints, and the display pointer put back in `r3` between them.
+        //
+        // **This is the fix, and it came from reading the frame's own first instructions.** The
+        // frame is `mfspr r0,LR; stwu r1,-0x18(r1); stw r30,...; or r30,r3,r3` -- it moves the
+        // display pointer into `r30` on entry and dereferences *`r30`* for everything,
+        // `display+0x74` included, while treating `r3` as a scratch register. So `r3` is not the
+        // display pointer once a paint has run, and a second `bl` at the frame enters it with
+        // whatever the frame last stored there -- which is the fault, and it is one fault in two
+        // shapes: mode 3 puts `li r3,1` in front of the frame and never restores `r3`, and mode 2
+        // lets the frame clobber `r3` itself. Either way the second paint walks a scene tree
+        // through a `r30` that is not the display, and the guest ends up at an address in the
+        // loader's arena.
+        //
+        // The word that repairs it is the title's own: `or r3, r30, r30`, which the frame uses five
+        // times in its own body, once before each of its own `bctrl` calls. Lifted from 0x0274c294
+        // rather than computed, because a hand-derived `or` encoding matched nothing in nine
+        // megabytes of PowerPC and a payload word nobody checked has already cost a run.
+        RestoreDisplayTwice = 9,
     };
     // The name a refusal or a report uses for a mode.
     static std::string_view modeName(Mode mode);
