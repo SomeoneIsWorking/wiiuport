@@ -44,6 +44,9 @@ std::string field(const std::string& body, const std::string& name) {
 // model the thing the code reads is a fixture that finds the crash rather than the bug.
 std::vector<std::byte> g_buffer;
 
+// A denormal and zero, written as the values they are, because the difference between them is
+// the whole of the floor's non-zero clause.
+
 Prepared aDraw(uint32_t stride, uint32_t bufferBytes) {
     // Value-initialised, and it has to be: `DrawPrepared` is a plain aggregate with no default
     // member initialisers, so a default-constructed one carries whatever was on the stack in
@@ -340,6 +343,77 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
         check::isTrue(body.find("\"magnitudeBar\":\"fail\"") != std::string::npos,
                       "and the report says the magnitude bar failed, with the share beside it, "
                       "so an unresolved layout reads as unresolved rather than as empty");
+    }
+
+    // **A tie is a choice, and the choice is named.** Two runs of the same title named stride
+    // 32's position as "semantic 1 at offset 12" and then as "semantic 0 at offset 0" -- the same
+    // layout, two answers -- because more than one position-sized attribute in a vertex layout
+    // has plausible values (position, normal, tangent, colour). Almost every layout has several,
+    // so refusing on a tie refuses the whole title, and picking by iteration order measures the
+    // map. So the lowest semantic index wins, the rule is in the report as `tieBreak`, and every
+    // candidate that cleared is listed beside the one chosen.
+    {
+        wiiuport::title::ObjectIdentityScope scope;
+        DrawAttributeCensus census(&scope);
+        for (uint32_t object = 1; object <= 5; object++) {
+            scope.bind(0x43e90000u + object * 0x300u);
+            Prepared draw = aDrawWithPositions(32, 8, 1.0f);
+            // Two plausible twelve-byte attributes: one at offset 0 and one at offset 12, both
+            // holding positions, because the bytes are the same bytes.
+            addAttribute(draw, 0, 0x30, 12, 0);
+            addAttribute(draw, 4, 0x30, 12, 12);
+            census.onDrawRecorded(draw);
+        }
+        const DrawAttributeCensus::Position at = census.positionFor(32);
+        const std::string body = census.json();
+        check::isTrue(at.known && at.semanticId == 0 && at.offset == 0,
+                      "two candidates clearing, the lowest semantic index wins: " + body);
+        check::isTrue(body.find("\"candidatesClearing\":2") != std::string::npos,
+                      "and the report says two cleared, so the reader knows a choice was made "
+                      "rather than one candidate having been found");
+        check::isTrue(body.find("\"tieBreak\":\"lowestSemanticThenOffset\"") != std::string::npos,
+                      "and names the rule, so the pick is visibly a rule and not a measurement");
+        check::isTrue(body.find("\"candidates\":{") != std::string::npos,
+                      "with the alternatives listed beside it, so a reader entitled to see them "
+                      "is entitled to object");
+    }
+
+    // **A vertex at the origin is a position, and a denormal is not.** The floor for denormals
+    // arrived without a non-zero clause and refused every layout whose geometry sat at the
+    // origin, which is most of a title's. Zero is exactly zero and is a perfectly good position.
+    {
+        wiiuport::title::ObjectIdentityScope scope;
+        DrawAttributeCensus census(&scope);
+        for (uint32_t object = 1; object <= 5; object++) {
+            scope.bind(0x43ea0000u + object * 0x300u);
+            Prepared draw = aDraw(32, 32 * 8);
+            addAttribute(draw, 0, 0x30, 12, 0);
+            std::memset(g_buffer.data(), 0, g_buffer.size());
+            census.onDrawRecorded(draw);
+        }
+        check::isTrue(census.positionFor(32).known,
+                      "every vertex at the origin still names a position, because zero is a "
+                      "position");
+    }
+
+    // A denormal is not, and the two are told apart by being non-zero.
+    {
+        wiiuport::title::ObjectIdentityScope scope;
+        DrawAttributeCensus census(&scope);
+        for (uint32_t object = 1; object <= 5; object++) {
+            scope.bind(0x43eb0000u + object * 0x300u);
+            Prepared draw = aDraw(32, 32 * 8);
+            addAttribute(draw, 0, 0x30, 12, 0);
+            const float denormal = 1.7e-38f;
+            std::memset(g_buffer.data(), 0, g_buffer.size());
+            for (uint32_t vertex = 0; vertex < 8; vertex++) {
+                std::memcpy(g_buffer.data() + vertex * 32, &denormal, sizeof(denormal));
+            }
+            census.onDrawRecorded(draw);
+        }
+        check::isTrue(!census.positionFor(32).known,
+                      "and a layout whose every vertex is a denormal names nothing, which is the "
+                      "1.7e+38 case's small twin");
     }
 
     // One object cannot agree with another, so nothing is named however many times it is drawn.

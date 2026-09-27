@@ -56,6 +56,9 @@ class DrawAttributeCensus final : public frame::DrawRecordedListener {
         // over every stride at once, which is a mixture of layouts and is why a draw should ask
         // about its own.
         uint32_t stride = 0;
+        // How many objects agreed on this candidate, which is the count bar's numerator and is
+        // reported so a reader can see the margin rather than only the verdict.
+        uint64_t objectsAgreeing = 0;
         uint32_t semanticId = 0;
         uint32_t format = 0;
         uint32_t sizeInBytes = 0;
@@ -148,6 +151,12 @@ class DrawAttributeCensus final : public frame::DrawRecordedListener {
     // not. One percent: generous, because the point is to refuse a layout that is not positions
     // and not to refuse one for a padding vertex.
     static constexpr double kImplausibleShareCeiling = 0.01;
+    // **And a floor for denormals, because "believable" has to mean plausible and not merely
+    // finite.** A largest component delta of 1.7e-38 was accepted as believable under a ceiling
+    // of 1e6, and that is a denormal rather than a position in any world. The floor applies to
+    // NON-ZERO values only: a vertex at the origin is exactly zero and is a perfectly good
+    // position, and a floor without that clause refuses most of a title's geometry.
+    static constexpr float kComponentFloor = 1.0e-20f;
     // How many vertices' worth of components are read per draw per candidate. A handful is
     // enough to see whether an offset holds positions, and reading every vertex of a million-
     // vertex mesh to find that out would be a census that costs more than the frame it watches.
@@ -176,6 +185,20 @@ class DrawAttributeCensus final : public frame::DrawRecordedListener {
     // The same, over the objects whose draws had this stride, and only those. A stride of zero
     // asks the question over every object, which is what `position()` does.
     Position positionForLocked(uint32_t stride) const;
+    // Every candidate that clears both bars for this stride, best first. **Best is a stated rule
+    // and not a measurement**, and the report carries the whole list beside the one it chose,
+    // because a reader entitled to see the alternatives is entitled to object to the rule.
+    //
+    // Two runs of the same title named stride 32's position as "semantic 1 at offset 12" and
+    // then as "semantic 0 at offset 0" -- the same layout, two answers -- because more than one
+    // position-sized attribute in a vertex layout has plausible values (position, normal,
+    // tangent, colour) and the winner depended on which objects the strided sample happened to
+    // catch. So the rule is lowest semantic index then lowest offset, reported as `tieBreak`.
+    // Refusing on a tie would refuse the whole title, since almost every layout has several
+    // plausible twelve-byte attributes; picking by iteration order would be a measurement of the
+    // map.
+    std::vector<Position> candidatesClearingLocked(uint32_t stride) const;
+
     // How many distinct objects were seen at this stride, and the bar for them.
     uint64_t nodesAtStrideLocked(uint32_t stride) const;
     // Every stride seen with a position-sized attribute, with the lock already held.
