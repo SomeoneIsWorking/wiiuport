@@ -6,6 +6,7 @@
 #include "wiiuport/title/ObjectIdentityScope.h"
 #include "wiiuport/title/ObjectPoseHistory.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
+#include "wiiuport/title/VertexPoseHistory.h"
 
 #include <array>
 #include <atomic>
@@ -106,6 +107,10 @@ class UniformBlockCensus {
     // The draw attribute census, reported beside the pose search. Null is allowed and reported
     // as null, so a build that wires no census does not look like a run that found nothing.
     void setDrawAttributeCensus(const DrawAttributeCensus* draws);
+
+    // The two-tick vertex history, reported beside the attribute census it reads. Null is
+    // allowed and reported as null.
+    void setVertexPoseHistory(const VertexPoseHistory* history);
 
     UniformBlockCensus(Register registerProbe, ReadWord readWord,
                        ObjectPoseHistory::ReadWords readWords,
@@ -217,6 +222,7 @@ class UniformBlockCensus {
     NodePoseLocator* m_nodes = nullptr;
     ObjectIdentityScope* m_scope = nullptr;
     const DrawAttributeCensus* m_drawAttributes = nullptr;
+    const VertexPoseHistory* m_vertexHistory = nullptr;
     Binder m_first{*this, false};
     Binder m_second{*this, true};
     std::atomic<uint64_t> m_bindings{0};
