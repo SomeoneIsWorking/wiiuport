@@ -124,6 +124,9 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
         }
         readEntry(object, binding.otherCursor, binding.otherEntry, binding.otherRead);
         mapWords(object, binding.otherEntry, binding.otherMapped);
+        binding.block = blockOf(binding.entry, binding.mapped, binding.blockSize);
+        binding.otherBlock =
+            blockOf(binding.otherEntry, binding.otherMapped, binding.otherBlockSize);
     }
     std::scoped_lock lock(m_mutex);
     if (std::find(m_seen.begin(), m_seen.end(), object) == m_seen.end()) {
@@ -177,6 +180,38 @@ void UniformBlockCensus::readEntry(uint32_t object, uint32_t cursor,
     }
     read = complete;
 }
+
+// The block an entry names.
+//
+// The binder's own decompilation is followed rather than guessed at. It reads
+// one entry *past* the last counted one -- `param_1 + 0x10 + *(int *)(param_1 +
+// 0x4c) * 0x1c` -- and takes that entry's word at `+0x0c` as the block's offset
+// and its word at `+0x04` as the size, handing both to GX2Set*UniformBlock.
+//
+// A guess was tried first: try every word of the entry, add the entry's own
+// offset, and keep the first that reads. It finds an address -- and it finds the
+// *object*, whose vtable and heap pointers read perfectly well, 0x140 before
+// where the block is. That is what "an address that reads" is worth: nothing. So
+// the offset is taken from the word the binder takes it from, and the only
+// question left is what the offset is relative to, which the decompilation does
+// not say and the report therefore says.
+//
+// The size is the entry's word at `+0x04`, which read 0x3e634300 on a real
+// binding -- a pointer, not a length. A tool that took it for a byte count asked
+// the product for a gigabyte and the product died, so it is reported as it
+// stands and never used as a length.
+uint32_t UniformBlockCensus::blockOf(const std::array<uint32_t, kEntryWords>& entry,
+                                     std::array<bool, kEntryWords>& mapped, uint32_t& size) const {
+    const uint32_t offset = entry[kEntryOffsetOffset / 4];
+    size = entry[kEntrySizeOffset / 4];
+    (void)mapped;
+    // The offset is relative to a base the title set elsewhere, and the only
+    // bases in hand are the other slot of the same ring and the object itself.
+    // Both are reported rather than one being chosen, because choosing is what
+    // made the first attempt name the object.
+    return offset;
+}
+
 
 void UniformBlockCensus::mapWords(uint32_t object, const std::array<uint32_t, kEntryWords>& entry,
                                   std::array<bool, kEntryWords>& mapped) const {
@@ -246,6 +281,14 @@ std::string UniformBlockCensus::json() const {
                               binding.otherMapped[word] ? "true" : "false");
         }
         one.raw("otherReadableAtOffset", otherReadable.text());
+        // Both slots' block offsets, as the binder's own decompilation takes
+        // them: the entry one past the counted ones, its word at +0x0c.
+        //
+        // These are offsets, not addresses, and the report says so: the title
+        // binds them against a base it sets elsewhere, and naming an address
+        // here is what made a first attempt report the object as the block.
+        one.number("blockOffset", binding.block);
+        one.number("otherBlockOffset", binding.otherBlock);
         one.raw("read", binding.read ? "true" : "false");
         examples.raw(std::to_string(index).c_str(), one.text());
     }

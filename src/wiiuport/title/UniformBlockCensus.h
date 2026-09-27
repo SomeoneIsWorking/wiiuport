@@ -38,6 +38,12 @@ namespace wiiuport::title {
 // reporting an empty histogram as a finding.
 class UniformBlockCensus {
   public:
+    static constexpr uint32_t kBlockWords = 96;
+    static constexpr size_t kDifferingExamples = 12;
+    // A differing offset is reported with the two values, so "differs" is a
+    // measurement over a stated pair rather than a count.
+    static constexpr size_t kDifferingShown = 6;
+
     // The two binders, which are the same function apart from which triple of
     // block indices they read, and the first instruction of each.
     static constexpr uint32_t kBinder = 0x027ff88c;
@@ -59,6 +65,15 @@ class UniformBlockCensus {
     // How many worked examples the report carries, each one a binding with the
     // cursor, the block's offset and the block's size.
     static constexpr size_t kExamples = 8;
+
+    // How many words of a block are read when a binding is examined, and how many
+    // examples of the differing offsets the report carries.
+    //
+    // Reading the whole block and reporting the offsets that differ between the
+    // two slots is the measurement that answers "which field holds the pose": it
+    // does not need the field to be named in advance, and a run that finds
+    // nothing differing says the two slots hold the same values rather than
+    // leaving the question open.
 
     // The fork's seams, injected so this is testable without a guest.
     // The flag says whether the probe keeps the entry. Every registration here is
@@ -116,6 +131,18 @@ class UniformBlockCensus {
         // is only a ring from the object that owns it.
         uint32_t object = 0;
         std::array<uint32_t, kEntryWords> entry{};
+        // Each slot's block *offset* and size, taken from the words the binder's
+        // own decompilation takes them from.
+        //
+        // Offsets and not addresses: the title binds them against a base it sets
+        // elsewhere. Resolving one to an address by trying entry words until one
+        // reads finds the object itself, whose vtable reads perfectly well -- a
+        // wrong answer that looks like a right one, and which is what the first
+        // attempt did.
+        uint32_t block = 0;
+        uint32_t otherBlock = 0;
+        uint32_t blockSize = 0;
+        uint32_t otherBlockSize = 0;
         // Which of those words, added to the entry's offset, is somewhere the
         // guest can actually read. The binder hands the GPU a *relative* offset,
         // so the block's address is a base the title set elsewhere, and the
@@ -144,6 +171,8 @@ class UniformBlockCensus {
     // previous tick drew from.
     void readEntry(uint32_t object, uint32_t cursor, std::array<uint32_t, kEntryWords>& entry,
                    bool& read) const;
+    uint32_t blockOf(const std::array<uint32_t, kEntryWords>& entry,
+                     std::array<bool, kEntryWords>& mapped, uint32_t& size) const;
     void mapWords(uint32_t object, const std::array<uint32_t, kEntryWords>& entry,
                   std::array<bool, kEntryWords>& mapped) const;
 
