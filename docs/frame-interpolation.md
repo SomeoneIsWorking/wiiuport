@@ -918,12 +918,53 @@ to it is deterministic.
 
 So the remaining cause is named as far as the evidence goes: **a branch out of the frame's return path
 lands in the loader arena's data, and the recompiler has no way to say that region is not code.**
-Whether the fix belongs in the recompiler -- which would need a way to mark a range as
-not-translatable, and does not have one -- or in the stand-in, which would mean never returning into a
-context the title's loop would not have set up, is the open choice. **This file does not pick one
-without measuring which the branch is**, and the discriminator is available: the second paint as a tail
-branch survives (`TailTwiceAtSixty`, which "paints nothing") and the second paint as a call faults, so
-the difference is entirely in what happens *after* the frame returns.
+
+**And the discriminator this section offered is withdrawn.** It said the second paint as a tail branch
+survives while the second paint as a call faults, so the difference was what happens after the frame
+returns. `TailTwiceAtSixty` was measured as "painting nothing" back when it shared the payload's
+`bl` at `0x028fad2c` with the two-paint call shape -- so that measurement was of a payload that called
+into a zero-filled hole, and it says nothing about the shape. **Re-run with the hole call gone, mode 8
+arms and the product dies within the same second:**
+
+```
+  at rest:      installed False (twiceAtSixty), probe installed, block 0x00e05880, 1554 paints, interval 2
+  armed mode 8: installed True  (tailTwiceAtSixty), probe installed, block 0x00e05880, 1555 paints, interval 1
+  next read:    connection refused
+```
+
+The interval field reads **1**, so the field write that replaced the hole call works, and the arming
+succeeds. Both two-paint shapes fault, whether the second paint is a call or a tail branch, so **"what
+happens after the frame returns" does not separate them** and the tail branch is not a workaround.
+
+### The block the report names does not hold the payload
+
+Read as bytes, at the fault, with mode 3 armed and the report naming the block as `0x00e05880`:
+
+```
+0x00e05880  c1 a6 00 48  89 df e8 15  7e 14 00 e9  78 f7 ff ff
+0x00e05890  48 8d 35 37  c1 a6 00 48  89 df e8 01  7e 14 00 e9
+0x00e058a0  64 f7 ff ff  48 8d 35 0d  c1 a6 00 48  89 df e8 ed
+```
+
+**That is not the payload.** The payload for that shape is three words of branches -- `bl 0x0274c264`,
+`b 0x0274c264`, `b 0x0274c020` -- and every one of them has `0x48` or `0x4b` in its top byte. What is
+there instead is a pattern repeating every `0x14` bytes, and its words decode as ordinary
+non-branching instructions: `0xc1a60048` is `lfs f13,0(r0,r12)` and `0x89dfe815` is `lbzu`. **A block
+the report names, at the moment of the fault, holding a repeating pattern rather than the three
+branches the builder writes there.**
+
+Two readings fit and one measurement separates them, so neither is claimed: the **block address moved**
+between the arming the harness recorded and the fault -- the harness writes the address at arming and
+the fault comes later, and the address is reported as `0x00e05898` in some runs and `0x00e05880` in
+others -- or **something overwrote the payload** after it was written. What does not fit either reading
+is that the fault's program counter is consistently *just below* the block in both armings, `0x00e0586c`
+and `0x00e05884` against blocks at `0x00e05880` and `0x00e05898`.
+
+**This is the next thing to settle, and it is smaller than what came before it:** whether the words the
+mod wrote are still at the address it wrote them to when the guest runs. The product's own `/memory`
+accessor answers it, and the probe that asks it has to read the address *after* arming rather than
+before -- the first attempt at that read the channel after the product had already gone, so it recorded
+nothing, and a read that cannot be taken is not a reading of zero.
 
 ### The frame writes one word above its own allocation
 
