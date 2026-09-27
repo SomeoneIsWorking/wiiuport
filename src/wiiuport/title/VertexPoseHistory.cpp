@@ -181,6 +181,13 @@ VertexPoseHistory::Verdict VertexPoseHistory::verdictOf(const Node::Sample& befo
     if (*differingBytes == 0) {
         return Verdict::Identical;
     }
+    // Bytes differ, so something is not byte-identical. Whether the POSITION moved is a
+    // separate question, asked of the values: one real run reported 13,780 differing bytes
+    // beside a largest component delta of 1.19e-07 and called it a blend, which is a
+    // difference in the low mantissa bits and not a pose.
+    if (*biggestDelta <= kPositionMotion) {
+        return Verdict::ValueUnchanged;
+    }
     return Verdict::Blendable;
 }
 
@@ -188,11 +195,14 @@ VertexPoseHistory::Verdict VertexPoseHistory::verdictOf(const Node::Sample& befo
 // paired -- because a node with one paired shape out of four has not been shown to be static,
 // it has been shown to be under-sampled.
 VertexPoseHistory::Verdict VertexPoseHistory::verdictOf(const Node& node, uint64_t* differingBytes,
-                                                        float* biggestDelta,
-                                                        uint64_t* outOfRange) const {
+                                                        float* biggestDelta, uint64_t* outOfRange,
+                                                        uint32_t* stride,
+                                                        uint32_t* vertices) const {
     *differingBytes = 0;
     *biggestDelta = 0.0f;
     *outOfRange = 0;
+    *stride = 0;
+    *vertices = 0;
     bool anyPaired = false;
     Verdict best = Verdict::UnpairedShapes;
     // Grouped by shape, not by adjacency. A node with four shapes appends them interleaved --
@@ -229,10 +239,20 @@ VertexPoseHistory::Verdict VertexPoseHistory::verdictOf(const Node& node, uint64
                 verdictOf(before, after, node.componentBytes, &differing, &biggest, &shapeOut);
             anyPaired = true;
             outOfRangeTotal += shapeOut;
+            // The geometry of the shape the verdict is ABOUT, written before any early return,
+            // so the numbers beside a verdict are the numbers that verdict is about.
+            *stride = after.stride;
+            *vertices = node.componentBytes == 0
+                            ? 0
+                            : static_cast<uint32_t>(after.bytes.size() / node.componentBytes);
+            // The counts describe the shape the verdict is about, for EVERY verdict and not
+            // only the blendable one. Writing them only on the blendable path left
+            // `valueUnchanged` reporting zero differing bytes, which is the same "zero for not
+            // reported" this report has now produced three times.
+            *differingBytes = differing;
+            *biggestDelta = biggest;
+            *outOfRange = outOfRangeTotal + shapeOut;
             if (one == Verdict::Blendable) {
-                *differingBytes = differing;
-                *biggestDelta = biggest;
-                *outOfRange = outOfRangeTotal + shapeOut;
                 return one;
             }
             best = one;
@@ -248,6 +268,8 @@ const char* VertexPoseHistory::nameOf(Verdict verdict) {
         return "oneSample";
     case Verdict::Identical:
         return "identical";
+    case Verdict::ValueUnchanged:
+        return "valueUnchanged";
     case Verdict::Blendable:
         return "blendable";
     case Verdict::UnpairedShapes:
@@ -265,12 +287,17 @@ VertexPoseHistory::Tally VertexPoseHistory::tally() const {
         uint64_t differing = 0;
         uint64_t outOfRange = 0;
         float biggest = 0.0f;
-        switch (verdictOf(node, &differing, &biggest, &outOfRange)) {
+        uint32_t stride = 0;
+        uint32_t vertices = 0;
+        switch (verdictOf(node, &differing, &biggest, &outOfRange, &stride, &vertices)) {
         case Verdict::Blendable:
             out.blendable++;
             break;
         case Verdict::Identical:
             out.identical++;
+            break;
+        case Verdict::ValueUnchanged:
+            out.valueUnchanged++;
             break;
         case Verdict::OneSample:
         case Verdict::UnpairedShapes:
@@ -296,17 +323,23 @@ std::string VertexPoseHistory::json() const {
     // should not have to be assembled from the table below.
     uint64_t blendable = 0;
     uint64_t identical = 0;
+    uint64_t valueUnchanged = 0;
     uint64_t oneSample = 0;
     for (const Node& node : m_nodes) {
         uint64_t differing = 0;
         uint64_t outOfRange = 0;
+        uint32_t stride = 0;
+        uint32_t vertices = 0;
         float biggest = 0.0f;
-        switch (verdictOf(node, &differing, &biggest, &outOfRange)) {
+        switch (verdictOf(node, &differing, &biggest, &outOfRange, &stride, &vertices)) {
         case Verdict::Blendable:
             blendable++;
             break;
         case Verdict::Identical:
             identical++;
+            break;
+        case Verdict::ValueUnchanged:
+            valueUnchanged++;
             break;
         case Verdict::OneSample:
         case Verdict::UnpairedShapes:
@@ -316,6 +349,8 @@ std::string VertexPoseHistory::json() const {
     }
     body.number("blendable", blendable);
     body.number("identical", identical);
+    body.number("valueUnchanged", valueUnchanged);
+    body.raw("positionMotion", JsonBody::real(static_cast<double>(kPositionMotion)));
     body.number("unpairedShapes", oneSample);
 
     JsonBody nodes;
@@ -327,10 +362,15 @@ std::string VertexPoseHistory::json() const {
         uint64_t differing = 0;
         float biggest = 0.0f;
         uint64_t outOfRange = 0;
-        const Verdict verdict = verdictOf(node, &differing, &biggest, &outOfRange);
-        const Node::Sample* latest = node.samples.empty() ? nullptr : &node.samples.back();
-        const size_t bytes = latest == nullptr ? 0 : latest->bytes.size();
-        const uint32_t stride = latest == nullptr ? 0 : latest->stride;
+        uint32_t stride = 0;
+        uint32_t vertices = 0;
+        const Verdict verdict =
+            verdictOf(node, &differing, &biggest, &outOfRange, &stride, &vertices);
+        // The geometry of the shape the verdict is ABOUT, not of whichever sample happened to
+        // be last. One run showed 1040 vertices beside a verdict about another shape, and
+        // 13,780 differing bytes against a total of 12,480 -- which is only possible if the two
+        // numbers came from different shapes.
+        const size_t bytes = node.componentBytes == 0 ? 0 : vertices * node.componentBytes;
         JsonBody one;
         one.number("node", node.address);
         one.string("verdict", nameOf(verdict));
