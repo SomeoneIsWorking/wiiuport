@@ -452,7 +452,7 @@ void WindWakerPaint::install() {
     m_frame.setReservation([this](std::string& refusal) {
         reserve(refusal);
     });
-    m_register(kDisplayFrame, kDisplayFrameFirst, m_frame, true, 0);
+    m_register(kDisplayFrameProbe, kDisplayFrameProbeFirst, m_frame, true, 0);
 }
 
 void WindWakerPaint::reserve(std::string& refusal) {
@@ -752,10 +752,20 @@ std::string WindWakerPaint::enable(Mode mode) {
         // because this mode writes there.
         const uint32_t frameEntry = kDisplayFrame;
         uint32_t there = 0;
+        // The word the probe sits on is checked, and named: a revision whose frame differs there is
+        // refused by name rather than branched into. The frame's *entry* is checked too, and the
+        // two are different checks -- the entry is what the stand-in branches to, the probe word is
+        // what the probe displaces.
         if (!m_readWord(frameEntry, there) || there != kDisplayFrameFirst) {
             m_refusal = "the frame's entry at " + hex(frameEntry) + " holds " + hex(there) +
                         ", not " + hex(kDisplayFrameFirst) +
                         "; this stand-in is written for this title's frame";
+            return m_refusal;
+        }
+        if (!m_readWord(kDisplayFrameProbe, there) || there != kDisplayFrameProbeFirst) {
+            m_refusal = "the frame's word at " + hex(kDisplayFrameProbe) + " holds " + hex(there) +
+                        ", not " + hex(kDisplayFrameProbeFirst) +
+                        ", so the probe would displace a different instruction";
             return m_refusal;
         }
         if (!withinReach(frameEntry, m_block)) {
@@ -1009,6 +1019,10 @@ std::string WindWakerPaint::probeName() const {
         return "entryHeldOther";
     case GuestCallProbes::Installation::EntryNotRelocatable:
         return "entryNotRelocatable";
+    case GuestCallProbes::Installation::EntryReadsLinkRegister:
+        // Named rather than folded into "unknown", because it is a refusal a caller can act on: the
+        // probe belongs on a different word, and the report says which one it wanted.
+        return "entryReadsLinkRegister";
     case GuestCallProbes::Installation::NoCodeSpace:
         return "noCodeSpace";
     }
