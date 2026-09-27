@@ -64,6 +64,7 @@ class VertexPoseHistory final : public frame::DrawRecordedListener {
     struct Tally {
         uint64_t tracked = 0;
         uint64_t blendable = 0;
+        uint64_t valueUnchanged = 0;
         uint64_t identical = 0;
         uint64_t unpairedShapes = 0;
         uint64_t refused = 0;
@@ -89,6 +90,12 @@ class VertexPoseHistory final : public frame::DrawRecordedListener {
     // magnitude is a signal that the layout differs and not a measurement. Generous on purpose:
     // the point is to catch 10^38, not to bound a scene.
     static constexpr float kComponentCeiling = 1.0e6f;
+    // **How far a position must move between two frames to be a pose.** A shape whose bytes
+    // differ in their low mantissa bits and whose values agree to seven decimal places is not
+    // moving: one real run reported 13,780 differing bytes beside a largest component delta of
+    // 1.19e-07, and the bitwise difference was called a blend. Generous, because the point is
+    // to separate "the bytes changed" from "the position changed" and not to bound a scene.
+    static constexpr float kPositionMotion = 1.0e-4f;
     // How many distinct nodes are tracked, how many *shapes* each keeps a sample of, and how
     // many samples each shape keeps. A node is drawn several times a frame -- a placeholder, a
     // depth pass, a colour pass -- and a bound on shapes is what stops one node's whole
@@ -135,6 +142,11 @@ class VertexPoseHistory final : public frame::DrawRecordedListener {
         OneSample,
         // Two samples of one shape and not one byte differs: a static mesh.
         Identical,
+        // Two samples of one shape whose bytes differ but whose VALUES agree to within
+        // kPositionMotion: not a pose. Kept apart from `Identical`, because the bytes really
+        // did differ and a reader needs to know that, and apart from `Blendable`, because the
+        // position did not move.
+        ValueUnchanged,
         // Two samples of one shape and the value moved: a pose.
         Blendable,
         // Every shape of this node has a single sample, so nothing was compared. A node that
@@ -150,8 +162,13 @@ class VertexPoseHistory final : public frame::DrawRecordedListener {
     // use: a node is as blendable as its best-matched shape, and the report says how many
     // shapes were paired, because a node with one paired shape out of four has not been shown
     // to be static -- it has been shown to be under-sampled.
+    //
+    // `stride` and `vertices` come back as well, because a verdict with the geometry of a
+    // DIFFERENT shape beside it is the same lie as a magnitude of zero for a comparison that
+    // never happened: one real run showed 1040 vertices beside a verdict about a shape that was
+    // not that one, and 13,780 differing bytes against a total of 12,480.
     Verdict verdictOf(const Node& node, uint64_t* differingBytes, float* biggestDelta,
-                      uint64_t* outOfRange) const;
+                      uint64_t* outOfRange, uint32_t* stride, uint32_t* vertices) const;
     static const char* nameOf(Verdict verdict);
 
     const ObjectIdentityScope* m_scope = nullptr;

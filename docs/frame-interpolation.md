@@ -1067,6 +1067,39 @@ Done with a regular expression, which reports its substitution count: the mutati
 the same offset with different strides -- because the `layouts` block lists both strides either
 way and so cannot tell whether the key separated them.
 
+### The bitwise fault, again, one level down -- and a verdict beside another shape's numbers
+
+With the per-layout position in place the falsifier read 6 blendable, 1 identical, 1 unpaired.
+Two of those lines were wrong, and the report is what showed it:
+
+    node 1166856616: blendable, 1040 vertices, 12480 bytes, stride 32,
+                    differing bytes 13780, biggest component delta 1.18866922e-07
+
+**13,780 differing bytes out of a total of 12,480.** That is impossible for one pair of samples,
+so the two numbers came from different shapes: the verdict was about a shape that was not the one
+whose geometry was printed beside it. The node's `vertices`, `positionBytes` and `stride` came
+from whichever sample happened to be last, while the verdict came from the best-matched pair. The
+geometry now travels with the verdict.
+
+**And 13,780 bytes differing beside a largest component delta of 1.19e-07 is not a pose.** That
+is a difference in the low mantissa bits -- the *same* bitwise fault the node scan had, now at
+vertex level, and `differingBytes > 0` was deciding "blendable". So a third answer exists and is
+named: `valueUnchanged`, for bytes that really did differ while the position did not move. It is
+kept apart from `identical`, because the bytes did differ and a reader is entitled to that fact,
+and apart from `blendable`, because the position did not move. The threshold is stated at
+1e-4 -- generous, because the point is to separate "the bytes changed" from "the position
+changed" and not to bound a scene.
+
+**And the same "zero for not reported", for the fourth time.** The differing-byte count was
+written only on the blendable path, so a `valueUnchanged` node reported `differingBytes: 0` --
+about a comparison that had happened and found four differing bytes. The counts are now written
+for every paired shape whatever the verdict.
+
+A fixture detail worth recording, because it measured the opposite case: a nudge of 1e-8 on a
+value of 1.0 rounds straight back to 1.0 -- the float epsilon there is 1.19e-7 -- so the test was
+comparing identical bytes and reporting `identical` for what should have been `valueUnchanged`.
+The smallest nudge that changes the bits at all is 1e-7, and the test says so.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It

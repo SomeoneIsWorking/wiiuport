@@ -204,6 +204,66 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
                       "as under-sampling");
     }
 
+    // **Bytes that differ and a position that did not move is its own answer.** This is the
+    // bitwise fault the node scan had, at vertex level: one real run reported 13,780 differing
+    // bytes beside a largest component delta of 1.19e-07 and called it a blend. That is a
+    // difference in the low mantissa bits, not a pose. Kept apart from `identical` -- the bytes
+    // really did differ and a reader needs to know that -- and apart from `blendable`.
+    {
+        ObjectIdentityScope scope;
+        std::atomic<uint64_t> frame{1};
+        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        scope.bind(0x43e00000u);
+        history.onDrawRecorded(aMeshDraw(aMeshAt(1.0f)));
+        frame.store(2);
+        Mesh nudged = aMeshAt(1.0f);
+        // One part in 10^7 of a unit -- the float epsilon at 1.0 is 1.19e-7, so this is the
+        // SMALLEST nudge that changes the bits at all. A tenth of that rounds straight back to
+        // 1.0f and the test would have measured identical bytes rather than an unmoved
+        // position, which is the opposite case.
+        nudged.positions[0] += 1e-7f;
+        history.onDrawRecorded(aMeshDraw(nudged));
+        const std::string body = history.json();
+        check::isTrue(field(body, "valueUnchanged") == "1" && field(body, "blendable") == "0",
+                      "a shape whose bytes differ but whose values agree is valueUnchanged, and "
+                      "is not a blend: " +
+                          body);
+        check::isTrue(field(body, "differingBytes") != "0",
+                      "with the differing bytes still reported, because they did differ and a "
+                      "reader is entitled to that fact");
+        check::isTrue(field(body, "positionMotion") != "",
+                      "and the threshold that separates the two is a number in the report, so "
+                      "the boundary can be argued with rather than guessed at");
+    }
+
+    // **The geometry beside a verdict is the geometry of the shape that verdict is about.** One
+    // run showed 1040 vertices beside a verdict about a different shape, and 13,780 differing
+    // bytes against a total of 12,480 -- only possible if the two numbers came from different
+    // shapes. So a node with a moving 4-vertex shape and a still 1000-vertex shape reports the
+    // 4-vertex geometry, because that is the shape the verdict came from.
+    {
+        wiiuport::title::ObjectIdentityScope scope;
+        std::atomic<uint64_t> frame{1};
+        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        scope.bind(0x43e00000u);
+        Mesh small = aMeshAt(0.0f);
+        Mesh large = aMeshAt(0.0f);
+        large.positions.resize(1000 * 3, 7.0f);
+        for (int tick = 0; tick < 2; tick++) {
+            frame.store(static_cast<uint64_t>(tick) + 1);
+            small.positions[0] = 0.5f * static_cast<float>(tick);
+            history.onDrawRecorded(aMeshDraw(small));
+            history.onDrawRecorded(aMeshDraw(large));
+        }
+        const std::string body = history.json();
+        check::isTrue(field(body, "vertices") == "4" && field(body, "stride") == "12",
+                      "the moving four-vertex shape's geometry, not the still thousand-vertex "
+                      "one's: " +
+                          body);
+        check::isTrue(field(body, "positionBytes") == "48",
+                      "and its byte length, so the two cannot come from different shapes");
+    }
+
     // **A magnitude beyond any scene is a signal, not a result.** The first real run of this
     // reported component deltas of 1.06e+38 and called them movement. That is what bytes that
     // are not a position at that offset look like when read as a float -- the attribute was
