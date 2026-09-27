@@ -896,6 +896,48 @@ comparisons -- so the uniform-buffer negative is the *strict* bar's, and the loo
 not yet a measurement. The comment on `identityOf` now says so where the next reader will find
 it.
 
+### Identity is the node, and the address the fork's record called one is not
+
+The identity the whole uniform-buffer question rests on was measured and did not hold.
+`RecordedUniformAssembly::blockSources` -- "the guest addresses of the uniform blocks this
+draw sourced" -- was documented in the fork's own header as "the engine's own storage for the
+object, and the only identity a recorded draw carries". Over 836,990 assembled buffers it
+matched exactly **one** identity across the 438,872 that had sources. The uniform block is
+re-uploaded at a new guest address each frame, so the set of addresses is nearly unique per
+draw and the same object's assemblies never meet. Every "did this value change between two
+draws of one object" comparison in `ObjectPoseLocator` therefore happened 63 times, and one
+movement in 63 is not a measurement of a quarter of a million assemblies. The comment is
+corrected in place: the field is kept, because it is what the draw actually read, and is no
+longer called an identity.
+
+**The node is one step from both ends and in neither.** The GX2 hook cannot see it; the binder
+can, because the draw calls its sub-object at `node + 0xa1c` and the probe there already fires
+137,489 times a run. So `ObjectIdentityScope` is a single published slot: the census writes it
+on the way into its scan, `RecordingObserver` reads it once per assembly, and
+`RecordedUniformAssembly` gains `objectAddress`. The node is never passed between the two --
+the binder and the GX2 hook are different call sites, and the slot is the whole of the join.
+
+**A single slot is a limitation and its error rate is reported.** `bindsSinceLastQuery` is how
+many writes the slot was standing for when it was read. One is the answer for a correct
+correlation: the binding these assemblies belong to. Above one, something else bound in
+between and the identity read is another object's -- which is worse than a missing one, so the
+count is in the report and a run where it is large says so rather than being believed. The
+census carries the scope's coverage and error rate in its own report, because a correlation
+whose error rate is not beside its results is one that gets believed.
+
+Two report defects, both in the field added to make the denominator visible. `identitiesSeen`
+was `m_seen.size()`, which is one entry per *(identity, offset)* pair -- a field named for
+identities carrying pairs, and precisely the number a reader divides the movement counts by.
+It now counts distinct identities, with `trackedPairs` beside it. And the scope kept the
+binds-since-last-read count and the answer in one field, so the report read the value *after*
+the reset: always zero, which looks like a good result and is the absence of a measurement.
+Two fields now, one in progress and one the answer.
+
+Verified by mutation rather than by argument: keying the identity on the block source again
+fails three checks. Ten assemblies of one object with ten *different* block addresses give nine
+comparisons and nine movements under the node, and no comparisons at all under the address --
+which is the whole of what the node buys, and the number the earlier run could not produce.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It
