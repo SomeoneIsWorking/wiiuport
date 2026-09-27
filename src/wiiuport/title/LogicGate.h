@@ -72,7 +72,16 @@ class LogicGate {
     //
     // And the ticks counter used to be incremented on the *skipped* path, so the
     // count the report calls ticks counted the calls that did not run.
+    //
+    // `kBranchWord` is separate from `kThroughWord` on purpose. The through path
+    // starts at `kThroughWord` and ends in a branch at `kBranchWord`, and a
+    // displacement is measured from the word it stands in: measured from the
+    // start of the path instead, it lands twenty bytes past the tick's second
+    // instruction, which hangs the title with the gate armed and reads as a
+    // title that has stopped. The two were one constant when the through path was
+    // a single word, and one is not one when it is six.
     static constexpr size_t kThroughWord = 8;
+    static constexpr size_t kBranchWord = 13;
     static constexpr size_t kGateWords = 14;
     // The code block holds only the sixteen instructions; the two counters the
     // guest writes are in a block of their own, in memory it may write.

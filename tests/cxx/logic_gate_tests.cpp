@@ -156,6 +156,7 @@ void wiiuport::tests::runLogicGateTests() {
         const uint32_t calls = kCounters + 4 * LogicGate::kCallsWord;
         const uint32_t ticks = kCounters + 4 * LogicGate::kTicksWord;
         const uint32_t through = kBlock + 4 * LogicGate::kThroughWord;
+        const uint32_t branchAt = kBlock + 4 * LogicGate::kBranchWord;
         // Every word below is written as opcode, then source in bits 21-25, then
         // destination in bits 16-20, then the immediate -- the order the
         // encodings actually have. The two that were got wrong first time are
@@ -175,8 +176,36 @@ void wiiuport::tests::runLogicGateTests() {
                       "storing it back: stw r4,0(r3)");
         check::isTrue(words[5] == (0x70000000u | (4u << 21) | (4u << 16) | 1u),
                       "and testing one bit of it: andi. r4,r4,1");
-        check::isTrue(words[6] == (0x40800000u | ((through - (kBlock + 4 * 6)) & 0xfffc)),
-                      "an odd call branches over the tick");
+        // The conditional branch is checked by its BO and BI fields, not by
+        // comparing against the constant the code uses. A conditional branch is
+        // one opcode with its condition in those two fields, and an expectation
+        // that reuses the code's own constant cannot catch the constant being
+        // wrong -- which is how `bne` sat here as 0x40800000 (BO=4, BI=0) while
+        // the comment beside it named 0x40820014 as the instruction it came from.
+        // BO=4 branches when the bit BI names is false, and `andi.` sets BI=2
+        // (bit 2, "not equal") when its result is not zero; so `bne` is BO=4 BI=2,
+        // and the title's own `bne` at 0x025d4398, 0x025d4678, 0x025d46a4 and
+        // 0x0274c964 all carry 0x4082....
+        {
+            const uint32_t branch = words[6];
+            const uint32_t opcode = branch >> 26;
+            const uint32_t bo = (branch >> 21) & 0x1fu;
+            const uint32_t bi = (branch >> 16) & 0x1fu;
+            const uint32_t absolute = (branch >> 11) & 1u;
+            const uint32_t link = branch & 1u;
+            check::isTrue(opcode == 16u, "the branch that skips is a conditional branch, opcode 16");
+            check::isTrue(bo == 4u, "with BO=4, which branches when the bit BI names is false");
+            check::isTrue(bi == 2u,
+                          "and BI=2, the bit `andi.` sets when its result is not zero -- which is "
+                          "what makes this bne and not the branch over the same displacement that "
+                          "BI=0 gives");
+            check::isTrue(absolute == 0u && link == 0u,
+                          "and neither its absolute bit nor its link bit is set, so the "
+                          "displacement is relative and the link register is the caller's");
+            check::isTrue(branch == (0x40820000u | ((through - (kBlock + 4 * 6)) & 0xfffc)),
+                          "and the word is the title's own bne with the displacement to the through "
+                          "path, which is 0x4082....");
+        }
         // A skipped call returns with the link register as the caller left it:
         // the gate has not touched r0 or r1 on this path.
         check::isTrue(words[7] == 0x4e800020, "and a skipped call returns: blr");
@@ -203,9 +232,24 @@ void wiiuport::tests::runLogicGateTests() {
         // title: the tick's epilogue returns through the link register its second
         // instruction saved into the caller's frame, so a tick that skipped the
         // store returns through a register nobody saved.
-        check::isTrue(words[13] == (18u << 26) | ((LogicGate::kTickBody - through) & 0x03fffffcu),
+        check::isTrue(words[13] == (18u << 26) | ((LogicGate::kTickBody - branchAt) & 0x03fffffcu),
                       "and a call it lets through continues at the tick's own second instruction, "
                       "0x025d42f0, with the title running every instruction after it");
+        // The displacement is measured from the word the branch stands in, which
+        // is not where the through path starts. An earlier layout had the two as
+        // one constant; with the through path six words long they are two, and
+        // measuring from the start of the path lands 20 bytes past the tick's
+        // second instruction -- which hangs the title and reads as a title that
+        // has stopped. The expectation here is built from the branch's own index
+        // rather than from `through`, because an expectation that reuses the
+        // code's own expression cannot catch the code being wrong about it.
+        check::isTrue(LogicGate::kBranchWord == 13, "the branch stands at word thirteen");
+        check::isTrue(LogicGate::kThroughWord < LogicGate::kBranchWord,
+                      "and the through path starts before it, so the path is what the branch ends");
+        const uint32_t landed = branchAt + ((words[13] & 0x03fffffcu));
+        check::isTrue(landed == LogicGate::kTickBody,
+                      "read back the way the guest would, the branch lands on the tick's own "
+                      "second instruction and nowhere else");
     }
     // The pass-through control has to reach the same instruction the gate's own
     // through path does. The indirect flavour used to load the *block's* address,
