@@ -42,6 +42,42 @@ constexpr uint32_t kLoadOne = 0x38600001; // li r3,1          from 0x025f094c
 // encoding that is wrong looks like, and a payload word nobody checked has already cost a run.
 constexpr uint32_t kRestoreDisplay = 0x7fc3f378; // or r3,r30,r30   from 0x0274c294
 
+// The display's own per-pass flag, read and written by the frame itself.
+//
+// `lwz r0, 0x74(r30)` is the frame's second instruction after its entry work, at 0x0274c2c4, and
+// `stw r0, 0x74(r30)` is at 0x0274c38c. **The two words that bracket the paint are the frame's own,
+// verbatim, with the same base register it uses** -- which is why this payload needs no word of its
+// own anywhere.
+//
+// The field is not the flip counter the objective's note guesses. It is what the frame *branches*
+// on at entry, and it gates two calls:
+//
+//     0x0274c2c4  lwz   r0,0x74(r30)
+//     0x0274c2cc  rlwinm. r12,r0,0x0,0x1f,0x1f      <- bit 0
+//     0x0274c2d4  beq   0x0274c2e4
+//     0x0274c2d8  rlwinm. r0,r0,0x1f,0x1f,0x1f      <- bit 31
+//     0x0274c2dc  beq   0x0274c2e4
+//     0x0274c2e0  li    r31,0
+//     ...
+//     0x0274c2fc  cmpwi r31,0
+//     0x0274c300  beq   0x0274c320                   <- skips what follows
+//     0x0274c304  lwz   r10,0x24(r30)
+//     0x0274c308  lwz   r0,0xec(r10)
+//     0x0274c30c  mtspr CTR,r0
+//     0x0274c310  or    r3,r30,r30
+//     0x0274c314  bctrl
+//     0x0274c318  or    r3,r30,r30
+//     0x0274c31c  bl    0x0274c038
+//     ...
+//     0x0274c38c  stw   r0,0x74(r30)                  <- and the frame writes it
+//
+// `r31` is zero exactly when bits 0 and 31 are both set, and the block above is skipped exactly
+// then. So a paint that leaves those bits set sends the *next* paint down a different path from the
+// one it took -- which is the second paint's near-null dereference, and why no amount of restoring
+// the display pointer helped.
+constexpr uint32_t kReadDisplayPhase = 0x801e0074;  // lwz  r0,0x74(r30)  from 0x0274c2c4
+constexpr uint32_t kWriteDisplayPhase = 0x901e0074; // stw  r0,0x74(r30)  from 0x0274c38c
+
 // The most words any stand-in is: the swap-interval call, two loop bodies, and
 // the branch back. The block is reserved once, at startup, for this many.
 // The most words any stand-in is: the seven of the one-vblank form, one more
@@ -170,6 +206,8 @@ std::string_view WindWakerPaint::modeName(Mode mode) {
         return "tailTwiceAtSixty";
     case Mode::RestoreDisplayTwice:
         return "restoreDisplayTwice";
+    case Mode::SamePhaseTwice:
+        return "samePhaseTwice";
     }
     return "unknown";
 }
@@ -194,6 +232,8 @@ std::optional<WindWakerPaint::Mode> WindWakerPaint::modeFrom(long long number) {
         return Mode::TailTwiceAtSixty;
     case 9:
         return Mode::RestoreDisplayTwice;
+    case 10:
+        return Mode::SamePhaseTwice;
     default:
         return std::nullopt;
     }
@@ -259,7 +299,25 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
     // word between the two calls is the fix, and a step list that appended a third paint would
     // undo the finding it exists to test.
     std::vector<Step> steps;
-    if (mode == Mode::RestoreDisplayTwice) {
+    if (mode == Mode::SamePhaseTwice) {
+        // Save the display's per-pass flag, paint, put it back, paint again.
+        //
+        // **Every word here is the frame's own, verbatim.** The load is 0x0274c2c4 and the store is
+        // 0x0274c38c, both `r30`-based exactly as the frame writes them, and the two calls are the
+        // same shape the other two-paint modes use. So this payload introduces no word of its own
+        // -- which is the property that has mattered all session, since a derived word is a word
+        // nobody checked and one has already cost a run.
+        //
+        // What it does is make the second paint take the *same* path as the first. The frame
+        // branches on bits 0 and 31 of this field at entry and skips a virtual call and a call to
+        // 0x0274c038 when both are set, and then writes the field; without putting it back, the
+        // second paint runs a path the first one did not, and that path is what dereferences guest
+        // address 0x198.
+        steps.push_back({false, 0, kReadDisplayPhase});
+        steps.push_back({true, kDisplayFrame});
+        steps.push_back({false, 0, kWriteDisplayPhase});
+        steps.push_back({true, kDisplayFrame});
+    } else if (mode == Mode::RestoreDisplayTwice) {
         // **No `li r3,1` and no setter call.** The frame's second instruction is `or r30, r3, r3`,
         // so it takes the display pointer into `r30` and dereferences *`r30`* for everything while
         // treating `r3` as a scratch register -- `display+0x74` is `lwz r0, 0x74(r30)`. Putting a
