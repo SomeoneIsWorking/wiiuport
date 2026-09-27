@@ -688,19 +688,8 @@ WindWakerPaint::DisplayFacts WindWakerPaint::displayFacts() const {
     }
     (void)m_readWord(facts.display + kVTableOffset, facts.vtable);
 
-    struct Field {
-        uint32_t offset;
-        const char* name;
-    };
-
-    static constexpr Field kFields[] = {
-        {kPhaseOffset, "phase"},
-        {kIntervalOffset, "interval"},
-        {kFlagsOffset, "flags"},
-        {kCounterOffset, "counter"},
-    };
     JsonBody fields;
-    for (const Field& field : kFields) {
+    for (const DisplayField& field : kDisplayFields) {
         uint32_t value = 0;
         if (!m_readWord(facts.display + field.offset, value)) {
             continue;

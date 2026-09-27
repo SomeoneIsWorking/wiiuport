@@ -41,10 +41,16 @@ Key keyOf(const DrawAttributeCensus::Signature& signature) {
             signature.buffer,     signature.offset, signature.stride};
 }
 
-const char* hexValue(uint32_t value) {
-    static thread_local std::array<char, 11> text{};
+// `0x%08x` into a buffer that outlives the call, without a function-local static.
+//
+// A `static thread_local` array is what this used to be, and the ownership rule is right to refuse
+// it: it is storage the reader cannot see the lifetime of, and `hexValue` hands out a pointer into
+// it. The scope owns it instead -- the buffer exists exactly as long as the `HexValue` this returns
+// does, which is the only lifetime a caller can reason about.
+std::string hexValue(uint32_t value) {
+    std::array<char, 11> text{};
     std::snprintf(text.data(), text.size(), "0x%08x", value);
-    return text.data();
+    return std::string(text.data());
 }
 
 } // namespace
