@@ -161,6 +161,36 @@ void wiiuport::tests::runUniformBlockRingTests() {
                       "read as a fact about the title");
     }
 
+    // **The two halves of a binding are not both usable, and the report says which.** The
+    // census reads two words from a descriptor entry: the one at +0x0c is the block's SIZE --
+    // 0x40, which is 64 bytes, for every object on the real title -- and the one at +0x04 is a
+    // *relative* offset, because the census's own `blockOf` says so and says that reading it as
+    // a length once asked the product for a gigabyte. The base has not been identified, so a
+    // relative offset read as a guest address is a wrong answer rather than a missing one, and
+    // the ring records the size and refuses the address.
+    {
+        g_blocks = new std::map<uint32_t, std::vector<uint32_t>>();
+        g_frame = 1;
+        UniformBlockRing ring(&readWords, &now);
+        ring.bindSize(1, 0x40);
+        const std::string body = ring.json();
+        check::isTrue(field(body, "sizesKnown") == "1" && field(body, "addressesKnown") == "0",
+                      "a size is known and no address is, because the title's address word is a "
+                      "relative offset whose base this has not identified: " +
+                          body);
+        check::isTrue(body.find("\"blockSizes\":") != std::string::npos &&
+                          body.find(":64") != std::string::npos,
+                      "and the 64 bytes are recorded, which is the one half of the descriptor "
+                      "entry that is usable without a base: " +
+                          body);
+        check::isTrue(body.find("\"addressState\":") != std::string::npos,
+                      "with the address's state named, so a reader is not left to infer that the "
+                      "re-read half is missing");
+        check::isTrue(field(body, "pairsCompared") == "0",
+                      "and no comparison claimed, because a re-read needs an address this does "
+                      "not have");
+    }
+
     // A block past the bound is counted and not hashed: a hash of a megabyte per binding is a
     // census that costs more than the frame it watches.
     {
