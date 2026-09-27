@@ -99,6 +99,7 @@ void Runtime::installHooks() {
     m_particleProbe.install();
     m_environmentProbe.install();
     m_lineProbe.install();
+    m_nodePose.install();
     m_paint.install();
     m_blocks.install();
     m_logic.install();

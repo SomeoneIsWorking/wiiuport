@@ -32,6 +32,7 @@
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
 #include "wiiuport/title/LogicGate.h"
+#include "wiiuport/title/NodePoseLocator.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
@@ -132,6 +133,9 @@ class Runtime {
     // Where in an assembled uniform buffer the pose is, found by shape. Registered
     // before the blends so its counts are the same draws they see.
     title::ObjectPoseLocator m_poseLocator;
+    // Which field of a node holds its pose. Registered first of the three, because it is
+    // the one two measurements point at.
+    title::NodePoseLocator m_nodePose{&GuestCallProbes::Register, &GuestPatching::ReadWords};
     interp::ObjectBlend m_objectBlend{interp::ContinuousInterpolator::kBlendPoint};
     interp::ReplayBlend m_replayBlend{m_objectBlend, m_substitution};
     guest::BufferWriters m_writers;
@@ -143,7 +147,7 @@ class Runtime {
                              &GuestPatching::AllocateData, &GuestPatching::WriteWord,
                              &GuestPatching::ReadWord};
     title::UniformBlockCensus m_blocks{&GuestCallProbes::Register, &GuestPatching::ReadWord,
-                                       &GuestPatching::ReadWords, &m_poseLocator};
+                                       &GuestPatching::ReadWords, &m_poseLocator, &m_nodePose};
     title::WindWakerPaint m_paint{&GuestCallProbes::Register,      &GuestPatching::AllocateCode,
                                   &GuestPatching::WriteWord,       &GuestPatching::ReadWord,
                                   &GuestPatching::SetSwapInterval, &GuestPatching::SwapInterval};

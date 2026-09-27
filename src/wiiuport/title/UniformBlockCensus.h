@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Cafe/HW/Espresso/GuestCallProbes.h"
+#include "wiiuport/title/NodePoseLocator.h"
 #include "wiiuport/title/ObjectPoseHistory.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
 
@@ -96,7 +97,8 @@ class UniformBlockCensus {
     // one and there is no reason it should have to be.
     UniformBlockCensus(Register registerProbe, ReadWord readWord,
                        ObjectPoseHistory::ReadWords readWords,
-                       const ObjectPoseLocator* locator = nullptr);
+                       const ObjectPoseLocator* locator = nullptr,
+                       const NodePoseLocator* nodes = nullptr);
 
     // Registers both binder probes, before the title is linked.
     void install();
@@ -200,6 +202,7 @@ class UniformBlockCensus {
     ReadWord m_readWord;
     ObjectPoseHistory m_poseHistory;
     const ObjectPoseLocator* m_locator = nullptr;
+    const NodePoseLocator* m_nodes = nullptr;
     Binder m_first{*this, false};
     Binder m_second{*this, true};
     std::atomic<uint64_t> m_bindings{0};

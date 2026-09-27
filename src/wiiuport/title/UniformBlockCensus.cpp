@@ -37,9 +37,10 @@ std::string_view installationName(std::optional<GuestCallProbes::Installation> v
 
 UniformBlockCensus::UniformBlockCensus(Register registerProbe, ReadWord readWord,
                                        ObjectPoseHistory::ReadWords readWords,
-                                       const ObjectPoseLocator* locator)
-    : m_register(registerProbe), m_readWord(readWord), m_poseHistory(readWords),
-      m_locator(locator) {
+                                       const ObjectPoseLocator* locator,
+                                       const NodePoseLocator* nodes)
+    : m_register(registerProbe), m_readWord(readWord), m_poseHistory(readWords), m_locator(locator),
+      m_nodes(nodes) {
 }
 
 void UniformBlockCensus::install() {
@@ -277,6 +278,14 @@ std::string UniformBlockCensus::json() const {
         body.raw("poseLocator", "null");
     } else {
         body.object("poseLocator", m_locator->json());
+    }
+    // And the third place, which is where two measurements in a row say the pose is: the
+    // node's own memory, at the node's own draw. Null when there is no locator, rather than
+    // a member that is absent and reads as a route with nothing to say.
+    if (m_nodes == nullptr) {
+        body.raw("nodePose", "null");
+    } else {
+        body.object("nodePose", m_nodes->json());
     }
     if (!m_refusal.empty()) {
         body.string("refusal", m_refusal);

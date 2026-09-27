@@ -15,6 +15,7 @@ void runBlockCensusTests();
 void runLogicGateTests();
 void runObjectPoseHistoryTests();
 void runObjectPoseLocatorTests();
+void runNodePoseLocatorTests();
 void runReplayTests();
 void runSearchTests();
 void runInputTests();
