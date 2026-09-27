@@ -77,6 +77,8 @@ add_library(wiiuport STATIC
   title/ObjectPoseHistory.h
   title/NodePoseLocator.cpp
   title/NodePoseLocator.h
+  title/TransformShape.cpp
+  title/TransformShape.h
   title/ObjectPoseLocator.cpp
   title/ObjectPoseLocator.h
   title/UniformBlockCensus.cpp

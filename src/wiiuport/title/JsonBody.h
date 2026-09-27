@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <string>
 
 namespace wiiuport::title {
@@ -21,6 +24,29 @@ namespace wiiuport::title {
 // is going to be wrong should say so at its own call site.
 class JsonBody {
   public:
+    // A measured value as a JSON number, and the one way to write one.
+    //
+    // Nine significant digits, not six fixed decimals: a difference of one part in 10^40
+    // prints as zero under %.6f, and a reader told "moved 18, biggest delta 0.000000" has no
+    // way to tell a bit of noise from a value that was never computed.
+    //
+    // **And never `inf` or `nan`, because a client parses this.** Guest memory holds denormals
+    // and values large enough to overflow, and a numeric formatter writes those as `inf` and
+    // `nan`, which JSON does not allow; one of them made a whole report unparseable and the
+    // run reported it as an I/O failure. A non-finite measurement is a fact about memory, not
+    // a number, so it is written as a quoted string and the reader is told.
+    //
+    // This was two copies of a formatter with two precisions, one of which could emit `inf`,
+    // in two locators that read the same kind of thing.
+    static std::string real(double value, int significant = 9) {
+        if (!std::isfinite(value)) {
+            return value > 0.0 ? "\"inf\"" : (value < 0.0 ? "\"-inf\"" : "\"nan\"");
+        }
+        char text[40];
+        std::snprintf(text, sizeof(text), "%.*g", significant, value);
+        return {text};
+    }
+
     // A value that brings its own form: true, false, a number, a nested object.
     void raw(const char* name, const std::string& value) {
         separate();

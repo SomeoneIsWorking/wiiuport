@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Cafe/HW/Espresso/GuestCallProbes.h"
+#include "wiiuport/title/TransformShape.h"
 
 #include <array>
 #include <atomic>
@@ -78,21 +79,14 @@ class NodePoseLocator {
     // `addi r3,r28,0xa1c` immediately before the call into it.
     static constexpr uint32_t kSubObjectOffset = 0xa1c;
 
-    static constexpr float kUnitTolerance = 0.01f;
-    static constexpr float kPerpendicularTolerance = 0.01f;
-    static constexpr size_t kPoseWords = 12;
-    // **What counts as movement, and why it is not a bitwise test.** The first run of this
-    // reported `moved 18` beside `biggest delta 0.000000`: the values differed in the last
-    // mantissa bit and in no way a pose moves, so a bitwise test named a static basis matrix
-    // at three offsets 1020 bytes apart. A pose is a value that changes *between two draws of
-    // the same object*, which are a frame apart, so a change smaller than a thousandth of a
-    // unit is not one. The bar is stated rather than tuned: it is the first number here that
-    // a reader could reasonably want to argue with, so it is the one that says what it is.
-    static constexpr float kMotionEpsilon = 1e-3f;
-    // How non-singular a 3x3 has to be to count as a transform at all. Without a floor, a
-    // plane of near-zero numbers reads as a matrix and the loose bar finds one at every
-    // offset, which is a bar that cannot fail.
-    static constexpr double kDeterminantFloor = 1e-6;
+    // The tolerances and the two classes live in one place, `TransformShape`, because the
+    // other locator asking the same question -- over the uniform buffer the title assembles
+    // for a named node's draw -- has to classify a 3x4 the same way or a negative means
+    // nothing. A `using`, not a second set of constants: two copies of a rule is a rule with
+    // two futures, and these two already disagreed once.
+    using Shape = TransformShape;
+    static constexpr size_t kPoseWords = Shape::kWords;
+
     // **How much of each is read, and why the two windows are disjoint.** The sub-object is
     // a field *of* the node, at `+0xa1c`, so a 4 KiB window from the node's base covers the
     // sub-object's first 1508 bytes as well -- and a pose in the sub-object then shows up in
@@ -230,21 +224,6 @@ class NodePoseLocator {
         NodePoseLocator& m_owner;
     };
 
-    // A rigid transform: three unit rows, pairwise perpendicular. This is the strict class,
-    // and it is what the objective's "rigid 3x4" asks for.
-    static bool isPose(const float* words);
-    // **The looser class, and why it is needed to choose between two answers.** A rigid test
-    // cannot tell "the node has no transform here" from "the node's transform carries scale",
-    // and those point at different places: an absent local transform means the transform a
-    // renderer multiplies is the *world* matrix, the product of the node's place in the graph
-    // with its parents', and it has to be looked for on the parent. A scaled one means the
-    // field is here and the parent chain is needed only to compose with it. So an offset is
-    // also counted when its 3x3 is merely non-singular, and the scale actually measured is
-    // reported -- a transform with unit rows and one with rows of length 2.5 are different
-    // answers wearing the same shape.
-    static bool isAffine(const float* words);
-    // The largest deviation of a row's length from 1, as a scale to report.
-    static float scaleOf(const float* words);
     // Scans one object's memory and folds what it finds into that object's candidates.
     // The window is the kind's own, so a node and its sub-object are read over disjoint
     // ranges and one field cannot be reported as two.

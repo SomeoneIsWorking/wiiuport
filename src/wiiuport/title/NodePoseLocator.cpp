@@ -1,6 +1,7 @@
 #include "wiiuport/title/NodePoseLocator.h"
 
 #include "wiiuport/title/JsonBody.h"
+#include "wiiuport/title/TransformShape.h"
 
 #include <algorithm>
 #include <array>
@@ -12,26 +13,6 @@
 namespace wiiuport::title {
 
 namespace {
-
-// Nine significant digits, not six fixed decimals: a difference of one part in 10^40 prints
-// as zero under %.6f, and a reader told "moved 18, biggest delta 0.000000" has no way to
-// tell a bit of noise from a value that was never computed.
-//
-// **And never `inf` or `nan`, because the client parses this.** The loose class admits any
-// non-singular 3x3, which includes rows long enough to overflow a float to infinity and rows
-// of denormals whose determinant underflows to zero; %.9g writes those as `inf` and `nan`,
-// which JSON does not allow, and one of them made the whole report unparseable -- `GET
-// /blocks` answered with something no client could read, and the run said so as an I/O
-// failure rather than as what it was. A non-finite value is a fact about the guest's
-// memory, not a number, so it is written as a quoted string and the reader is told.
-std::string number(float value) {
-    if (!std::isfinite(value)) {
-        return value > 0.0f ? "\"inf\"" : (value < 0.0f ? "\"-inf\"" : "\"nan\"");
-    }
-    char text[32];
-    std::snprintf(text, sizeof(text), "%.9g", static_cast<double>(value));
-    return {text};
-}
 
 std::string hexValue(uint32_t value) {
     std::array<char, 11> text{};
@@ -86,29 +67,6 @@ void NodePoseLocator::observe(uint32_t address, Kind kind) {
     scan(address, kind);
 }
 
-bool NodePoseLocator::isPose(const float* words) {
-    for (size_t row = 0; row < 3; row++) {
-        const float x = words[row * 3 + 0];
-        const float y = words[row * 3 + 1];
-        const float z = words[row * 3 + 2];
-        if (std::fabs(std::sqrt(x * x + y * y + z * z) - 1.0f) > kUnitTolerance) {
-            return false;
-        }
-    }
-    for (size_t first = 0; first < 3; first++) {
-        for (size_t second = first + 1; second < 3; second++) {
-            float dot = 0.0f;
-            for (size_t column = 0; column < 3; column++) {
-                dot += words[first * 3 + column] * words[second * 3 + column];
-            }
-            if (std::fabs(dot) > kPerpendicularTolerance) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 bool NodePoseLocator::claimLocked(uint32_t address, Kind kind, uint64_t frame) {
     auto known =
         std::find_if(m_tracked.begin(), m_tracked.end(), [address, kind](const Tracked& one) {
@@ -141,34 +99,6 @@ uint32_t NodePoseLocator::windowWords(Kind kind) {
     return kind == Kind::Node ? kNodeScanWords : kScanWords;
 }
 
-bool NodePoseLocator::isAffine(const float* words) {
-    // Non-singular, and not a plane dressed up as one: a determinant of a millionth is a
-    // degenerate triple that would otherwise read as a transform.
-    const double a = words[0];
-    const double b = words[1];
-    const double c = words[2];
-    const double d = words[3];
-    const double e = words[4];
-    const double f = words[5];
-    const double g = words[6];
-    const double h = words[7];
-    const double i = words[8];
-    const double determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
-    return std::fabs(determinant) > kDeterminantFloor;
-}
-
-float NodePoseLocator::scaleOf(const float* words) {
-    float worst = 0.0f;
-    for (size_t row = 0; row < 3; row++) {
-        const float x = words[row * 3 + 0];
-        const float y = words[row * 3 + 1];
-        const float z = words[row * 3 + 2];
-        const float length = std::sqrt(x * x + y * y + z * z);
-        worst = std::max(worst, std::fabs(length - 1.0f));
-    }
-    return worst;
-}
-
 void NodePoseLocator::scan(uint32_t address, Kind kind) {
     if (address == 0) {
         return;
@@ -193,7 +123,7 @@ void NodePoseLocator::scan(uint32_t address, Kind kind) {
     // walks in floats and the report names bytes.
     std::vector<std::pair<uint32_t, size_t>> found;
     for (size_t offset = 0; offset + kPoseWords <= words.size(); offset++) {
-        if (isAffine(words.data() + offset)) {
+        if (Shape::isAffine(words.data() + offset)) {
             found.emplace_back(static_cast<uint32_t>(offset * sizeof(float)), offset);
         }
     }
@@ -222,7 +152,7 @@ void NodePoseLocator::scan(uint32_t address, Kind kind) {
             for (size_t word = 0; word < kPoseWords; word++) {
                 biggest = std::max(biggest, std::fabs(words[at + word] - known->last[word]));
             }
-            if (biggest > kMotionEpsilon) {
+            if (biggest > Shape::kMotionEpsilon) {
                 known->moved++;
             } else {
                 known->still++;
@@ -232,12 +162,12 @@ void NodePoseLocator::scan(uint32_t address, Kind kind) {
         known->held = true;
         known->scans++;
         known->affineScans++;
-        if (isPose(words.data() + at)) {
+        if (Shape::isRigid(words.data() + at)) {
             known->rigidScans++;
         } else {
             // The row lengths, reported, because "affine" and "rigid" differ only by scale
             // and a reader deciding where to look next needs to know whether it is there.
-            known->biggestScale = std::max(known->biggestScale, scaleOf(words.data() + at));
+            known->biggestScale = std::max(known->biggestScale, Shape::scaleOf(words.data() + at));
         }
         for (size_t word = 0; word < kPoseWords; word++) {
             known->last[word] = words[at + word];
@@ -421,12 +351,12 @@ std::string NodePoseLocator::tableFor(Kind kind, bool affine) const {
         one.number("compared", compared);
         one.number("moved", moved);
         one.number("still", still);
-        one.raw("biggestDelta", number(biggest));
+        one.raw("biggestDelta", JsonBody::real(static_cast<double>(biggest)));
         one.raw("moving", moved > 0 ? "true" : "false");
         // How far the rows are from unit length. Zero is a rigid transform, and a non-zero
         // one is the answer to "does this field carry scale", which the strict bar cannot
         // give because it will not count the field at all.
-        one.raw("scale", number(scale));
+        one.raw("scale", JsonBody::real(static_cast<double>(scale)));
         offsets.object(std::to_string(shown), one.text());
         shown++;
     }
@@ -483,8 +413,8 @@ std::string NodePoseLocator::json() const {
     body.number("nodeRegister", kNodeRegister);
     body.number("subObjectOffset", kSubObjectOffset);
     body.number("calls", m_calls.load());
-    body.raw("motionEpsilon", number(kMotionEpsilon));
-    body.raw("determinantFloor", number(kDeterminantFloor));
+    body.raw("motionEpsilon", JsonBody::real(static_cast<double>(Shape::kMotionEpsilon)));
+    body.raw("determinantFloor", JsonBody::real(static_cast<double>(Shape::kDeterminantFloor)));
     body.number("subObjectScanWords", kScanWords);
     body.number("nodeScanWords", kNodeScanWords);
     body.number("nodeScanBytes", kNodeScanWords * 4);

@@ -1,4 +1,5 @@
 #include "wiiuport/title/ObjectPoseLocator.h"
+#include "wiiuport/title/TransformShape.h"
 
 #include "wiiuport/title/JsonBody.h"
 
@@ -10,41 +11,11 @@
 
 namespace wiiuport::title {
 
-namespace {
-
-std::string number(float value) {
-    char text[32];
-    std::snprintf(text, sizeof(text), "%.6f", static_cast<double>(value));
-    return {text};
-}
-
-} // namespace
+namespace {} // namespace
 
 // Three unit rows, mutually perpendicular. Unit length and perpendicularity to a stated
 // tolerance is what makes twelve floats a transform; a colour triple can be near unit
 // length by chance and a matrix of ones has equal rows, so neither passes.
-bool ObjectPoseLocator::isPose(const float* words) {
-    for (size_t row = 0; row < 3; row++) {
-        const float x = words[row * 3 + 0];
-        const float y = words[row * 3 + 1];
-        const float z = words[row * 3 + 2];
-        if (std::fabs(std::sqrt(x * x + y * y + z * z) - 1.0f) > kUnitTolerance) {
-            return false;
-        }
-    }
-    for (size_t first = 0; first < 3; first++) {
-        for (size_t second = first + 1; second < 3; second++) {
-            float dot = 0.0f;
-            for (size_t column = 0; column < 3; column++) {
-                dot += words[first * 3 + column] * words[second * 3 + column];
-            }
-            if (std::fabs(dot) > kPerpendicularTolerance) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
 
 // The block sources as a string, so an identity is comparable without a comparator and a
 // report can name one. The sources are the guest addresses the draw read its uniforms
@@ -79,18 +50,18 @@ bool ObjectPoseLocator::remember(const std::string& identity, uint32_t offset, c
             return true;
         }
         known->compared++;
-        float biggest = 0.0f;
-        bool differing = false;
-        for (size_t word = 0; word < kPoseWords; word++) {
-            biggest = std::max(biggest, std::fabs(words[word] - entry.second.second[word]));
-            if (words[word] != entry.second.second[word]) {
-                differing = true;
-            }
-        }
-        if (differing) {
+        // A magnitude, and a movement bar, not a bitwise test. The node locator reported
+        // `moved 18` beside `biggest delta 0.000000` -- values differing in the last mantissa
+        // bit -- and named three static matrices that way. The delta is recorded either way
+        // here, because a delta that is only kept when it passes the bar cannot be looked at
+        // to work out why it did not.
+        const float biggest = Shape::deltaOf(entry.second.second.data(), words);
+        if (Shape::moved(entry.second.second.data(), words)) {
             known->moved++;
-            known->biggestDelta = std::max(known->biggestDelta, biggest);
+        } else {
+            known->still++;
         }
+        known->biggestDelta = std::max(known->biggestDelta, biggest);
         for (size_t word = 0; word < kPoseWords; word++) {
             entry.second.second[word] = words[word];
         }
@@ -133,10 +104,19 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
     // would either cap the scan below that or be sized for a guess.
     std::vector<Candidate> found;
     for (size_t offset = 0; offset + kPoseWords <= words; offset++) {
-        if (!isPose(assembly.data.data() + offset)) {
+        if (!Shape::isAffine(assembly.data.data() + offset)) {
             continue;
         }
-        found.push_back(Candidate{static_cast<uint32_t>(offset * sizeof(float)), 1, 0, 0, 0.0f, 0});
+        Candidate candidate;
+        candidate.offset = static_cast<uint32_t>(offset * sizeof(float));
+        candidate.assemblies = 1;
+        candidate.affineAssemblies = 1;
+        if (Shape::isRigid(assembly.data.data() + offset)) {
+            candidate.rigidAssemblies = 1;
+        } else {
+            candidate.biggestScale = Shape::scaleOf(assembly.data.data() + offset);
+        }
+        found.push_back(candidate);
     }
     if (found.empty()) {
         return;
@@ -154,6 +134,14 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
             known = m_candidates.end() - 1;
         } else {
             known->assemblies++;
+            known->affineAssemblies++;
+            if (Shape::isRigid(assembly.data.data() + candidate.offset / sizeof(float))) {
+                known->rigidAssemblies++;
+            } else {
+                known->biggestScale =
+                    std::max(known->biggestScale, Shape::scaleOf(assembly.data.data() +
+                                                                 candidate.offset / sizeof(float)));
+            }
         }
         // One unit throughout: the offset in bytes, as the candidates and the report keep
         // it, and the data indexed by it.
@@ -170,13 +158,36 @@ uint32_t ObjectPoseLocator::bestOffset() const {
     }
     const uint64_t needed = assemblies * kBeliefPercent / 100;
     uint32_t best = 0;
-    uint64_t bestSeen = 0;
+    uint64_t bestAssemblies = 0;
     for (const Candidate& candidate : m_candidates) {
-        if (candidate.assemblies < needed) {
+        if (candidate.rigidAssemblies < needed || candidate.moved == 0) {
             continue;
         }
-        if (candidate.assemblies > bestSeen) {
-            bestSeen = candidate.assemblies;
+        if (candidate.rigidAssemblies > bestAssemblies) {
+            bestAssemblies = candidate.rigidAssemblies;
+            best = candidate.offset;
+        }
+    }
+    return best;
+}
+
+// The same over the loose class, which is the one that can tell a scaled transform from
+// a basis matrix: the strict bar above says nothing for both.
+uint32_t ObjectPoseLocator::bestAffineOffset() const {
+    std::scoped_lock lock(m_mutex);
+    const uint64_t assemblies = m_assemblies.load();
+    if (assemblies == 0) {
+        return 0;
+    }
+    const uint64_t needed = assemblies * kBeliefPercent / 100;
+    uint32_t best = 0;
+    uint64_t bestAssemblies = 0;
+    for (const Candidate& candidate : m_candidates) {
+        if (candidate.affineAssemblies < needed || candidate.moved == 0) {
+            continue;
+        }
+        if (candidate.affineAssemblies > bestAssemblies) {
+            bestAssemblies = candidate.affineAssemblies;
             best = candidate.offset;
         }
     }
@@ -186,6 +197,10 @@ uint32_t ObjectPoseLocator::bestOffset() const {
 std::string ObjectPoseLocator::json() const {
     std::scoped_lock lock(m_mutex);
     JsonBody body;
+    // The same names this report has always used. A field renamed because the code around
+    // it moved is a field every existing reader silently loses, and a reader that gets no
+    // value where a count used to be cannot tell a rename from a measurement that stopped
+    // happening.
     const uint64_t assemblies = m_assemblies.load();
     body.number("assemblies", assemblies);
     body.number("beliefPercent", kBeliefPercent);
@@ -193,42 +208,93 @@ std::string ObjectPoseLocator::json() const {
     body.number("unscannedBuffers", m_unscanned);
     body.number("buffersWithoutSources", m_noSources);
     body.number("identitiesRefused", m_identitiesRefused);
+    // Every candidate offset the scan ever saw, in either class, so "no offset was named" is
+    // a statement about a set and not an absence.
     body.number("candidates", m_candidates.size());
-
-    // The believed offset, with the count that made it believed, and the number of
-    // distinct objects it was seen on -- a transform seen once, on one draw, is a
-    // coincidence until it is seen on many.
-    const uint64_t needed = assemblies * kBeliefPercent / 100;
-    std::vector<Candidate> believed;
-    for (const Candidate& candidate : m_candidates) {
-        if (candidate.assemblies >= needed) {
-            believed.push_back(candidate);
+    body.raw("motionEpsilon", JsonBody::real(static_cast<double>(Shape::kMotionEpsilon)));
+    body.raw("determinantFloor", JsonBody::real(static_cast<double>(Shape::kDeterminantFloor)));
+    // Two bars over two classes, and the answer to where to look next is which of them
+    // fired. `rigid` alone means the value is a pose; `affine` alone means it is a transform
+    // carrying scale, which the strict bar would never have counted; neither means the pose
+    // is not in the assembled buffers either. An offset is named only if it also cleared the
+    // assemblies bar *and* was seen to move -- a value that holds a shape in every assembly
+    // and never changes is a basis.
+    const uint64_t needed = m_assemblies.load() * kBeliefPercent / 100;
+    auto clears = [needed](uint64_t inClass) {
+        return inClass >= needed;
+    };
+    // Every offset that cleared the assemblies bar is listed, and each says whether it moved.
+    // Only the moving ones are named. Filtering the immovable ones out of the table leaves the
+    // most informative case -- a shape held in every assembly that never changes -- reported
+    // as an empty list, which is indistinguishable from a scan that found nothing at all. That
+    // emptiness is what the first version of this did, and it is the case a reader most needs
+    // the counts for.
+    auto tableFor = [this, &clears, needed](bool affine) {
+        auto inClass = [affine](const Candidate& candidate) {
+            return affine ? candidate.affineAssemblies : candidate.rigidAssemblies;
+        };
+        JsonBody table;
+        std::vector<Candidate> held;
+        size_t ever = 0;
+        for (const Candidate& candidate : m_candidates) {
+            if (inClass(candidate) > 0) {
+                ever++;
+            }
+            if (clears(inClass(candidate))) {
+                held.push_back(candidate);
+            }
         }
-    }
-    std::sort(believed.begin(), believed.end(), [](const Candidate& a, const Candidate& b) {
-        if (a.assemblies != b.assemblies) {
-            return a.assemblies > b.assemblies;
+        std::sort(held.begin(), held.end(), [&](const Candidate& a, const Candidate& b) {
+            const uint64_t left = inClass(a);
+            const uint64_t right = inClass(b);
+            if (left != right) {
+                return left > right;
+            }
+            return a.offset < b.offset;
+        });
+        size_t moving = 0;
+        std::string best = "null";
+        for (const Candidate& candidate : held) {
+            if (candidate.moved > 0) {
+                moving++;
+                if (best == "null") {
+                    // An integer, because a byte offset is a byte offset: as a float it reads
+                    // "64.0", and a caller that writes at it wants a number it can add.
+                    best = std::to_string(candidate.offset);
+                }
+            }
         }
-        return a.offset < b.offset;
-    });
-    body.number("believedOffsets", believed.size());
-    // An integer, because a byte offset is a byte offset: as a float it reads "64.0", and
-    // a caller that writes at it wants a number it can add.
-    body.raw("bestOffset", believed.empty() ? "null" : std::to_string(believed[0].offset));
+        // How many offsets were ever in this class at all, so "one offset was ever a rigid
+        // transform" is a statement about the class rather than about the whole scan. The
+        // loose class legitimately finds more, and a test asserting one candidate against the
+        // loose total would be asserting that the loose class fails.
+        table.number("candidates", ever);
+        table.number("heldOften", held.size());
+        table.number("believedOffsets", moving);
+        table.raw("beliefPercent", std::to_string(kBeliefPercent));
+        table.raw("assembliesNeeded", std::to_string(needed));
+        table.raw("bestOffset", best);
+        JsonBody entries;
+        for (size_t index = 0; index < held.size() && index < kExamples; index++) {
+            const Candidate& candidate = held[index];
+            JsonBody one;
+            one.number("offset", candidate.offset);
+            one.number("assemblies", inClass(candidate));
+            one.number("compared", candidate.compared);
+            one.number("moved", candidate.moved);
+            one.number("still", candidate.still);
+            one.raw("moving", candidate.moved > 0 ? "true" : "false");
+            one.raw("biggestDelta", JsonBody::real(static_cast<double>(candidate.biggestDelta)));
+            one.raw("scale", JsonBody::real(static_cast<double>(candidate.biggestScale)));
+            one.number("identities", candidate.identities);
+            entries.object(std::to_string(index), one.text());
+        }
+        table.object("offsets", entries.text());
+        return table.finish();
+    };
 
-    JsonBody offsets;
-    for (size_t index = 0; index < believed.size() && index < kExamples; index++) {
-        const Candidate& candidate = believed[index];
-        JsonBody one;
-        one.number("offset", candidate.offset);
-        one.number("assemblies", candidate.assemblies);
-        one.number("compared", candidate.compared);
-        one.number("moved", candidate.moved);
-        one.raw("biggestDelta", number(candidate.biggestDelta));
-        one.number("identities", candidate.identities);
-        offsets.object(std::to_string(index), one.text());
-    }
-    body.object("offsets", offsets.text());
+    body.object("rigid", tableFor(false));
+    body.object("affine", tableFor(true));
     return body.finish();
 }
 

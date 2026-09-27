@@ -1,6 +1,7 @@
 #pragma once
 
 #include "wiiuport/frame/RecordingObserver.h"
+#include "wiiuport/title/TransformShape.h"
 
 #include <array>
 #include <atomic>
@@ -40,12 +41,13 @@ namespace wiiuport::title {
 // never moves is a colour triple that happened to look like one.
 class ObjectPoseLocator : public frame::AssemblyRecordedListener {
   public:
-    // The tolerances, as in the pose history: loose enough for a matrix built in single
-    // precision through a chain of transforms, and stated so a number near the edge is a
-    // number somebody can argue with.
-    static constexpr float kUnitTolerance = 0.01f;
-    static constexpr float kPerpendicularTolerance = 0.01f;
-    static constexpr size_t kPoseWords = 12;
+    // The tolerances and the two classes live in `TransformShape`, shared with the locator
+    // that reads the node's own memory. Two copies of a classification is a classification
+    // with two futures, and these two already disagreed: this one only ever counted a
+    // *rigid* 3x4, so "no offset was a pose" here also covered every scaled one, and the
+    // scaled ones are the ones that would be a pose with a scale on it.
+    using Shape = TransformShape;
+    static constexpr size_t kPoseWords = Shape::kWords;
     // The most bytes of an assembled buffer the scan will consider. A buffer larger than
     // this is reported as unscanned rather than scanned in part, because a partial scan's
     // "no pose here" is about the part it looked at and not about the buffer.
@@ -61,9 +63,17 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
         uint32_t offset = 0;
         uint64_t assemblies = 0;   // assemblies holding a transform here
         uint64_t compared = 0;     // repeat assemblies of one identity
-        uint64_t moved = 0;        // of those, how many found the value changed
+        uint64_t moved = 0;        // of those, how many found the value moved
+        uint64_t still = 0;        // of those, how many found it did not
         float biggestDelta = 0.0f; // the largest single-float change seen
         uint64_t identities = 0;   // distinct block-source sets seen holding one here
+        // The two classes, counted apart. `affine` is the superset -- a non-singular 3x3 --
+        // and `rigid` the strict one. An offset can be affine in every assembly and rigid in
+        // none, and that difference is the answer to "is this a transform, or a rigid one".
+        uint64_t affineAssemblies = 0;
+        uint64_t rigidAssemblies = 0;
+        // How far the row lengths are from 1, as a deviation. Zero is rigid.
+        float biggestScale = 0.0f;
     };
 
     void onAssemblyRecorded(const frame::RecordedUniformAssembly& assembly) override;
@@ -78,12 +88,14 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     // real answer here: it means "no offset was a pose often enough to name", and the
     // report says which bar.
     uint32_t bestOffset() const;
+    // The same over the loose class: held in enough assemblies *and* seen to move. This is the
+    // one that can tell a scaled pose from a basis matrix, where the strict bar says nothing
+    // for both.
+    uint32_t bestAffineOffset() const;
     // The share of assemblies an offset must hold a transform in to be named.
     static constexpr uint32_t kBeliefPercent = 20;
 
   private:
-    // A rigid transform, tested.
-    static bool isPose(const float* words);
     // The identity of a draw's object: its block sources, as the fork hands them over.
     static std::string identityOf(const frame::RecordedUniformAssembly& assembly);
     // The last transform seen at an offset for one identity, so the next can be compared
