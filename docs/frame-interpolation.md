@@ -1077,6 +1077,59 @@ the recompiled code, still with the arena holding a run of the guest's own value
 was a real defect and is fixed, and something else sends the guest into the arena after the frame has
 returned.
 
+### Four stubs side by side, and the fault is inside the frame's
+
+Read beside the arming, over a window around the payload (`block_words.py`, looking for `bctr` -- an
+exact word, so a stub is found by its own last instruction rather than by decoding its first):
+
+```
+0x00e05820  displaced 0x81830140  resume 0x027b5e98
+0x00e05838  displaced 0x9421ffe0  resume 0x027ff1dc
+0x00e05850  displaced 0x9421feb8  resume 0x0216001c
+0x00e05868  displaced 0x7c7e1b78  resume 0x0274c27c   <- or r30,r3,r3
+```
+
+**Four probe stubs sit side by side in the trampoline area, and the fourth is this title's display
+frame.** Its displaced word is `or r30,r3,r3` -- the frame's sixth word, where the probe moved when the
+link-register defect above was fixed -- and its resume is `0x0274c27c`, which is the frame's seventh
+word. So the probe is installed exactly where it was moved to, and it resumes exactly where it should.
+
+**And the fault's program counter, `0x00e0586c`, is that stub's second word.** The stub begins at
+`0x00e05868`; `0x00e0586c` is the displaced instruction, `or r30,r3,r3` -- **a register move, which
+cannot fault.** Reaching it with a register file holding four words at four-byte spacing and a stack
+pointer that is not a guest address is the shape of an instruction that was never meant to be running.
+
+**So the guest is inside the frame's own probe, on the frame's own displaced word, with the frame's own
+probe correct in memory.** That is the narrowest the fault has been, and it is the same place in every
+run.
+
+### And the probe mechanism was writing code without invalidating it
+
+Which is the one thing that would put an instruction there that is not the one in memory.
+
+`GuestCallProbes` wrote its stub and the branch over the probed entry with `memory_writeU32` and told the
+recompiler nothing. The trampoline area is registered with the recompiler wholesale, because the loader
+does put real code in it -- so a block covering any address there may already have been translated from
+whatever the loader had written, and writing over that leaves the guest running the **old**
+translation: the words in memory are the new ones and the words executing are not.
+
+**Every other guest-code writer in cemu invalidates, and this one did not.**
+
+```
+GuestPatching::WriteBytes:276   PPCRecompiler_invalidateRange, for a range that is not fresh
+Debugger.cpp:146,557,592         per word and per range
+GDBBreakpoints.cpp:110,116,130   per word
+GraphicPack2PatchesApply.cpp     per patch
+GuestCallProbes.cpp              nowhere
+```
+
+**Fixed, in the fork, and the fix is the point even though it did not resolve the fault.** The probe's
+writes go through one `WriteGuestWord` that writes and invalidates, so nothing written by that file can
+miss it. Re-run with it: **the fault persists, unchanged.** So the stale translation was a real defect
+and not the cause -- and it had to be fixed anyway, because leaving it in place makes every subsequent
+measurement in that area a measurement of the loader's bytes rather than of the mod's, which is the
+mistake this file has already made once with a debugger reading host addresses.
+
 ### A payload was branching into a zero-filled hole, and that was a real fault
 
 Read live, at the fault, in one pass from one register (`faultgpc.py`) so that nothing had to be
