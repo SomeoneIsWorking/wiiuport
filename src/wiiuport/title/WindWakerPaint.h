@@ -333,6 +333,19 @@ class WindWakerPaint {
         // twice, and then a branch back to the loop. Eleven words, and every one of the ten is
         // verbatim.
         LoopDispatchTwice = 12,
+        // **The same dispatch with the frame carried as a literal, and this one paints.**
+        //
+        // The one thing the loop's own dispatch cannot express is a call to the frame rather than
+        // to whatever slot `0xcc` holds -- and after this mod is installed, slot `0xcc` holds the
+        // stand-in. `LoopDispatchTwice` installs and does not fault, and does not paint for exactly
+        // that reason. So the frame is built into the payload from the address the mod read out of
+        // that slot before it rewrote it, with `lis`/`ori` whose *forms* are lifted from the
+        // title's image and whose immediates are that address.
+        //
+        // Eleven words again, and the objective's own shape: the vtable load is replaced by the
+        // pair that materialises the frame, the counter move and the display restore are the loop's
+        // own, and the eleventh is the branch back to the loop.
+        LoopFrameLiteralTwice = 13,
     };
     // The name a refusal or a report uses for a mode.
     static std::string_view modeName(Mode mode);
