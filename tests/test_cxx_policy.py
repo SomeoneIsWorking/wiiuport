@@ -30,6 +30,9 @@ def test_the_accepted_fixture_is_not_empty() -> None:
     assert "class Recorder" in body
     assert 'extern "C"' in body
     assert "const int* still_fine" in body
+    # The half the rule used to get wrong: a computed const is an ordinary local, and flagging it
+    # put 376 findings on correct code and made this gate impossible to pass.
+    assert "const int doubled" in body
 
 
 @pytest.mark.parametrize(
@@ -41,6 +44,7 @@ def test_the_accepted_fixture_is_not_empty() -> None:
         ("block-scope declaration", "cached"),
         ("block-scope declaration", "limit"),
         ("block-scope declaration", "stride"),
+        ("block-scope declaration", "derived"),
     ],
 )
 def test_every_rule_fires_on_the_rejected_fixture(rule: str, name: str) -> None:

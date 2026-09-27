@@ -23,9 +23,11 @@ bool FrameCapture::armOnce(size_t slot) {
     // The callback outlives this call and runs on a thread the renderer
     // detaches at the swap. `this` is a process-lifetime owner, which is the
     // only reason capturing it here is safe.
-    auto armed = m_request([this, slot](const LatteFrameHooks::FrameImage& image) {
-        receive(slot, image);
-    }, 1);
+    auto armed = m_request(
+        [this, slot](const LatteFrameHooks::FrameImage& image) {
+            receive(slot, image);
+        },
+        1);
     if (!armed) {
         std::lock_guard<std::mutex> guard(m_mutex);
         m_refused += 1;

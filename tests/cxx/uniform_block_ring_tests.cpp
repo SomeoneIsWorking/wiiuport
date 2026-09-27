@@ -75,10 +75,10 @@ void wiiuport::tests::runUniformBlockRingTests() {
         g_frame = 1;
         (*g_blocks)[0x2000] = blockFilledWith(0x11111111u);
         UniformBlockRing ring(&readWords, &now);
-        ring.bind(1, 0x2000, 64);
+        ring.bind(1, UniformBlockRing::Block{0x2000, 64});
         g_frame = 2;
         (*g_blocks)[0x2000] = blockFilledWith(0x22222222u);
-        ring.bind(1, 0x2000, 64);
+        ring.bind(1, UniformBlockRing::Block{0x2000, 64});
         const std::string body = ring.json();
         check::isTrue(field(body, "pairsCompared") == "1", "one pair compared: " + body);
         check::isTrue(field(body, "previousTickStillPresent") == "0" &&
@@ -99,11 +99,11 @@ void wiiuport::tests::runUniformBlockRingTests() {
         (*g_blocks)[0x2000] = blockFilledWith(0x11111111u);
         (*g_blocks)[0x3000] = blockFilledWith(0x33333333u);
         UniformBlockRing ring(&readWords, &now);
-        ring.bind(1, 0x2000, 64);
+        ring.bind(1, UniformBlockRing::Block{0x2000, 64});
         g_frame = 2;
         // The second tick writes somewhere else and leaves the first address alone.
         (*g_blocks)[0x3000] = blockFilledWith(0x44444444u);
-        ring.bind(1, 0x3000, 64);
+        ring.bind(1, UniformBlockRing::Block{0x3000, 64});
         const std::string body = ring.json();
         check::isTrue(field(body, "previousTickStillPresent") == "1",
                       "the previous tick's bytes are still at the address it used: " + body);
@@ -120,12 +120,12 @@ void wiiuport::tests::runUniformBlockRingTests() {
         g_frame = 1;
         (*g_blocks)[0x2000] = blockFilledWith(0x11111111u);
         UniformBlockRing ring(&readWords, &now);
-        ring.bind(1, 0x2000, 64);
+        ring.bind(1, UniformBlockRing::Block{0x2000, 64});
         g_frame = 2;
         // The earlier address is unmapped by the time the second binding arrives.
         g_blocks->erase(0x2000);
         (*g_blocks)[0x3000] = blockFilledWith(0x33333333u);
-        ring.bind(1, 0x3000, 64);
+        ring.bind(1, UniformBlockRing::Block{0x3000, 64});
         const std::string body = ring.json();
         check::isTrue(field(body, "previousTickOverwritten") == "0" &&
                           field(body, "previousTickStillPresent") == "0",
@@ -149,9 +149,9 @@ void wiiuport::tests::runUniformBlockRingTests() {
         g_frame = 7;
         (*g_blocks)[0x2000] = blockFilledWith(0x11111111u);
         UniformBlockRing ring(&readWords, &now);
-        ring.bind(1, 0x2000, 64);
-        ring.bind(1, 0x2000, 64);
-        ring.bind(1, 0x2000, 64);
+        ring.bind(1, UniformBlockRing::Block{0x2000, 64});
+        ring.bind(1, UniformBlockRing::Block{0x2000, 64});
+        ring.bind(1, UniformBlockRing::Block{0x2000, 64});
         const std::string body = ring.json();
         check::isTrue(field(body, "bindings") == "3" && field(body, "pairsCompared") == "0",
                       "three bindings inside one frame take one sample and compare nothing: " +
@@ -197,7 +197,7 @@ void wiiuport::tests::runUniformBlockRingTests() {
         g_blocks = new std::map<uint32_t, std::vector<uint32_t>>();
         g_frame = 1;
         UniformBlockRing ring(&readWords, &now);
-        ring.bind(1, 0x2000, UniformBlockRing::kMaxBlockBytes + 4);
+        ring.bind(1, UniformBlockRing::Block{0x2000, UniformBlockRing::kMaxBlockBytes + 4});
         const std::string body = ring.json();
         check::isTrue(field(body, "blocksOversize") == "1" && field(body, "objectsTracked") == "0",
                       "a block past the bound is counted and contributes nothing: " + body);
@@ -211,7 +211,7 @@ void wiiuport::tests::runUniformBlockRingTests() {
         for (uint32_t object = 1; object <= UniformBlockRing::kObjects + 3; object++) {
             const uint32_t address = 0x2000u + object * 0x100u;
             (*g_blocks)[address] = blockFilledWith(object);
-            ring.bind(object, address, 64);
+            ring.bind(object, UniformBlockRing::Block{address, 64});
         }
         const std::string body = ring.json();
         check::isTrue(field(body, "objectsTracked") == std::to_string(UniformBlockRing::kObjects),

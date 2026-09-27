@@ -86,13 +86,15 @@ def test_a_run_waits_for_its_own_images_before_reading_a_slot(
     install(monkeypatch, recorder)
     images = control.capture_run(21337, 2, timeout=5.0)
     assert images == (FRAMED, FRAMED)
-    first_slot = next(index for index, (method, path) in enumerate(recorder.calls)
-                      if method == "GET" and path.startswith("/capture?slot="))
+    first_slot = next(
+        index
+        for index, (method, path) in enumerate(recorder.calls)
+        if method == "GET" and path.startswith("/capture?slot=")
+    )
     set_ups = [index for index, (_, path) in enumerate(recorder.calls) if path == "/counters"]
     assert set_ups, "the run never read the watermark"
     assert max(set_ups) < first_slot, (
-        "a slot was read before the watermark said the images had arrived: "
-        f"{recorder.calls}"
+        f"a slot was read before the watermark said the images had arrived: {recorder.calls}"
     )
 
 
@@ -121,8 +123,8 @@ def test_a_missing_watermark_is_not_read_as_zero(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(control, "_counter_field", lambda port, name, timeout=5.0: None)
     with pytest.raises(ControlUnavailable) as refused:
         control.capture_run(21337, 2, timeout=0.4)
-    assert "only 0 images" in str(refused.value) or "needed" in str(refused.value), (
-        str(refused.value)
+    assert "only 0 images" in str(refused.value) or "needed" in str(refused.value), str(
+        refused.value
     )
 
 

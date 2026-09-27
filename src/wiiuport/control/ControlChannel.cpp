@@ -890,10 +890,9 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
         // stops says it did not -- with the census as the observer, so nothing in
         // the answer rests on the gate's own payload or its own counters.
         const bool through = requestedFlag(std::string(request.query()), "through", false);
-        const int flavour = static_cast<int>(requestedCount(std::string(request.query()),
-                                                            "flavour", 2));
-        const std::string refusal =
-            wanted ? m_logic.enable(through, flavour) : m_logic.disable();
+        const int flavour =
+            static_cast<int>(requestedCount(std::string(request.query()), "flavour", 2));
+        const std::string refusal = wanted ? m_logic.enable(through, flavour) : m_logic.disable();
         if (!refusal.empty()) {
             return lucent::http::Response::text(409, "Conflict", refusal + "\n");
         }
@@ -1059,8 +1058,9 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
         // presents -- the two paints of a stand-in that paints twice -- is the
         // null case, and it needs this.
         const size_t count = requestedCount(std::string(request.query()), "count", 1);
-        auto armed = count <= 1 ? m_capture.armOnce(requestedSlot(std::string(request.query())))
-                                : m_capture.armRun(count, requestedSlot(std::string(request.query())));
+        auto armed = count <= 1
+                         ? m_capture.armOnce(requestedSlot(std::string(request.query())))
+                         : m_capture.armRun(count, requestedSlot(std::string(request.query())));
         return lucent::http::Response::json(
             armed ? 200 : 503, armed ? "OK" : "Service Unavailable",
             std::string("{\"armed\":") + (armed ? "true" : "false") +

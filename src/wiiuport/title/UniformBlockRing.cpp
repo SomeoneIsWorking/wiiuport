@@ -32,7 +32,9 @@ void UniformBlockRing::bindSize(uint32_t object, uint32_t sizeInBytes) {
     }
 }
 
-void UniformBlockRing::bind(uint32_t object, uint32_t address, uint32_t sizeInBytes) {
+void UniformBlockRing::bind(uint32_t object, Block block) {
+    const uint32_t address = block.address;
+    const uint32_t sizeInBytes = block.sizeInBytes;
     m_bindings.fetch_add(1, std::memory_order_relaxed);
     m_addressesKnown.fetch_add(1, std::memory_order_relaxed);
     if (object == 0 || address == 0) {

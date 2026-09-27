@@ -193,7 +193,8 @@ void wiiuport::tests::runLogicGateTests() {
             const uint32_t bi = (branch >> 16) & 0x1fu;
             const uint32_t absolute = (branch >> 11) & 1u;
             const uint32_t link = branch & 1u;
-            check::isTrue(opcode == 16u, "the branch that skips is a conditional branch, opcode 16");
+            check::isTrue(opcode == 16u,
+                          "the branch that skips is a conditional branch, opcode 16");
             check::isTrue(bo == 4u, "with BO=4, which branches when the bit BI names is false");
             check::isTrue(bi == 2u,
                           "and BI=2, the bit `andi.` sets when its result is not zero -- which is "
@@ -202,9 +203,10 @@ void wiiuport::tests::runLogicGateTests() {
             check::isTrue(absolute == 0u && link == 0u,
                           "and neither its absolute bit nor its link bit is set, so the "
                           "displacement is relative and the link register is the caller's");
-            check::isTrue(branch == (0x40820000u | ((through - (kBlock + 4 * 6)) & 0xfffc)),
-                          "and the word is the title's own bne with the displacement to the through "
-                          "path, which is 0x4082....");
+            check::isTrue(
+                branch == (0x40820000u | ((through - (kBlock + 4 * 6)) & 0xfffc)),
+                "and the word is the title's own bne with the displacement to the through "
+                "path, which is 0x4082....");
         }
         // A skipped call returns with the link register as the caller left it:
         // the gate has not touched r0 or r1 on this path.
@@ -258,9 +260,8 @@ void wiiuport::tests::runLogicGateTests() {
     {
         const auto direct = LogicGate::throughPayload(kBlock, 1);
         check::isTrue(direct.size() == 1, "the direct pass-through is one word");
-        check::isTrue(direct.size() == 1 &&
-                          direct[0] == (18u << 26) |
-                                           ((LogicGate::kTickBody - kBlock) & 0x03fffffcu),
+        check::isTrue(direct.size() == 1 && direct[0] == (18u << 26) |
+                                                ((LogicGate::kTickBody - kBlock) & 0x03fffffcu),
                       "and it branches to the tick's own second instruction");
         for (int flavour = 1; flavour <= 2; flavour++) {
             const auto words = LogicGate::throughPayload(kBlock, flavour);
