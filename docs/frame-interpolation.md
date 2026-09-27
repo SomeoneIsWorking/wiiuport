@@ -1142,6 +1142,41 @@ about the title. The next measurement is a *strided* sample -- objects spread ac
 run rather than the first few -- because a negative about eight objects of one kind is not a
 negative about the game.
 
+### Spread across the run, the answer changes: three blendable, all at one stride
+
+With the strided sample the eight tracked objects sit at frames 109, 132, 159, 180, 204, 225,
+253 and 293 -- spread across the whole run rather than packed into its first seconds -- and the
+verdicts change with them:
+
+    500,896 draws seen, 8 nodes tracked, 47 refused by the set bound
+    3 blendable, 1 identical, 1 valueUnchanged, 3 with nothing paired
+
+    node 1166878616: blendable,  4 vertices, stride 20, 38 differing bytes,
+                     biggest component delta 0.106766738, 28 components out of range
+    node 1216241436: blendable,  4 vertices, stride 20, 42 differing bytes, delta 209089
+    node 1160909272: blendable,  4 vertices, stride 20, 40 differing bytes, delta 883540
+    node 1046048488: valueUnchanged, 10 vertices, stride 152, 80 differing bytes, delta 9.1e-07
+    node 1160952552: identical,   3 vertices, stride 32, 0 differing bytes, delta 0
+
+**All three blendable are at stride 20, and one of them has a believable magnitude.** A largest
+component delta of **0.107** is a tenth of a unit of travel, which is what a position does. So
+there is something real here, and the reason the earlier sample found none is exactly what the
+stride was for: a sea and a sky do not move and a particle system is not a mesh.
+
+**And the stride-20 layout is the one whose position the census got wrong.** 4 vertices at a
+20-byte stride with a 12-byte position at offset 0 leaves 8 bytes of something else in the
+stride, and those are being read as floats -- which is the out-of-range count. But a *believable*
+0.107 on the same 12 bytes is impossible if all three components were wrong, so the 12 bytes at
+offset 0 are partly position and partly not.
+
+**Which means the per-layout bar is still too weak.** It names a position by how many objects
+agree on the *signature* -- semantic, format, size, buffer, offset -- and for stride 20 seven
+objects agreed on offset 0, which is enough to clear a bar over counts and not enough to
+establish that the twelve bytes there are three floats of plausible magnitude. The next bar is a
+magnitude condition, not a count: a per-layout position whose components are implausible is not
+a position, and a layout that fails it is a layout the census has not solved rather than a layout
+with a position at offset 0.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It
