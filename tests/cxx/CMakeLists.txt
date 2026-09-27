@@ -2,6 +2,7 @@ add_executable(wiiuport_tests
   main.cpp
   block_census_tests.cpp
   draw_attribute_census_tests.cpp
+  uniform_block_base_tests.cpp
   uniform_block_ring_tests.cpp
   vertex_pose_history_tests.cpp
   control_tests.cpp

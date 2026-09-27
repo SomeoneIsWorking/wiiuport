@@ -153,6 +153,9 @@ class Runtime {
     // objective's own second question, and the census is the one place that knows which block a
     // binding names.
     title::UniformBlockRing m_blockRing{&GuestPatching::ReadWords, nullptr};
+    // The base the relative offset is relative to, measured against the draw's real block
+    // addresses. The last thing standing between the objective's second question and an answer.
+    title::UniformBlockBase m_blockBase;
     interp::ObjectBlend m_objectBlend{interp::ContinuousInterpolator::kBlendPoint};
     interp::ReplayBlend m_replayBlend{m_objectBlend, m_substitution};
     guest::BufferWriters m_writers;

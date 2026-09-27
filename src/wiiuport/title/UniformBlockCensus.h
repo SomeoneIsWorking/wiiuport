@@ -6,6 +6,7 @@
 #include "wiiuport/title/ObjectIdentityScope.h"
 #include "wiiuport/title/ObjectPoseHistory.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
+#include "wiiuport/title/UniformBlockBase.h"
 #include "wiiuport/title/UniformBlockRing.h"
 #include "wiiuport/title/VertexPoseHistory.h"
 
@@ -136,6 +137,10 @@ class UniformBlockCensus {
     // place that knows which block a binding names. Null is allowed and reported as null.
     void setBlockRing(UniformBlockRing* ring);
 
+    // The base the relative offset is relative to, measured against the draw's real block
+    // addresses. Null is allowed and reported as null.
+    void setBlockBase(UniformBlockBase* base);
+
     UniformBlockCensus(Register registerProbe, ReadWord readWord,
                        ObjectPoseHistory::ReadWords readWords,
                        const ObjectPoseLocator* locator = nullptr,
@@ -248,6 +253,7 @@ class UniformBlockCensus {
     const DrawAttributeCensus* m_drawAttributes = nullptr;
     const VertexPoseHistory* m_vertexHistory = nullptr;
     UniformBlockRing* m_ring = nullptr;
+    UniformBlockBase* m_base = nullptr;
     Binder m_first{*this, false};
     Binder m_second{*this, true};
     std::atomic<uint64_t> m_bindings{0};

@@ -69,6 +69,10 @@ void UniformBlockCensus::setBlockRing(UniformBlockRing* ring) {
     m_ring = ring;
 }
 
+void UniformBlockCensus::setBlockBase(UniformBlockBase* base) {
+    m_base = base;
+}
+
 void UniformBlockCensus::setIdentityScope(ObjectIdentityScope* scope) {
     m_scope = scope;
 }
@@ -114,6 +118,13 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
     // guest address is a wrong answer rather than a missing one.
     if (binding.read && m_ring != nullptr) {
         m_ring->bindSize(object, binding.entry[UniformBlockCensus::kEntryBlockSize / 4]);
+    }
+    // The relative offset, published for the base measurement: the draw's own uniform assembly
+    // follows this call with the block's real guest address, and `address - offset` is the
+    // base the title is using.
+    if (binding.read && m_base != nullptr) {
+        m_base->publish(object, binding.entry[UniformBlockCensus::kEntryBlockAddress / 4],
+                        binding.entry[UniformBlockCensus::kEntryBlockSize / 4]);
     }
     if (binding.read) {
         mapWords(object, binding.entry, binding.mapped);
@@ -348,6 +359,7 @@ std::string UniformBlockCensus::json() const {
     // are still there when tick N paints. Measured by re-reading the earlier address, so it is
     // in the report rather than in a note beside it.
     body.object("blockRing", m_ring == nullptr ? "null" : m_ring->json());
+    body.object("blockBase", m_base == nullptr ? "null" : m_base->json());
     if (!m_refusal.empty()) {
         body.string("refusal", m_refusal);
     }
