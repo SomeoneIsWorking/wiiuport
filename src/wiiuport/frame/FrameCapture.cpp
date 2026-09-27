@@ -1,6 +1,8 @@
 #include "wiiuport/frame/FrameCapture.h"
 
+#include <atomic>
 #include <cstring>
+#include <memory>
 
 namespace wiiuport::frame {
 
@@ -23,7 +25,39 @@ bool FrameCapture::armOnce(size_t slot) {
     // only reason capturing it here is safe.
     auto armed = m_request([this, slot](const LatteFrameHooks::FrameImage& image) {
         receive(slot, image);
-    });
+    }, 1);
+    if (!armed) {
+        std::lock_guard<std::mutex> guard(m_mutex);
+        m_refused += 1;
+    }
+    return armed;
+}
+
+bool FrameCapture::armRun(size_t count, size_t firstSlot) {
+    if (count == 0) {
+        return true;
+    }
+    if (firstSlot + count > kSlotCount) {
+        // Named, because "nothing was captured" and "there was no room for the
+        // run asked for" are different findings and a caller that treats them as
+        // one waits for images that were never going to arrive.
+        std::lock_guard<std::mutex> guard(m_mutex);
+        m_requested += 1;
+        m_refused += 1;
+        return false;
+    }
+    // The fork's run re-arms as each image lands, and each re-arm routes the
+    // next image to the next slot, so the pair ends up in two slots without this
+    // side having to poll for the first before asking for the second.
+    auto next = std::make_shared<std::atomic<size_t>>(0);
+    auto armed = m_request(
+        [this, firstSlot, next](const LatteFrameHooks::FrameImage& image) {
+            const size_t index = next->fetch_add(1);
+            if (firstSlot + index < kSlotCount) {
+                receive(firstSlot + index, image);
+            }
+        },
+        static_cast<int>(count));
     if (!armed) {
         std::lock_guard<std::mutex> guard(m_mutex);
         m_refused += 1;

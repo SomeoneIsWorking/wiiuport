@@ -38,7 +38,7 @@ bool recordPresent(const LatteFrameHooks::PresentArguments& present) {
 std::vector<size_t> g_armedSlots;
 size_t g_nextSlot = 0;
 
-bool recordArmedSlot(LatteFrameHooks::CaptureCallback&&) {
+bool recordArmedSlot(LatteFrameHooks::CaptureCallback&&, int) {
     g_armedSlots.push_back(g_nextSlot);
     return true;
 }
@@ -47,7 +47,7 @@ bool recordArmedSlot(LatteFrameHooks::CaptureCallback&&) {
 // two detached renderer threads can.
 std::vector<LatteFrameHooks::CaptureCallback> g_heldCallbacks;
 
-bool holdCallback(LatteFrameHooks::CaptureCallback&& callback) {
+bool holdCallback(LatteFrameHooks::CaptureCallback&& callback, int) {
     g_heldCallbacks.push_back(std::move(callback));
     return true;
 }

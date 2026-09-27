@@ -128,7 +128,7 @@ LatteFrameHooks::GuestStateRestore fakeRestore() {
     return g_restore;
 }
 
-bool fakeCapture(LatteFrameHooks::CaptureCallback&&) {
+bool fakeCapture(LatteFrameHooks::CaptureCallback&&, int) {
     g_sequence.emplace_back("capture");
     return g_captureAccepted;
 }
