@@ -120,7 +120,16 @@ void DrawAttributeCensus::onDrawRecorded(const LatteFrameHooks::DrawPrepared& dr
                     float value = 0.0f;
                     std::memcpy(&value, &word, sizeof(value));
                     read++;
-                    if (!std::isfinite(value) || std::fabs(value) > kComponentCeiling) {
+                    // Three ways a value is not a position. Above the ceiling: a projection
+                    // constant. Non-finite: a byte pattern. Below the floor **and non-zero**: a
+                    // denormal, which is 1.7e-38 and is not a position in any world -- and the
+                    // non-zero matters, because a vertex AT THE ORIGIN is exactly zero and is a
+                    // perfectly good position. The first version of this floor had no non-zero
+                    // clause and refused every layout whose fixtures put their vertices at the
+                    // origin, which is most of them.
+                    const float magnitude = std::fabs(value);
+                    if (!std::isfinite(value) || magnitude > kComponentCeiling ||
+                        (magnitude != 0.0f && magnitude < kComponentFloor)) {
                         implausible++;
                     }
                 }
@@ -242,30 +251,84 @@ DrawAttributeCensus::Position DrawAttributeCensus::positionForLocked(uint32_t st
             read[keyOf(signature)] += signature.componentsRead;
         }
     }
-    Position out;
-    uint64_t bestObjects = 0;
-    for (const auto& [key, objects] : across) {
-        // **The count bar AND the magnitude bar, and the magnitude bar is a share.** Seven
-        // objects agreeing that the stride-20 position is at offset 0 is not enough, because
-        // those twelve bytes are partly position and partly the eight other bytes in the stride.
-        // But refusing a layout because ONE component in ONE draw was implausible refuses four
-        // of the title's seven layouts, which is a threshold in the wrong place rather than a
-        // bar. The share is the bar: at or below kImplausibleShareCeiling the layout survives a
-        // bad draw, and a layout that is mostly arithmetic does not.
-        if (shareOf(read[key], implausible[key]) > kImplausibleShareCeiling) {
+    const std::vector<Position> clearing = candidatesClearingLocked(stride);
+    if (clearing.empty()) {
+        return {};
+    }
+    return clearing.front();
+}
+
+std::vector<DrawAttributeCensus::Position>
+DrawAttributeCensus::candidatesClearingLocked(uint32_t stride) const {
+    // The objects whose draws had this stride, and only those: a position named across layouts
+    // is one layout's answer presented as the title's.
+    const uint64_t nodes = nodesAtStrideLocked(stride);
+    if (nodes < 2) {
+        // One object cannot agree with another, and the cross-object bar is the whole of the
+        // census. Its signatures are reported; none is named.
+        return {};
+    }
+    const uint64_t needed = nodes / 2 + 1;
+    std::map<Key, std::set<uint32_t>> across;
+    std::map<Key, uint64_t> implausible;
+    std::map<Key, uint64_t> read;
+    for (const Node& node : m_nodes) {
+        if (node.address == 0) {
             continue;
         }
-        if (objects.size() >= needed && objects.size() > bestObjects) {
-            bestObjects = objects.size();
-            out.semanticId = std::get<0>(key);
-            out.format = std::get<1>(key);
-            out.sizeInBytes = std::get<2>(key);
-            out.perInstance = std::get<3>(key);
-            out.buffer = std::get<4>(key);
-            out.offset = std::get<5>(key);
-            out.stride = std::get<6>(key);
-            out.known = true;
+        for (const Signature& signature : node.signatures) {
+            if (stride != 0 && signature.stride != stride) {
+                continue;
+            }
+            if (signature.sizeInBytes != kPositionBytes &&
+                signature.sizeInBytes != kPositionBytesPadded) {
+                continue;
+            }
+            across[keyOf(signature)].insert(node.address);
+            implausible[keyOf(signature)] += signature.componentsImplausible;
+            read[keyOf(signature)] += signature.componentsRead;
         }
+    }
+    // The count bar AND the magnitude bar, and the magnitude bar is a share. Seven objects
+    // agreeing that the stride-20 position is at offset 0 is not enough, because those twelve
+    // bytes are partly position and partly the eight other bytes in the stride. But refusing a
+    // layout because ONE component in ONE draw was implausible refuses four of the title's seven
+    // layouts, which is a threshold in the wrong place rather than a bar.
+    std::vector<std::pair<Key, uint64_t>> kept;
+    for (const auto& [key, objects] : across) {
+        if (objects.size() < needed) {
+            continue;
+        }
+        if (shareOf(read.at(key), implausible.at(key)) > kImplausibleShareCeiling) {
+            continue;
+        }
+        kept.emplace_back(key, objects.size());
+    }
+    // The stated tie-break: lowest semantic index, then lowest offset. It is a rule and not a
+    // measurement, and the report carries every candidate beside the one it chose so a reader can
+    // see that a choice was made.
+    std::sort(kept.begin(), kept.end(), [](const auto& left, const auto& right) {
+        if (std::get<0>(left.first) != std::get<0>(right.first)) {
+            return std::get<0>(left.first) < std::get<0>(right.first);
+        }
+        if (std::get<5>(left.first) != std::get<5>(right.first)) {
+            return std::get<5>(left.first) < std::get<5>(right.first);
+        }
+        return left.second > right.second;
+    });
+    std::vector<Position> out;
+    for (const auto& [key, objects] : kept) {
+        Position one;
+        one.semanticId = std::get<0>(key);
+        one.format = std::get<1>(key);
+        one.sizeInBytes = std::get<2>(key);
+        one.perInstance = std::get<3>(key);
+        one.buffer = std::get<4>(key);
+        one.offset = std::get<5>(key);
+        one.stride = std::get<6>(key);
+        one.objectsAgreeing = objects;
+        one.known = true;
+        out.push_back(one);
     }
     return out;
 }
@@ -398,6 +461,23 @@ std::string DrawAttributeCensus::json() const {
         JsonBody layout;
         layout.number("stride", strides[index]);
         layout.number("objects", nodesAtStrideLocked(strides[index]));
+        // How many candidates cleared, the rule that chose between them, and all of them. Two
+        // runs of the same title named this layout's position differently because more than one
+        // position-sized attribute has plausible values, so the reader is entitled to see that a
+        // choice was made and to see the alternatives.
+        const std::vector<Position> clearing = candidatesClearingLocked(strides[index]);
+        layout.number("candidatesClearing", clearing.size());
+        layout.string("tieBreak", "lowestSemanticThenOffset");
+        JsonBody also;
+        for (size_t rank = 0; rank < clearing.size() && rank < kExamples; rank++) {
+            JsonBody candidate;
+            candidate.number("semanticId", clearing[rank].semanticId);
+            candidate.number("sizeInBytes", clearing[rank].sizeInBytes);
+            candidate.number("offsetInStride", clearing[rank].offset);
+            candidate.number("objectsAgreeing", clearing[rank].objectsAgreeing);
+            also.object(std::to_string(rank), candidate.text());
+        }
+        layout.object("candidates", also.text());
         layout.raw("positionKnown", one.known ? "true" : "false");
         if (one.known) {
             layout.number("semanticId", one.semanticId);
