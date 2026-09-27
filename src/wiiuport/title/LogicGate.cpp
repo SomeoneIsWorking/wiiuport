@@ -287,10 +287,23 @@ std::string LogicGate::json() const {
     // whether a zero count means "no calls came" or "the gate is not wired to
     // the tick", which are the same number and not the same finding.
     body.string("probe", std::string(installationName(m_probe)));
+    // Quoted, because a client parses this: `raw` writes a value verbatim, and a
+    // bare `0x90010004` is not JSON. That is not a cosmetic slip -- the route's
+    // only consumer is a JSON parser, so one unquoted word made the whole report
+    // unreadable and every caller fell back to a probe the gate holds, which
+    // reads as a simulation running at zero hertz.
     uint32_t atBody = 0;
-    body.raw("wordAtTickBody", m_readWord(kTickBody, atBody) ? hex(atBody) : std::string("null"));
+    if (m_readWord(kTickBody, atBody)) {
+        body.string("wordAtTickBody", hex(atBody));
+    } else {
+        body.raw("wordAtTickBody", "null");
+    }
     uint32_t atEntry = 0;
-    body.raw("wordAtTickEntry", m_readWord(kTick, atEntry) ? hex(atEntry) : std::string("null"));
+    if (m_readWord(kTick, atEntry)) {
+        body.string("wordAtTickEntry", hex(atEntry));
+    } else {
+        body.raw("wordAtTickEntry", "null");
+    }
     body.raw("enabled", m_enabled ? "true" : "false");
     uint32_t calls = 0;
     uint32_t ticks = 0;

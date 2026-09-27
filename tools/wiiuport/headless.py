@@ -30,6 +30,7 @@ command.
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -55,6 +56,40 @@ class Display(Enum):
 
 TITLE_OUTPUT_SIZE = (1920, 1080)
 """The title's own output size, which an offscreen display defaults to."""
+
+
+def _port_holder(port: int) -> str | None:
+    """Whatever holds `port`, by name and pid, or None when it is free.
+
+    Read from the kernel's own socket table rather than by connecting: a connect
+    would be answered by the stale product, and the point is to notice it without
+    asking it anything.
+    """
+    for arguments in (["ss", "-ltnp"], ["/usr/sbin/ss", "-ltnp"]):
+        if not shutil.which(arguments[0]) and not Path(arguments[0]).is_file():
+            continue
+        try:
+            listed = subprocess.run(
+                arguments, capture_output=True, text=True, timeout=5, check=False
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for line in listed.splitlines():
+            columns = line.split()
+            if len(columns) < 4:
+                continue
+            # The local address is its own column, so the port is compared whole:
+            # a substring test for ":1" also matches ":21337" and every other port
+            # that ends in a 1, and a check that fires on a free port is a check
+            # nobody can keep.
+            local = columns[3]
+            if not local.rsplit(":", 1)[-1].isdigit() or int(local.rsplit(":", 1)[-1]) != port:
+                continue
+            named = re.search(r'users:\(\("(?P<name>[^"]+)",pid=(?P<pid>\d+)', line)
+            if named is not None:
+                return f"{named.group('name')} pid {named.group('pid')}"
+            return "a process this user may not name"
+    return None
 
 
 def gamescope_args(size: tuple[int, int]) -> tuple[str, ...]:
@@ -228,6 +263,7 @@ class HeadlessSession:
 
     def prepare(self, keys_source: Path | None = None, save_source: Path | None = None) -> None:
         """Create the isolated directories and write the offscreen settings."""
+        self.refuse_a_stale_product()
         for directory in (self.config_home, self.data_home, self.cache_home):
             directory.mkdir(parents=True, exist_ok=True)
         (self.config_home / "Cemu").mkdir(exist_ok=True)
@@ -240,6 +276,35 @@ class HeadlessSession:
             self._link_keys(keys_source)
         if save_source is not None:
             self._copy_save(save_source)
+
+    def refuse_a_stale_product(self) -> None:
+        """Refuse to start while a previous run's product is still alive.
+
+        Two products at once is a measurement that cannot be believed, and nothing
+        says so: the second one cannot bind the control port, logs that and
+        carries on, and the tool then drives the *first* product while watching the
+        second for its exit. Every number that run takes is then about whichever
+        title happened to still be up, and the report names neither.
+
+        It cost a session's worth of runs to find, because the symptom was the
+        product dying eleven seconds in with no signal, no core and no message --
+        which is what the second product does when it is sharing a GPU with the
+        first. So the check is here, before anything is written, and it names the
+        holder rather than only reporting that there is one.
+        """
+        port = self.runtime_env.get("WIIUPORT_CONTROL_PORT")
+        if port is None:
+            return
+        holder = _port_holder(int(port))
+        if holder is None:
+            return
+        raise RuntimeError(
+            f"refused: something is already listening on 127.0.0.1:{port}"
+            + (f" -- {holder}" if holder else "")
+            + ". A previous run's product is still alive; it holds about a gigabyte and the "
+            "GPU, and a run started beside it measures the wrong title. Kill it by the pid "
+            "named here, not by name."
+        )
 
     def _write_gamepad_profile(self) -> None:
         """Give player one a gamepad, because the title only reads one that exists.

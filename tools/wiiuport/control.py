@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 DEFAULT_PORT = 21337
 """The port the product listens on, loopback only, unless WIIUPORT_CONTROL_PORT
@@ -201,6 +202,21 @@ class TransformReport:
         return "\n".join(lines)
 
 
+# When set, every request is written to this file before it is sent and again with
+# what came back. Two runs that differ only in the product's fate differ here
+# first, and the difference is one line rather than a bisect through nine-minute
+# runs. Off unless asked for, because a maintainer tool that narrates is a
+# maintainer tool nobody reads.
+TRACE_PATH: Path | None = None
+
+
+def _trace(outgoing: str) -> None:
+    if TRACE_PATH is None:
+        return
+    with TRACE_PATH.open("a", encoding="utf-8") as trace:
+        trace.write(f"{time.monotonic():9.3f} {outgoing}\n")
+
+
 def _unreachable(url: str, dropped: BaseException) -> ControlUnavailable:
     """A channel that stopped answering, in the words a tool can report.
 
@@ -220,8 +236,10 @@ def _unreachable(url: str, dropped: BaseException) -> ControlUnavailable:
 
 def _get(path: str, port: int, timeout: float) -> dict:
     url = f"http://127.0.0.1:{port}{path}"
+    _trace(f"GET {path}")
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
+            _trace(f"  <- {response.status}")
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.URLError as unreachable:
         raise _unreachable(url, unreachable.reason) from unreachable
@@ -238,8 +256,10 @@ def request_bytes(method: str, path: str, port: int, timeout: float) -> bytes:
     runtime's own explanation, and silence says the runtime is not there."""
     url = f"http://127.0.0.1:{port}{path}"
     request = urllib.request.Request(url, method=method, data=b"" if method == "POST" else None)
+    _trace(f"{method} {path}")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
+            _trace(f"  <- {response.status}")
             return response.read()
     except urllib.error.HTTPError as refused:
         body = refused.read().decode("utf-8", "replace").strip()
@@ -709,9 +729,18 @@ class GateState:
 
 
 def read_gate(port: int = DEFAULT_PORT, timeout: float = 2.0) -> GateState:
-    payload = _get("/gate", port, timeout)
+    """The logic gate's own state, from `/logic`.
+
+    Not from `/gate`: that is the frame gate, which holds a title between frames
+    and answers with a different body entirely. Asking it for the tick's counters
+    fails on the fields, which is at least a refusal -- but a caller that fell
+    back on it would be reading the frame gate's state and calling it the
+    simulation's, which is how a run reports a logic rate of zero while the
+    simulation is perfectly healthy.
+    """
+    payload = _get("/logic", port, timeout)
     require_fields(
-        "GET /gate", payload, ("tick", "enabled", "callsCount", "ticksCount"), "the logic gate"
+        "GET /logic", payload, ("tick", "enabled", "callsCount", "ticksCount"), "the logic gate"
     )
     return GateState(
         tick=int(payload["tick"], 16),
@@ -814,8 +843,28 @@ def capture_frame(port: int, slot: int, timeout: float = 15.0) -> bytes:
     raise ControlUnavailable(f"no image reached slot {slot} within {timeout:.0f}s: {refusal}")
 
 
+# The most a tool may ask the product to hand over in one piece. A gigabyte is
+# not a hypothetical: the title's own descriptor entry has a word at +0x04 that
+# reads 0x3e634300, which a tool took for a byte count and asked for, and the
+# product died allocating it. The bound is here rather than in each caller
+# because the number that caused it came out of the title, not out of a tool.
+MAX_DUMP_BYTES = 1 << 20
+
+
 def dump_guest(port: int, address: int, size: int, timeout: float = 5.0) -> bytes:
-    """A range of guest memory, as the bytes lie. Refuses by reason."""
+    """A range of guest memory, as the bytes lie. Refuses by reason.
+
+    A size beyond `MAX_DUMP_BYTES` is refused here, naming the number, because the
+    cost of asking is the product's memory and there is no way to ask politely
+    about a gigabyte. A word read out of guest memory is not a length until
+    something has said it is one.
+    """
+    if size < 0 or size > MAX_DUMP_BYTES:
+        raise ControlUnavailable(
+            f"refused: {size} bytes at {address:#x} is beyond the {MAX_DUMP_BYTES}-byte bound "
+            "on one dump. A word read out of guest memory is not a length until something has "
+            "said it is one."
+        )
     return request_bytes("GET", f"/memory?address={address:x}&size={size}", port, timeout)
 
 

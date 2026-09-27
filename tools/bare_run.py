@@ -17,10 +17,16 @@ import sys
 import time
 from pathlib import Path
 
+from wiiuport.drive import press
 from wiiuport.headless import Display, HeadlessSession
 from wiiuport.paths import find_layout
 
-from wiiuport.control import DEFAULT_PORT, ControlUnavailable, read_paint
+from wiiuport.control import (
+    DEFAULT_PORT,
+    ControlUnavailable,
+    read_paint,
+    wait_for_channel,
+)
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 
 
@@ -47,6 +53,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="a Vulkan ICD to force, by its json; used to tell a driver crash from "
         "a product crash, and refused as evidence either way",
+    )
+    parser.add_argument(
+        "--presses",
+        type=int,
+        default=0,
+        help="how many button presses to inject, and how long between them. A run that "
+        "survives without them and dies with them is telling the truth about itself, and "
+        "this is the only difference between the two that the product can see",
+    )
+    parser.add_argument("--press-interval", type=float, default=8.0)
+    parser.add_argument(
+        "--boot", type=int, default=120, help="seconds to wait for the channel before pressing"
     )
     args = parser.parse_args(argv)
 
@@ -79,6 +97,27 @@ def main(argv: list[str] | None = None) -> int:
         # graphics init until the two were told apart.
         session.prepare(keys_source=keys, save_source=args.save)
         print(f"pid {running.pid}, waiting up to {args.seconds:.0f}s", flush=True)
+        # Presses go in one at a time and each is reported, because a run that
+        # dies "during the press phase" has told you nothing: this says which press,
+        # or that it died before the first. They wait for the channel first, because
+        # a press sent into a refused connection is a refusal of the tool's own
+        # making and looks like a run that could not be driven.
+        if args.presses > 0 and not wait_for_channel(args.port, args.boot):
+            print(
+                "refused: the channel never answered, so nothing could be pressed", file=sys.stderr
+            )
+            return 1
+        for index in range(args.presses):
+            if running.poll() is not None:
+                print(f"  the product was gone before press {index}", flush=True)
+                break
+            try:
+                press("a" if index % 2 == 0 else "plus", port=args.port)
+            except ControlUnavailable as unavailable:
+                print(f"  press {index} refused: {str(unavailable)[:80]}", flush=True)
+                break
+            print(f"  press {index} sent", flush=True)
+            time.sleep(args.press_interval)
         deadline = time.monotonic() + args.seconds
         answered_at: float | None = None
         paints_at_10s = -1
