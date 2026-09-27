@@ -1394,6 +1394,80 @@ labelled as the pass rate, not as the tick. **The `display+0x74` / `+0x28` toggl
 it was measured over roughly 300 paints with the pair sampled at every paint, and it is unaffected by
 the reservation fix, which moved no field the frame reads.
 
+### The refusal that silenced two instruments, and what the title says once they speak
+
+The frame probe fault was diagnosed correctly: an entry whose first instruction reads the link
+register computes a different value in the stub than it does where it stands, because a call sets the
+link register. **It was fixed by refusing to install such a probe** -- and `mfspr r0,LR` is the first
+instruction of every function with a frame. So the refusal took out the very probes this objective
+depends on:
+
+| probe | entry | first word | consequence |
+|---|---|---|---|
+| the binder | `0x027ff88c` | `mfspr r0,LR` | **0 bindings** over 823,431 assemblies |
+| the second binder | `0x027ff9c0` | `mfspr r0,LR` | ditto |
+| the logic gate's tick | `0x025d42ec` | `mfspr r0,LR` | **0 tick calls** with 240 paints in the window |
+
+The report said `installed as unknown and unknown` and read `identity: source blockSources` with 0
+objects tracked, and **both read as a title that never calls the function rather than as an
+instrument that was never wired.** The gate's zero was reported last turn as evidence that the tick
+address is not executed; that reading is withdrawn. It was a refused probe.
+
+**The fix is at the cause, and it is an ordering.** The stub now runs the displaced word *before* the
+HLE call, so the link register is the one the caller left -- the value the instruction computes where
+it stands -- and the instruction is correct. The refusal is deleted, and `Installation::
+EntryReadsLinkRegister` with it.
+
+**Which exposed a second defect, and that is why the ordering alone was not enough.** `Dispatch` found
+its registration by comparing the interpreter's program counter against the **stub's base**, which
+worked only because the HLE happened to be the stub's first word. Moving it to the second word
+silenced every probe in the product at once, and the symptom was the paint mod refusing to arm with
+*"the display thread has not painted yet"* -- on a title painting thirty times a second. The
+registration now carries the HLE word's own address and the comparison is on that.
+
+**Both are in the cemu fork, committed there as `c891998` and pinned here as `2a829c8`.**
+
+### What the title says once the instruments speak
+
+```
+binder probes at 0x027ff88c and 0x027ff9c0, installed as installed and installed:
+  167959 bindings recorded, 589 objects          (first window)
+  195581 bindings recorded, 590 objects          (second window)
+identity: source objectAddress, 14 distinct identities, 128 tracked (identity, offset) pairs
+```
+
+**The identity is the node.** That is the objective's own answer to "identity being the node", it was
+`blockSources` -- a withdrawn source -- until this run, and the difference is one ordering in a stub.
+
+**The pose, keyed to that identity, moves.** The census's loose class holds 10 offsets often enough
+and 10 of those are seen to move, best offset 60, over 14 node identities -- against 11 over 7
+`blockSources` identities before, so the denominator moved with the identity rather than the answer
+staying put by accident.
+
+**And tick N-1's uniform block is still present when tick N paints:**
+
+```
+16 of 16 comparisons say still present, 0 say overwritten, 0 could not be read;
+8 consecutive pairs used different addresses, which is double buffering measured
+```
+
+**This answers the second half of condition 2, and it reverses a withdrawal.** The document said
+"whether the other slot holds tick N-1's values is withdrawn", on the grounds that reading both slots
+whole found the other one zero at the pose's offsets. That reading was taken with the binder silent,
+so the two slots it compared were not the two the title was using. The measurement now is over 16
+distinct block addresses across 8 objects, 16 distinct offsets from the object, with a leading
+address of `0x3b5bd500` seen 99,829 and 115,470 times in the two windows.
+
+**The node's own window holds transform-shaped data that does not move, and that is reported as
+measured rather than as a failure.** Over a 2,588-byte window at the node, the loose class holds a 3x4
+at offset 100 in 7 of 8 objects, at 276 in 7 of 8, at 288 and 376 in 5 of 8 -- and **0 of them moved,
+with a biggest delta of exactly 0** across 21, 21, 15 and 15 repeat comparisons. A static prop's own
+transform not changing while the camera moves is what a prop's transform does, so this is the expected
+answer rather than a wrong offset: **the pose that changes per tick is the one in the assembled
+uniform block at offset 60, not the node's own field.** Which node field holds the pose is therefore
+answered *negatively* with denominators, and the pose is located in the draw's uniforms with the node
+as its identity -- which is the chain the objective named.
+
 ### The affine class was already here, already firing, and a second copy of it was the wrong answer
 
 The rigid predicate asks for three rows of unit length, and the argument for looking again is sound:
