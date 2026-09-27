@@ -593,6 +593,63 @@ previous tick. That is consistent with everything measured: the cursor turns, th
 256 bytes, the two slots are `0x100` apart, and at bind time the block holds no transform
 anywhere.
 
+### The chain the objective names, confirmed in the code — and the pose is not in that block
+
+The objective's own route is in the title's code, and reading it settles two things at once.
+`vtable 0x10036300` slot `+0xc` is `FUN_02160018` (the table holds `0x02160180` at `+0x0c`
+and the function's entry is `0x02160018`), 1,536 addresses, and it is the node's draw:
+
+```
+uVar1  = *(uint *)(param_2 + 0xc);                  /* which draw record */
+puVar7 = *(undefined4 **)(param_1 + 0xa4);          /* the node's record array */
+if (uVar1 < *(uint *)(param_1 + 0xa0)) puVar7 = puVar7 + uVar1 * 5;   /* stride 5 words */
+puVar7 = (undefined4 *)*puVar7;                     /* the record */
+...
+GX2CallDisplayList(*(undefined4 *)(pbVar5 + 4));    /* the title's own draw is a display list */
+...
+iVar8 = *(int *)(*(int *)(param_2 + 0x14) + 4);                            /* the sub-object */
+iVar8 = iVar8 + 0x10 + *(int *)(iVar8 + 0x4c) * 0x1c;                     /* the same arithmetic */
+uVar4 = *(undefined4 *)(iVar8 + 0xc);
+```
+
+So: node `+0xa4` → a record array of 5-word entries → the record, whose word 4 is a pointer
+when word 3 is non-zero, and two shorts at `+0xc` and `+0xe` of *that* are read next. Two shorts
+two bytes apart is a **range of indices**, which is the "uniform block index" the objective
+names. And the node's draw computes the sub-object's descriptor entry **itself**, with the
+binder's exact arithmetic, in the same function — so the binder and the draw are two readers of
+one descriptor, and following the call graph from either would have found the other.
+
+**And the block that descriptor names is not where the pose is.** The binder's second argument
+is the entry's word at `+0x0c`, which reads `0x40` for every object measured — and in the
+fork's own `GX2SetVertexUniformBlock` the three arguments are `(index, size, address)` from
+`hCPU->gpr[3..5]`, so **`0x40` is the block's size in bytes, not an offset inside a 256-byte
+block.** A 64-byte block cannot hold twelve floats, and a 256-byte window around one holds no
+rigid transform in any of 233 scans. Both readings now agree, and they agree that the pose is in
+a *different* block: the one the record's index range names, addressed through GX2's own
+uniform block table.
+
+**Which the fork already holds.** `LatteFrameHooks::UniformAssembly` is the fork's record of one
+draw's assembled uniforms, and it carries:
+
+- `data` and `sizeInBytes` — the uniform values the game itself assembled for that draw,
+- `blockAddresses` — the guest addresses of the uniform blocks the draw sourced, as
+  `(bufferId, physicalAddress)` pairs,
+- `stageIndex`, `shaderBaseHash`, `shaderAuxHash`, `writesColour`, `looksUpDepthMap`,
+  `fromRuntime`, and, on the `DisplayList` it belongs to, *whose draw this is*.
+
+So the pose is not something to find in guest memory by searching: it is inside the bytes the
+game assembled for a named node's draw, and the fork records both the bytes and the identity.
+The pose's *offset* within those bytes is found once, by the rigid-transform test over a
+bounded set of draws, and is then a constant. **And whether tick N-1's block is still present
+when tick N paints is answered by the frame recording the fork already keeps** — which is why
+the earlier reading, that the ring must carry N-1 because guest memory does not, was a
+consequence of reading the wrong block.
+
+This is the objective's thesis, confirmed with addresses: identity and pose are the game's own
+to read, and the thing that guessed at them — searching shaders for a 3x4 that moves like a
+camera, matching draws by block address and occurrence index — was guessing at a record the
+fork was already writing down.
+
 **What this leaves, stated rather than assumed.** The block the descriptor's `+0x04` names is
 a 256-byte block in a pool of fixed-size blocks, and it holds no rigid transform at any offset
 at the moment it is bound. The title's own document found a twelve-float 3x4 at `+0xc4` by
