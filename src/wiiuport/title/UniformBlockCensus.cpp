@@ -57,7 +57,17 @@ void UniformBlockCensus::Binder::OnCall(std::span<const uint32_t, 32> gpr,
     m_owner.record(gpr[3], m_second);
 }
 
+void UniformBlockCensus::setIdentityScope(ObjectIdentityScope* scope) {
+    m_scope = scope;
+}
+
 void UniformBlockCensus::record(uint32_t object, bool second) {
+    // Publish the object before anything else, so the draw's own uniform uploads -- which
+    // follow this call, on this thread, inside this draw -- read the right one. A publication
+    // that happens after the scan below would be a publication too late to matter.
+    if (m_scope != nullptr) {
+        m_scope->bind(object);
+    }
     // Both of the two things this binding names, each scored in its own table.
     //
     // The binder's argument is the node's **sub-object** -- the thing whose descriptor it

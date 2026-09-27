@@ -124,6 +124,10 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     std::vector<std::pair<std::string, std::pair<uint32_t, std::array<float, kPoseWords>>>> m_seen;
     uint64_t m_unscanned = 0;
     uint64_t m_noSources = 0;
+    // Whether any assembly carried a published object, so the report can say which of the two
+    // keys the numbers came from. A run where every assembly fell back is a run whose
+    // identities are addresses, and that is a different measurement from one whose are nodes.
+    bool m_sawObjectAddress = false;
     uint64_t m_identitiesRefused = 0;
 };
 

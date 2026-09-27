@@ -53,10 +53,12 @@ std::string section(const std::string& body, const std::string& name) {
     return "";
 }
 
-RecordedUniformAssembly assembly(std::vector<float> data, std::vector<uint32_t> sources) {
+RecordedUniformAssembly assembly(std::vector<float> data, std::vector<uint32_t> sources,
+                                 uint32_t object = 0) {
     RecordedUniformAssembly one;
     one.data = std::move(data);
     one.blockSources = std::move(sources);
+    one.objectAddress = object;
     one.stageIndex = 0;
     return one;
 }
@@ -113,6 +115,59 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
                           affine);
         check::isTrue(locator.bestOffset() == 64 && locator.bestAffineOffset() == 64,
                       "and both accessors agree with their tables");
+    }
+
+    // **The node is the identity, and this is the measurement that says so.** The fallback --
+    // the guest addresses the draw sourced its uniforms from -- was measured to match exactly
+    // one identity across 438,872 assemblies, because the uniform block is re-uploaded at a new
+    // address each frame. So here the *same object* is given a *different* block source on every
+    // assembly, exactly as the title does, and the pose moves between them. A locator that keys
+    // on the block source sees ten sightings of ten different objects and no comparisons at
+    // all; a locator that keys on the node sees one object, nine comparisons, nine movements.
+    // That difference is the whole reason `objectAddress` exists, and this is the test for it.
+    {
+        ObjectPoseLocator locator;
+        for (int seen = 0; seen < 10; seen++) {
+            std::vector<float> words(64, 0.0f);
+            putPose(words, 16, 0.1f * static_cast<float>(seen));
+            // A new address every assembly, as the title produces: the same object, re-uploaded.
+            locator.onAssemblyRecorded(assembly(
+                words, {0x3e000000u + static_cast<uint32_t>(seen) * 0x1000u}, 0x43e01000u));
+        }
+        const std::string body = locator.json();
+        const std::string rigid = section(body, "rigid");
+        check::isTrue(field(rigid, "compared") == "9",
+                      "nine repeat comparisons, because the ten assemblies were one object "
+                      "despite ten different block addresses: " +
+                          rigid);
+        check::isTrue(field(rigid, "moved") == "9" && locator.bestOffset() == 64,
+                      "and nine movements, so the pose is found in the buffer the title "
+                      "assembled for it -- which the address-keyed version of this could not do "
+                      "at all");
+        check::isTrue(field(body, "identitiesSeen") == "1",
+                      "and exactly one identity, which is the number the address key would have "
+                      "reached had it been used: " +
+                          body);
+    }
+
+    // Without a published object the fallback still works, and the report says which source it
+    // used -- a reader must not have to read the code to know whether a number came from the
+    // node or from an address.
+    {
+        ObjectPoseLocator locator;
+        for (int seen = 0; seen < 10; seen++) {
+            std::vector<float> words(64, 0.0f);
+            putPose(words, 16, 0.1f * static_cast<float>(seen));
+            locator.onAssemblyRecorded(assembly(words, {0x3e000000u}, 0));
+        }
+        const std::string body = locator.json();
+        check::isTrue(field(body, "identitiesSeen") == "1",
+                      "with the same block source every time, the fallback also yields one "
+                      "identity -- which is why the real run matched one: " +
+                          body);
+        check::isTrue(field(body, "identitySource") == "\"blockSources\"",
+                      "and the report names the source it used, so a number is never silently "
+                      "from the weaker of two keys");
     }
 
     // Ten assemblies, one of them with a pose, names nothing. This is the case a
