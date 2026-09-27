@@ -404,12 +404,46 @@ address `0x7ffed4000198` -- **base plus 0x198** -- and
 0x7ffed4100000-0x7ffed4e00000  0xd00000  ---p
 ```
 
-**The generated code's data base register is a `PROT_NONE` page.** The alternating
-`rw-p` / `---p` pattern with irregular sizes is this mapper's reserve-then-commit shape, and
-`MemMapper::FreeMemory(base, size, /*fromReservation=*/true)` produces a `PROT_NONE` page by
-`mprotect`ing a released range while keeping its address space -- so a `---p` page next to a live
-region is a **released allocation**, not a boundary. Generated code is running against memory that
-has been taken back.
+**And `%r13` is not the code cache at all -- it is `memory_base`, and the whole reading changes.**
+`BackendX64.cpp:1647` emits, in every generated function's prologue:
+
+```c
+// MOV R13, memory_base
+x64Gen_mov_reg64_imm64(&x64GenContext, REG_RESV_MEMBASE, (uint64)memory_base);
+```
+
+and every guest load and store is emitted as a direct access at
+`REG_RESV_MEMBASE + register + imm` -- `x64Gen_movBEZeroExtend_reg64_mem32Reg64PlusReg64` and its
+siblings, with no page check of any kind. So `movbe 0x3c(%r13,%rax,1),%eax` is **a guest load at
+guest address `0x15c + 0x3c = 0x198`**, and `memory_base` is the base of a **4 GB `PROT_NONE`
+reservation** (`MMU.cpp:132`, `MemMapper::ReserveMemory(nullptr, 0x100000000, P_RW)`, which is
+`mmap(..., PROT_NONE, ...)`), into which the guest's ranges are mapped. The `rw-p` / `---p`
+alternation is that reservation and its mapped ranges; the `---p` page at the base is the part of
+the reservation the guest has never touched.
+
+**So the previous two readings of this fault are both withdrawn.** It is not a released code-cache
+block, and the padding overflow is not its cause. It is a **guest load from guest address 0x198** --
+a near-null dereference on the second pass, faithfully translated, with the program counter and link
+register exactly where the title put them. The direct emission is not a bug: it is how a recompiler
+is supposed to reach guest memory, and it is correct for every page the guest has touched.
+
+That fits every observation, which is why it is worth the two withdrawals:
+
+- **Modes 6 and 8 survive** because neither reaches a second pass, so nothing new is asked of the
+  guest.
+- **Modes 2, 3 and 9 all fault** because the second pass does reach a dereference of a small value
+  as though it were a pointer -- `lwz` at `0x3c(rA)` with `rA = 0x15c` -- and the first pass never
+  got there.
+- **The frame's own `bctrl` chain is the likely route**: it loads a call target from the display
+  object (`mtspr CTR, r0` after `lwz r0, 0x74(r30)` and two more) and dispatches through it, so a
+  display pointer that is not the display on the second entry turns into a small value used as a
+  call target or a base.
+
+**The last piece is the guest instruction**, and it is a bounded read rather than another payload:
+the block being executed is a recompiled one, so its guest program counter is in the recompiler's
+own bookkeeping, and naming it names the instruction that reads 0x198 and the register that holds
+0x15c. That is a guest-logic question, and it is answerable without a debugger full of guesses --
+the recompiler stores the guest PC it is translating.
 
 ### A real bug found on the way, which is not this fault
 
