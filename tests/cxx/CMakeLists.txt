@@ -4,6 +4,7 @@ add_executable(wiiuport_tests
   control_tests.cpp
   logic_gate_tests.cpp
   pose_history_tests.cpp
+  pose_locator_tests.cpp
   paint_tests.cpp
   frame_tests.cpp
   replay_tests.cpp

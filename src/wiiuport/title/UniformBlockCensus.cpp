@@ -36,8 +36,10 @@ std::string_view installationName(std::optional<GuestCallProbes::Installation> v
 } // namespace
 
 UniformBlockCensus::UniformBlockCensus(Register registerProbe, ReadWord readWord,
-                                       ObjectPoseHistory::ReadWords readWords)
-    : m_register(registerProbe), m_readWord(readWord), m_poseHistory(readWords) {
+                                       ObjectPoseHistory::ReadWords readWords,
+                                       const ObjectPoseLocator* locator)
+    : m_register(registerProbe), m_readWord(readWord), m_poseHistory(readWords),
+      m_locator(locator) {
 }
 
 void UniformBlockCensus::install() {
@@ -267,6 +269,15 @@ std::string UniformBlockCensus::json() const {
     // or after it is what decides whether a blend can be driven from the binder alone,
     // and it is counted rather than read off the code.
     body.object("poseHistory", m_poseHistory.json());
+    // And the other half of the question, from the other place it can be answered: the
+    // uniform buffer the game assembled for a named node's draw, which is where the
+    // locator looks. Null when there is no locator, rather than a member that is absent
+    // and reads as a route that has nothing to say.
+    if (m_locator == nullptr) {
+        body.raw("poseLocator", "null");
+    } else {
+        body.object("poseLocator", m_locator->json());
+    }
     if (!m_refusal.empty()) {
         body.string("refusal", m_refusal);
     }
