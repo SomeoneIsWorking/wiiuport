@@ -1486,6 +1486,30 @@ two ticks apart: **the previous use of that address is still there when the next
 That is the question the objective asks, and the answer is yes, with the denominator stated: 16
 comparisons over 8 objects.
 
+**The scan against the real address is negative too, and now that is a fact about the block
+rather than about where it was read from.** `ObjectPoseHistory` is handed the same address the
+ring re-reads. It used to be handed the record's *size* word, `0x40`, as though it were an
+address, so every one of its readings was 64 bytes of guest memory at `0x40` -- one location, over
+and over. Measured at the address the binder names:
+
+```
+the bound block, read at the address the binder names:
+  236,161 observations, 0 whose block looked like a pose, 236,161 that did not,
+  0 unreadable, 0 without an object, 0 blocks refused
+scans: 233 over 4 blocks, 12 pose words
+offset hits: 0 -- none
+```
+
+So the block the descriptor names, read where the binder says it is, holds no twelve-float 3x4 at
+any 4-aligned offset, over 236,161 observations and 233 whole-block scans. **That is a real
+negative and it retires the third place to look.** The two earlier negatives were artifacts of the
+address; this one is not, and it agrees with the other two -- the title positions geometry on the
+CPU and hands GX2 vertex bytes, so there is no transform left in a uniform block to find.
+
+**The ring's verdict is 15 to 16 of 16 across runs**, not 16 of 16: one run of identical code
+reported one comparison overwritten out of sixteen, so the block's bytes do change sometimes and
+the comparison is not trivially always-equal. Stated as a range because two samples is two samples.
+
 Two things this does **not** say, because the earlier report had them backwards:
 
 - **The 233 whole-block scans were not of this block.** They read `object + 0xFC`, which is the

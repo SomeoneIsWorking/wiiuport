@@ -234,15 +234,18 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
         binding.otherBlock = blockOf(binding.otherEntry, binding.otherBlockSize);
         // What the bound block holds, read now, while the binder is about to hand it to the GPU.
         //
-        // **The `0x100`-apart claim is withdrawn.** It came from `mapWords`, which added one word
-        // to every other word and so produced differences out of unmapped memory; the second
-        // entry is not mapped at all (199,280 of 199,280 reads failed), so there is no second
-        // block here and nothing to be 0x100 from. What is passed is the record's own size word
-        // and the same word from the other record, which is the only pair of sizes this binder
-        // hands over. Read before the lock, because a binding on the display thread must not queue
-        // behind a report being written.
-        m_poseHistory.observe(object, binding.entry[kEntryBlockSize / 4],
-                              binding.otherEntry[kEntryBlockSize / 4]);
+        // **Given `blockOf`, which is the same address the ring gets -- and which is the fix for a
+        // scan that was reading the wrong place entirely.** It used to be handed the record's size
+        // word, `0x40`, as though it were an address, so every one of its readings was 64 bytes of
+        // guest memory at `0x40` -- one location, read over and over, which is how 233 whole-block
+        // scans came to agree. The address is the record's other word, the one the binder passes
+        // to `GX2Set*UniformBlock`, and the two are now the same value the ring re-reads.
+        //
+        // The other slot's address is zero when its record did not read, and a zero is counted as
+        // a descriptor that named nothing rather than read as a pose of zeroes. Read before the
+        // lock, because a binding on the display thread must not queue behind a report being
+        // written.
+        m_poseHistory.observe(object, binding.block, binding.otherBlock);
     }
     std::scoped_lock lock(m_mutex);
     if (std::find(m_seen.begin(), m_seen.end(), object) == m_seen.end()) {
