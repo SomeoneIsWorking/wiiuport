@@ -727,6 +727,8 @@ class GateState:
     ticks: int | None
     refusal: str
     probe: str = "unreported"
+    gate_probe: str = "unreported"
+    gate_entries: int | None = None
     block: str = "unreported"
     word_at_entry: str = "unreported"
     word_at_body: str = "unreported"
@@ -755,6 +757,8 @@ def read_gate(port: int = DEFAULT_PORT, timeout: float = 2.0) -> GateState:
     return GateState(
         tick=int(payload["tick"], 16),
         probe=str(payload.get("probe", "unreported")),
+        gate_probe=str(payload.get("gateProbe", "unreported")),
+        gate_entries=(None if payload.get("gateEntries") is None else int(payload["gateEntries"])),
         block=str(payload.get("block", "unreported")),
         word_at_entry=str(payload.get("wordAtTickEntry", "unreported")),
         word_at_body=str(payload.get("wordAtTickBody", "unreported")),

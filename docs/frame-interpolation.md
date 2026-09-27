@@ -248,11 +248,35 @@ entered**, and each of those is measured rather than inferred:
   seconds at sixty paints a second.
 
 So the gate's code is in place, its branch is in place and correct, and nothing
-executes it. The paint mod's stand-in lives in the same loader arena and does
-execute -- reached through a vtable, that is, through an indirect call the CPU
-resolves at the call. The gate is reached by a *relative branch* out of recompiled
-code, across about 30 MiB backwards. That difference is the next thing to test, and
-it is a question about the recompiler rather than about this title.
+executes it. Three things were wrong with it in turn, and each is fixed:
+
+1. **Its link-time probe held the tick's entry**, which took it from the caller
+   census for the rest of every run. Fixed in the fork: a probe may now ask for
+   only the moment and hand the entry straight back. That fix is what made the
+   measurement above possible at all.
+2. **Registering that second probe from inside the install callback** appended to
+   the vector the install loop was iterating, and the append invalidated the loop.
+   The result was worse than no probe: a registration that reported `installed`
+   and counted nothing, which reads as a title that never calls the function. Fixed
+   in the fork: the registrations are a deque, indexed, re-reading the size each
+   turn, so one made from a callback is installed in the same pass.
+3. **Its two counters were in the code arena** -- memory the guest executes from.
+   A guest store into an area documented for instructions is not something to rely
+   on, and a store that lands nowhere is indistinguishable from code that never
+   ran. Fixed: the fork can now hand out memory the guest may *write*, from its own
+   system area, zeroed, and deliberately not registered with the recompiler. The
+   gate's instructions stay in code and its counters go to data.
+
+**What is left, stated as the open question it is.** The gate still reports zero
+calls and zero ticks after all three, and its payload reads back from guest memory
+word for word as the code builds it. The one difference left between the gate and
+the paint mod, which shares that arena and demonstrably runs, is *how they are
+reached*: the paint mod's stand-in is reached through a vtable, an indirect call
+the CPU resolves at the call, and the gate through a relative branch out of
+recompiled code about 30 MiB backwards. So the next experiment is not about this
+title at all -- it is to reach the paint mod's own stand-in by a direct branch and
+see whether the picture still reaches sixty. That has a known-good control in the
+same mechanism and answers the question in one run.
 
 **What the title's own code says about it.** `FUN_025f172c` is the per-frame
 entry, and it calls the tick unconditionally:

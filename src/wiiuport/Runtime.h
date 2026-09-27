@@ -2,8 +2,8 @@
 
 #include <mutex>
 
-#include "wiiuport/control/ControlChannel.h"
 #include "Cafe/HW/Espresso/GuestPatching.h"
+#include "wiiuport/control/ControlChannel.h"
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FrameGate.h"
 #include "wiiuport/frame/FramePresenter.h"
@@ -136,10 +136,11 @@ class Runtime {
     guest::LineProbe m_lineProbe{m_writers};
     guest::CallerCensus m_callers{&GuestCallProbes::Register};
     title::LogicGate m_logic{&GuestCallProbes::Register, &GuestPatching::AllocateCode,
-                            &GuestPatching::WriteWord, &GuestPatching::ReadWord};
+                             &GuestPatching::AllocateData, &GuestPatching::WriteWord,
+                             &GuestPatching::ReadWord};
     title::UniformBlockCensus m_blocks{&GuestCallProbes::Register, &GuestPatching::ReadWord};
-    title::WindWakerPaint m_paint{&GuestCallProbes::Register, &GuestPatching::AllocateCode,
-                                  &GuestPatching::WriteWord, &GuestPatching::ReadWord,
+    title::WindWakerPaint m_paint{&GuestCallProbes::Register,      &GuestPatching::AllocateCode,
+                                  &GuestPatching::WriteWord,       &GuestPatching::ReadWord,
                                   &GuestPatching::SetSwapInterval, &GuestPatching::SwapInterval};
     interp::VertexBlend m_vertexBlend{m_objectBlend, m_writers,
                                       interp::ContinuousInterpolator::kBlendPoint};

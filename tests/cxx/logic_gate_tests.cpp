@@ -2,9 +2,11 @@
 #include "suites.h"
 #include "wiiuport/title/LogicGate.h"
 
+#include <algorithm>
 #include <map>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 using wiiuport::title::LogicGate;
@@ -44,15 +46,40 @@ GuestCallProbes::Probe* g_probe = nullptr;
 // Whether the registration asked to keep the entry. It must not: a probe that
 // holds the tick's entry takes it from the caller census for the rest of the run,
 // and the only symptom is a count of zero that reads as a title that never ticks.
-bool g_holdsEntry = true;
+// Every registration the gate makes, with what it asked for. The tick's must be
+// momentary and the gate's own block's must not: the first because holding the
+// tick's entry takes it from the caller census for the rest of the run, the second
+// because the count of entries is the whole diagnosis.
+std::vector<std::pair<uint32_t, bool>> g_registrations;
 
-void keepRegistration(uint32_t, uint32_t, GuestCallProbes::Probe& probe, bool holdsEntry) {
+void keepRegistration(uint32_t entry, uint32_t, GuestCallProbes::Probe& probe, bool holdsEntry) {
     g_probe = &probe;
-    g_holdsEntry = holdsEntry;
+    g_registrations.emplace_back(entry, holdsEntry);
+}
+
+// Whether the registration for `entry` asked to keep it. A registration that is
+// not there at all counts as keeping it, so a missing registration fails the
+// check rather than passing it.
+bool holdsEntry(uint32_t entry) {
+    const auto found =
+        std::find_if(g_registrations.begin(), g_registrations.end(), [entry](const auto& pair) {
+            return pair.first == entry;
+        });
+    return found != g_registrations.end() ? found->second : true;
 }
 
 uint32_t allocateCode(uint32_t) {
     return kBlock;
+}
+
+// The counters' block: a different address from the code block, because it is a
+// different kind of memory. The guest writes this one and only executes the
+// other, and the gate's whole difficulty was that it could not rely on a store
+// into the area meant for instructions.
+constexpr uint32_t kCounters = 0x00e0a000;
+
+uint32_t allocateData(uint32_t) {
+    return kCounters;
 }
 
 bool writeWord(uint32_t address, uint32_t value) {
@@ -66,8 +93,8 @@ bool readWord(uint32_t address, uint32_t& value) {
 LogicGate makeGate(FakeGuest& guest) {
     g_fake = &guest;
     g_probe = nullptr;
-    g_holdsEntry = true;
-    return LogicGate(&keepRegistration, &allocateCode, &writeWord, &readWord);
+    g_registrations.clear();
+    return LogicGate(&keepRegistration, &allocateCode, &allocateData, &writeWord, &readWord);
 }
 
 // The moment the fork reports the title is linked, which is where the gate's
@@ -113,13 +140,15 @@ void wiiuport::tests::runLogicGateTests() {
     // The gate's words, one at a time, because every one is lifted from the
     // title and a payload this size is mostly the cost of being sure.
     {
-        const auto words = LogicGate::payload(kBlock);
+        const auto words = LogicGate::payload(kBlock, kCounters);
         check::isTrue(words.size() == LogicGate::kGateWords, "the gate is sixteen words");
         if (words.size() != LogicGate::kGateWords) {
             return;
         }
-        const uint32_t calls = kBlock + 4 * LogicGate::kCallsWord;
-        const uint32_t ticks = kBlock + 4 * LogicGate::kTicksWord;
+        // In the data block, which is where the payload counts and where the
+        // report says the counters are.
+        const uint32_t calls = kCounters + 4 * LogicGate::kCallsWord;
+        const uint32_t ticks = kCounters + 4 * LogicGate::kTicksWord;
         const uint32_t through = kBlock + 4 * LogicGate::kThroughWord;
         const uint32_t tail = through + 8;
         // Every word below is written as opcode, then source in bits 21-25, then
@@ -171,7 +200,7 @@ void wiiuport::tests::runLogicGateTests() {
     // A block the tick and the gate cannot both reach is refused rather than
     // written with a displacement that lands elsewhere.
     {
-        check::isTrue(LogicGate::payload(0x40000000).empty(),
+        check::isTrue(LogicGate::payload(0x40000000, kCounters).empty(),
                       "a gate too far from the tick is refused");
     }
     // Installing, and putting it back.
@@ -180,9 +209,12 @@ void wiiuport::tests::runLogicGateTests() {
         LogicGate gate = makeGate(guest);
         gate.install();
         linked();
-        check::isTrue(!g_holdsEntry,
-                      "the gate's probe asks not to keep the tick's entry, so the caller census "
-                      "on that address can still take it");
+        check::isTrue(!holdsEntry(LogicGate::kTick),
+                      "the gate's probe on the tick asks not to keep the entry, so the caller "
+                      "census on that address can still take it");
+        check::isTrue(holdsEntry(kBlock),
+                      "and the probe on the gate's own block does keep it, because counting the "
+                      "gate's entries is what says whether the gate is reached at all");
         check::isTrue(gate.enable().empty(), "the gate installs over the tick's body");
         uint32_t word = 0;
         check::isTrue(readWord(LogicGate::kTickBody, word) && word != LogicGate::kTickSecond,
@@ -222,8 +254,8 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(body.find("\"callsCount\":null") != std::string::npos,
                       "the call counter reads as unread before any call");
         // Written, it reads.
-        guest.writeWord(kBlock + 4 * LogicGate::kCallsWord, 41);
-        guest.writeWord(kBlock + 4 * LogicGate::kTicksWord, 20);
+        guest.writeWord(kCounters + 4 * LogicGate::kCallsWord, 41);
+        guest.writeWord(kCounters + 4 * LogicGate::kTicksWord, 20);
         body = gate.json();
         check::isTrue(body.find("\"callsCount\":41") != std::string::npos,
                       "and the call counter reads what is there");

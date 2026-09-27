@@ -58,12 +58,16 @@ class LogicGate {
     // through path starts, after the skipped path's return.
     static constexpr size_t kThroughWord = 13;
     static constexpr size_t kGateWords = 16;
-    static constexpr size_t kCallsWord = 16;
-    static constexpr size_t kTicksWord = 17;
-    static constexpr size_t kBlockWords = 18;
+    // The code block holds only the sixteen instructions; the two counters the
+    // guest writes are in a block of their own, in memory it may write.
+    static constexpr size_t kBlockWords = kGateWords;
+    static constexpr size_t kCallsWord = 0;
+    static constexpr size_t kTicksWord = 1;
+    static constexpr size_t kCounterWords = 2;
     // How many bytes the gate asks the loader's arena for, reported so a report
     // that says the counters are zero can be read against the space they are in.
     static constexpr uint32_t kBlockBytes = 4 * kBlockWords;
+    static constexpr uint32_t kCounterBytes = 4 * kCounterWords;
 
     // The fork's seams, injected so this is testable without a guest. The last
     // argument says the probe does not keep the tick's entry: this one wants the
@@ -73,13 +77,19 @@ class LogicGate {
     using Register = void (*)(uint32_t entry, uint32_t firstInstruction,
                               GuestCallProbes::Probe& probe, bool holdsEntry);
     using AllocateCode = uint32_t (*)(uint32_t sizeInBytes);
+    // The counters are words the *guest* stores into, which is a different kind of
+    // memory from words it executes: they were in the code block, and a guest
+    // store into an area documented for instructions is not something to rely on,
+    // because a store that lands nowhere is indistinguishable from code that never
+    // ran -- which is exactly what the counters said.
+    using AllocateData = uint32_t (*)(uint32_t sizeInBytes);
     using WriteWord = bool (*)(uint32_t guestAddress, uint32_t value);
     using ReadWord = bool (*)(uint32_t guestAddress, uint32_t& value);
     // For the report: the call the gate replaced, and the counter's address.
     using Where = std::string (*)();
 
-    LogicGate(Register registerProbe, AllocateCode allocateCode, WriteWord writeWord,
-              ReadWord readWord);
+    LogicGate(Register registerProbe, AllocateCode allocateCode, AllocateData allocateData,
+              WriteWord writeWord, ReadWord readWord);
 
     // Registers the probe, which is also the moment the title's modules are
     // linked and the gate's memory can be taken.
@@ -98,7 +108,10 @@ class LogicGate {
     // The gate's words for a block at `blockAddress`: count the call, let every
     // other one through. Every branch is direct, and the tick is reached by a
     // tail branch so that its return goes to the title's caller.
-    static std::vector<uint32_t> payload(uint32_t blockAddress);
+    // Sixteen words for `blockAddress` to branch to, counting in
+    // `countersAddress`: two addresses because the two are different kinds of
+    // memory, instructions the guest executes and words it writes.
+    static std::vector<uint32_t> payload(uint32_t blockAddress, uint32_t countersAddress);
 
     std::string json() const;
 
@@ -107,9 +120,11 @@ class LogicGate {
 
     Register m_register;
     AllocateCode m_allocateCode;
+    AllocateData m_allocateData;
     WriteWord m_writeWord;
     ReadWord m_readWord;
     std::atomic<uint32_t> m_block{0};
+    std::atomic<uint32_t> m_counters{0};
     uint32_t m_original = 0;
     bool m_enabled = false;
     mutable std::mutex m_mutex;
