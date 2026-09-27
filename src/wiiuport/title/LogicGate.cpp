@@ -36,21 +36,6 @@ constexpr uint32_t kBranchCount = 0x4e800420;    // bctr
 constexpr uint32_t kPrimaryBranch = 18;
 constexpr int64_t kRelativeBranchReach = 0x02000000;
 
-// The tick's own first two instructions, lifted whole out of the title's image
-// at 0x025d42ec and 0x025d42f0 -- bytes read from it, not assembled here:
-//
-//     025d42ec  mfspr r0,LR        7c0802a6
-//     025d42f0  stw  r0,0x4(r1)    90010004
-//
-// The gate has to supply them, because it takes the word at 0x025d42f0 for its
-// own branch, and the tick cannot be entered past them: its epilogue reads the
-// saved link register back out of the caller's frame at 0x4(r1) and returns
-// through it, so a tick that skipped the store would return to whatever LR held
-// when the gate ran. This is the whole reason the gate replaces the *second*
-// instruction rather than branching around the first.
-constexpr uint32_t kTickSaveLink = 0x7c0802a6;  // mfspr r0,LR
-constexpr uint32_t kTickStoreLink = 0x90010004; // stw  r0,0x4(r1)
-
 std::string hex(uint32_t value) {
     std::array<char, 11> text{};
     std::snprintf(text.data(), text.size(), "0x%08x", value);
@@ -120,6 +105,40 @@ bool withinReach(uint32_t from, uint32_t to) {
 
 // Only for the link-time moment: the gate replaces the tick's entry, so a probe
 // there would be counting calls the gate has taken over.
+// The standing probe on the tick's entry. It counts every call -- so the host
+// knows the call rate whether or not the gate is in -- and its resume is the
+// gate's own block, which is how the gate is reached at all.
+//
+// Reached by the probe's stub branch, and that matters: a branch written by the
+// host into a guest function's *interior* does not arrive in the trampoline area,
+// whatever kind of branch it is, because the recompiler has to turn it into a jump
+// to a host address it never translated. The stub's branch is the one way in that
+// is known to work, and the caller census has counted 2020 calls a run through it.
+class LogicGate::Counter final : public GuestCallProbes::Probe {
+  public:
+    explicit Counter(LogicGate& owner) : m_owner(owner) {
+    }
+
+    void OnInstall(GuestCallProbes::Installation installation) override;
+    void OnCall(std::span<const uint32_t, 32>, uint32_t) override;
+
+    // Atomic because the count is written from whichever guest thread called the
+    // tick and read from the control channel's. A plain counter read across those
+    // two is a race, and a racy count is a number nobody may report.
+    std::atomic<uint64_t> calls{0};
+
+  private:
+    LogicGate& m_owner;
+};
+
+void LogicGate::Counter::OnInstall(GuestCallProbes::Installation installation) {
+    m_owner.onCounted(installation);
+}
+
+void LogicGate::Counter::OnCall(std::span<const uint32_t, 32>, uint32_t) {
+    calls.fetch_add(1, std::memory_order_relaxed);
+}
+
 class LogicGate::Moment final : public GuestCallProbes::Probe {
   public:
     explicit Moment(LogicGate& owner) : m_owner(owner) {
@@ -142,7 +161,8 @@ void LogicGate::Moment::OnCall(std::span<const uint32_t, 32>, uint32_t) {
 LogicGate::LogicGate(Register registerProbe, AllocateCode allocateCode, AllocateData allocateData,
                      WriteWord writeWord, ReadWord readWord)
     : m_register(registerProbe), m_allocateCode(allocateCode), m_allocateData(allocateData),
-      m_writeWord(writeWord), m_readWord(readWord), m_moment(new Moment(*this)) {
+      m_writeWord(writeWord), m_readWord(readWord), m_moment(new Moment(*this)),
+      m_counter(new Counter(*this)) {
 }
 
 void LogicGate::install() {
@@ -152,7 +172,7 @@ void LogicGate::install() {
     // for the rest of the run, so the caller census -- the only thing that counts
     // the simulation -- would see no calls at all. That is not a hypothetical: it
     // is what this registration did, and it read as a title that never ticks.
-    m_register(kTick, kTickFirst, *m_moment, false);
+    m_register(kTick, kTickFirst, *m_moment, false, 0);
 }
 
 void LogicGate::onInstalled(GuestCallProbes::Installation installation) {
@@ -174,15 +194,54 @@ void LogicGate::onInstalled(GuestCallProbes::Installation installation) {
     m_counters = m_allocateData(kCounterBytes);
     if (m_counters == 0) {
         m_refusal = "there was no writable guest memory for the gate's two counters";
+        return;
     }
+    // The block is filled before anything can reach it, because the standing
+    // probe below sends *every* call here, gate or no gate. A freshly allocated
+    // block is zeroes, and a zero word is an illegal instruction: an un-gated
+    // gate did not run the title's tick, it raised a guest exception inside the
+    // simulation, and the product died in the scheduler with a stack trace that
+    // named nothing of this. "Out" is therefore a payload of its own -- one
+    // branch, straight to the instruction after the entry -- and not the absence
+    // of one.
+    if (!passThrough()) {
+        m_refusal = "the gate's block at " + hex(m_block) + " would not take its pass-through word";
+        return;
+    }
+    // Now that the block exists, the standing probe: it takes the entry this
+    // momentary one is about to give back, and it sends the call to the gate.
+    // Registering from inside this callback is why the installer had to be fixed
+    // to survive an append while it iterates.
+    m_register(kTick, kTickFirst, *m_counter, true, m_block);
+}
+
+bool LogicGate::passThrough() {
+    // The stub has already run the entry's own first instruction, so the title's
+    // second is where a call that is not being gated belongs -- kTickBody, and not
+    // the word after it. The tick's epilogue returns through the link register
+    // its second instruction saved into the caller's frame, so continuing one word
+    // too far does not merely run different code: it returns through a register
+    // nobody saved, and the title spins in a wait loop forever with a control
+    // channel still answering. This is the same one-word payload the `through`
+    // control uses, deliberately: the control that proves a bare pass-through
+    // arrives and the resting state of the gate are the same code, so there is no
+    // way to tell them apart by accident.
+    return m_writeWord(m_block, branchTo(m_block, kTickBody, false));
+}
+
+void LogicGate::onCounted(GuestCallProbes::Installation installation) {
+    std::scoped_lock lock(m_mutex);
+    m_counted = installation;
+}
+
+uint32_t LogicGate::resumeTarget() const {
+    std::scoped_lock lock(m_mutex);
+    return m_block.load();
 }
 
 std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t countersAddress) {
-    // The gate runs in its own block, because a 52-byte tick has no room for it.
-    // The word at 0x025d42f0 -- the tick's second instruction -- takes a branch
-    // to here, and the gate's return and its tail branch both go to the title's
-    // own code. It supplies the tick's first two instructions itself, so a call
-    // it lets through is the title's tick entered the way the title enters it.
+    // The gate runs in its own block, because a 52-byte tick has no room for it,
+    // and the probe's stub is what brings a call here.
     //
     // Every word here is either lifted from the title's image or a branch, and
     // each lifted form was checked against a second instruction in that image
@@ -194,18 +253,18 @@ std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t counter
     // `addi r1,r1,0x8` (0x38210008).
     //
     // r3 to r6 are volatile under the EABI and the tick reads none of them on
-    // entry, so the gate keeps to them. r0 and r1 are untouched until the through
-    // path, where the title's own two instructions touch them.
+    // entry, so the gate keeps to them. Nothing here touches r0, r1 or the link
+    // register: a skipped call returns through a link register the stub's own
+    // `mfspr r0,LR` never disturbed, and a call let through continues at the
+    // title's own second instruction with its registers as the title left them.
+    //
     // The counters are in the data block: memory the guest writes, not memory it
-    // executes from. A store into the code arena is not something to rely on,
-    // because a store that lands nowhere is indistinguishable from code that
-    // never ran -- which is what the counters said when they lived there.
+    // executes from.
     const uint32_t calls = countersAddress + 4 * kCallsWord;
     const uint32_t ticks = countersAddress + 4 * kTicksWord;
     const uint32_t testAt = blockAddress + 4 * 6;
     const uint32_t through = blockAddress + 4 * kThroughWord;
-    const uint32_t tailAt = through + 8;
-    if (!withinReach(testAt, through) || !withinReach(tailAt, kTickBody + 4)) {
+    if (!withinReach(testAt, through) || !withinReach(through, kTickBody)) {
         return {};
     }
     return {
@@ -222,18 +281,16 @@ std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t counter
         kAddImmediate | (6 << 21) | (6 << 16) | 1,               // addi r6, r6, 1
         kStoreWord | (6 << 21) | (5 << 16),                      // stw  r6, 0(r5)
         kReturn,                                                 // blr  on a skipped call
-        kTickSaveLink,                                           // mfspr r0,LR
-        kTickStoreLink,                                          // stw  r0,0x4(r1)
-        branchTo(tailAt, kTickBody + 4, false),                  // b    the tick's own body
+        branchTo(through, kTickBody, false),                     // b    the tick's own body
     };
 }
 
 std::vector<uint32_t> LogicGate::throughPayload(uint32_t blockAddress, int flavour) {
-    // One word that branches back to the instruction after the branch site: no
-    // state, nothing to keep right, and the tick either runs or does not. The
-    // census says which, and it counts the tick whether or not this payload runs.
+    // One word that branches to the title's own second instruction: no state,
+    // nothing to keep right, and the tick either runs or does not. The census says
+    // which, and it counts the tick whether or not this payload runs.
     if (flavour == 1) {
-        return {branchTo(blockAddress, kTickBody + 4, false)};
+        return {branchTo(blockAddress, kTickBody, false)};
     }
     // Through the count register, which is the way the recompiler resolves a
     // target it has a jump-table entry for -- the way a stand-in reached through a
@@ -250,7 +307,13 @@ std::vector<uint32_t> LogicGate::throughPayload(uint32_t blockAddress, int flavo
 std::string LogicGate::enable(bool through, int throughFlavour) {
     std::scoped_lock lock(m_mutex);
     m_throughFlavour = throughFlavour;
-    if (m_enabled) {
+    // Not an early return when it is already in. Enabling is a request for a
+    // *particular* payload, and a gate that answers "already on" without looking
+    // at which one is in cannot be moved from the pass-through control to the
+    // counting one without going out first -- which is how a run ends up
+    // measuring a control and calling it a gate, or the other way round, with the
+    // report saying only that the gate is on.
+    if (m_enabled && m_through == through && m_installedFlavour == throughFlavour) {
         return {};
     }
     if (m_block == 0 || m_counters == 0) {
@@ -265,16 +328,16 @@ std::string LogicGate::enable(bool through, int throughFlavour) {
     }
     // The word the gate takes is the tick's second instruction, and it is
     // checked rather than assumed: a revision whose tick starts differently gets a
-    // refusal instead of a gate that ran the wrong code. The first instruction is
-    // not checked here because the gate does not replace it -- the probe has --
-    // and the gate supplies its own copy.
-    uint32_t first = 0;
-    if (!m_readWord(kTickBody, first) || first != kTickSecond) {
-        m_refusal = "the tick's body at " + hex(kTickBody) + " holds " + hex(first) + ", not " +
+    // refusal instead of a gate that ran the wrong code. The gate does not
+    // replace it -- nothing is written into the title's code at all -- but the
+    // gate's through path continues at that instruction, so its identity is part
+    // of what the gate is for.
+    uint32_t second = 0;
+    if (!m_readWord(kTickBody, second) || second != kTickSecond) {
+        m_refusal = "the tick's body at " + hex(kTickBody) + " holds " + hex(second) + ", not " +
                     hex(kTickSecond) + "; this gate is written for this title's tick";
         return m_refusal;
     }
-    m_original = first;
     // `through` is the control, and which way it branches *is* the experiment:
     // 1 is a direct branch and 2 an indirect one through the count register, which
     // is the mechanism the recompiler's jump table serves. Everything else about
@@ -293,17 +356,13 @@ std::string LogicGate::enable(bool through, int throughFlavour) {
             return m_refusal;
         }
     }
-    const uint32_t entry = branchTo(kTickBody, m_block, false);
-    if (!withinReach(kTickBody, m_block)) {
-        m_refusal =
-            "the gate at " + hex(m_block) + " is out of a branch's reach of " + hex(kTickBody);
-        return m_refusal;
-    }
-    if (!m_writeWord(kTickBody, entry)) {
-        m_refusal = "the tick's body at " + hex(kTickBody) + " would not take the branch";
-        return m_refusal;
-    }
+    // Nothing is written into the title's code. The probe's own stub sends the
+    // call here, and the words in the tick's body are left exactly as they were:
+    // a host-written branch at an interior address does not arrive, and writing
+    // one there would also take the tick's second instruction away for good.
     m_enabled = true;
+    m_through = through;
+    m_installedFlavour = throughFlavour;
     m_refusal.clear();
     lucent::info("gate", "logic gate at {}: the tick at {} now runs every other call{}",
                  hex(m_block), hex(kTick),
@@ -319,12 +378,16 @@ std::string LogicGate::disable() {
     if (!m_enabled) {
         return {};
     }
-    if (!m_writeWord(kTickBody, m_original)) {
-        m_refusal =
-            "the tick's body at " + hex(kTickBody) + " would not take " + hex(m_original) + " back";
+    // The gate's own block goes back to its pass-through word. The title's code
+    // is untouched and always was: the probe holds the entry, and the block is
+    // where the decision lives.
+    if (!passThrough()) {
+        m_refusal = "the gate's block at " + hex(m_block) + " would not take its pass-through word";
         return m_refusal;
     }
     m_enabled = false;
+    m_through = false;
+    m_installedFlavour = 0;
     m_refusal.clear();
     lucent::info("gate", "the tick at {} is the title's own again", hex(kTick));
     return {};
@@ -349,6 +412,23 @@ std::string LogicGate::json() const {
     // whether a zero count means "no calls came" or "the gate is not wired to
     // the tick", which are the same number and not the same finding.
     body.string("probe", std::string(installationName(m_probe)));
+    // The standing probe that actually holds the entry, and the calls it counted.
+    // These are the two numbers that say whether the gate is reached at all, and
+    // they are separate from the counters above because they are kept by the host
+    // rather than by the guest: the guest's own counter cannot tell "the gate did
+    // not run" from "the gate ran and its store did not land", and those are the
+    // two things worth telling apart.
+    body.string("holdingProbe", std::string(installationName(m_counted)));
+    body.number("callsAtProbe", m_counter != nullptr ? m_counter->calls.load() : 0);
+    // Which payload the block holds, because "enabled" alone cannot say it: the
+    // pass-through control is enabled too, and it is the control, not the gate.
+    body.raw("through", m_through ? "true" : "false");
+    body.number("flavour", m_through ? m_installedFlavour : 0);
+    // Read straight from the member, not through resumeTarget(): the report
+    // already holds the lock, and taking it again in the same call is a
+    // self-deadlock that hangs the first test to ask the gate anything. The
+    // accessor is for callers that do not hold it.
+    body.string("resume", hex(m_block.load()));
     // Quoted, because a client parses this: `raw` writes a value verbatim, and a
     // bare `0x90010004` is not JSON. That is not a cosmetic slip -- the route's
     // only consumer is a JSON parser, so one unquoted word made the whole report

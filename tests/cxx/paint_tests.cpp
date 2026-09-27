@@ -64,7 +64,8 @@ uint32_t g_lastBlock = 0;
 // the title does -- through the probe -- instead of reaching inside the mod.
 GuestCallProbes::Probe* g_probe = nullptr;
 
-void keepRegistration(uint32_t, uint32_t, GuestCallProbes::Probe& probe, bool /*holdsEntry*/) {
+void keepRegistration(uint32_t, uint32_t, GuestCallProbes::Probe& probe, bool /*holdsEntry*/,
+                      uint32_t /*resume*/) {
     g_probe = &probe;
 }
 
@@ -234,9 +235,9 @@ void wiiuport::tests::runPaintTests() {
         check::isTrue(WindWakerPaint::modeFrom(7).has_value() &&
                           *WindWakerPaint::modeFrom(7) == WindWakerPaint::Mode::BranchEntry,
                       "mode 7 is the branch-entry control");
-        check::isTrue(WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::BranchEntry)
-                          .has_value(),
-                      "and it builds a payload");
+        check::isTrue(
+            WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::BranchEntry).has_value(),
+            "and it builds a payload");
         check::isTrue(WindWakerPaint::modeFrom(6) == WindWakerPaint::Mode::OneAtSixty,
                       "mode 6 is one paint at one vblank a flip");
         check::isTrue(WindWakerPaint::modeFrom(5) == WindWakerPaint::Mode::IntervalField,

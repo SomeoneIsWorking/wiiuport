@@ -41,8 +41,8 @@ FakeGuest* g_fake = nullptr;
 GuestCallProbes::Probe* g_first = nullptr;
 GuestCallProbes::Probe* g_second = nullptr;
 
-void keepRegistration(uint32_t entry, uint32_t, GuestCallProbes::Probe& probe,
-                      bool /*holdsEntry*/) {
+void keepRegistration(uint32_t entry, uint32_t, GuestCallProbes::Probe& probe, bool /*holdsEntry*/,
+                      uint32_t /*resume*/) {
     if (entry == UniformBlockCensus::kBinder) {
         g_first = &probe;
     } else {

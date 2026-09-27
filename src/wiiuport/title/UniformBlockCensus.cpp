@@ -80,8 +80,8 @@ UniformBlockCensus::UniformBlockCensus(Register registerProbe, ReadWord readWord
 }
 
 void UniformBlockCensus::install() {
-    m_register(kBinder, kFirstInstruction, m_first, true);
-    m_register(kBinderSecond, kFirstInstruction, m_second, true);
+    m_register(kBinder, kFirstInstruction, m_first, true, 0);
+    m_register(kBinderSecond, kFirstInstruction, m_second, true, 0);
 }
 
 void UniformBlockCensus::Binder::OnInstall(GuestCallProbes::Installation result) {

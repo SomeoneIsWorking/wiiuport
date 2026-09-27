@@ -65,8 +65,11 @@ class UniformBlockCensus {
     // a standing one -- each exists to count calls for the whole run -- so each
     // passes true. The parameter is here so that one `GuestCallProbes::Register`
     // address fits every seam the product hands it to.
+    // `resume` is where the call continues; zero is the instruction after the
+    // entry, which is what an observer wants. It is in the signature so that one
+    // `GuestCallProbes::Register` address fits every seam the product hands it to.
     using Register = void (*)(uint32_t entry, uint32_t firstInstruction,
-                              GuestCallProbes::Probe& probe, bool holdsEntry);
+                              GuestCallProbes::Probe& probe, bool holdsEntry, uint32_t resume);
     using ReadWord = bool (*)(uint32_t guestAddress, uint32_t& value);
 
     UniformBlockCensus(Register registerProbe, ReadWord readWord);

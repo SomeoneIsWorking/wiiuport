@@ -732,11 +732,29 @@ class GateState:
     block: str = "unreported"
     word_at_entry: str = "unreported"
     word_at_body: str = "unreported"
+    # The probe that holds the tick's entry, and the calls it counted. Separate
+    # from `calls`, which is the gate's own guest-written counter: this one is
+    # kept by the host, so it moves whenever the tick is called even while the
+    # gate is out, and a report that conflated the two would read a call rate as
+    # a tick rate.
+    holding_probe: str = "unreported"
+    calls_at_probe: int | None = None
+    resume: str = "unreported"
+    # Whether the block holds the counting payload or the pass-through control.
+    # Both are "enabled", and only one of them is the gate.
+    through: bool = False
+    flavour: int = 0
 
     def render(self) -> str:
+        what = (
+            ("the pass-through control" if self.through else "the counting payload")
+            if self.enabled
+            else "nothing"
+        )
         return (
             f"logic gate: {'in' if self.enabled else 'out'} at {self.tick:#010x}, "
-            f"{self.calls} calls, {self.ticks} ticks through it"
+            f"{what} in {self.block}, {self.calls} calls, {self.ticks} ticks through it; "
+            f"{self.calls_at_probe} calls at its probe ({self.holding_probe})"
         )
 
 
@@ -762,6 +780,13 @@ def read_gate(port: int = DEFAULT_PORT, timeout: float = 2.0) -> GateState:
         block=str(payload.get("block", "unreported")),
         word_at_entry=str(payload.get("wordAtTickEntry", "unreported")),
         word_at_body=str(payload.get("wordAtTickBody", "unreported")),
+        holding_probe=str(payload.get("holdingProbe", "unreported")),
+        calls_at_probe=(
+            None if payload.get("callsAtProbe") is None else int(payload["callsAtProbe"])
+        ),
+        resume=str(payload.get("resume", "unreported")),
+        through=bool(payload.get("through", False)),
+        flavour=int(payload.get("flavour", 0)),
         enabled=bool(payload["enabled"]),
         calls=None if payload["callsCount"] is None else int(payload["callsCount"]),
         ticks=None if payload["ticksCount"] is None else int(payload["ticksCount"]),
