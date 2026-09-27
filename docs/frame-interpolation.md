@@ -393,11 +393,44 @@ routing the dead reads through the accessor was written, found to add a duplicat
 live code, and **reverted**: it would have been a change to the emulator justified by a code path
 that does not compile.
 
-So the jump table is cleared and the fault is elsewhere in the host. Finding it needs a different
-instrument than reading the source: the out-of-bounds access is a `movbe` out of the recompiler's
-code cache, so the honest next step is a run under AddressSanitizer with the same capture workload
-that reproduces it here, which will name both the function and the offset rather than leaving an
-index computed by a debugging command to be interpreted.
+So the jump table is cleared and the fault is elsewhere in the host. The access itself is small and
+in bounds, which is the finding that redirected everything: `%r13 = 0x7ffed4000000`, `%rax = 0x15c`,
+address `0x7ffed4000198` -- **base plus 0x198** -- and
+
+```
+0x7ffed0ffa000-0x7ffed4000000  0x3006000  rw-p    <- a 48MB region
+0x7ffed4000000-0x7ffed4010000  0x10000   ---p    <- the base register points here
+0x7ffed4010000-0x7ffed4100000  0xf0000   rw-p
+0x7ffed4100000-0x7ffed4e00000  0xd00000  ---p
+```
+
+**The generated code's data base register is a `PROT_NONE` page.** The alternating
+`rw-p` / `---p` pattern with irregular sizes is this mapper's reserve-then-commit shape, and
+`MemMapper::FreeMemory(base, size, /*fromReservation=*/true)` produces a `PROT_NONE` page by
+`mprotect`ing a released range while keeping its address space -- so a `---p` page next to a live
+region is a **released allocation**, not a boundary. Generated code is running against memory that
+has been taken back.
+
+### A real bug found on the way, which is not this fault
+
+`PPCRecompilerX86_allocateExecutableMemory` (`BackendX64.cpp:1313`) bounds-checked with
+`codeMemoryBlockIndex + size > codeMemoryBlockSize` and then wrote up to three bytes of `0x90`
+padding **past** that -- so a translation landing flush against the end of its block wrote at
+`codeMemoryBlock[codeMemoryBlockSize]`, one past the allocation, into a page with no permissions.
+Fixed by rounding the size up before the check (`(size + 3) & ~3`).
+
+**It does not fix the double-paint fault, and that is measured**: mode 9 armed over a run that had
+reached 1,845 paints at rest still takes the product down with it. The overflow is three bytes past a
+block; the faulting access is 0x198 into a page that was never part of that block. So the fix is
+kept because it is a genuine out-of-bounds write, and the fault is *not* claimed as fixed.
+
+What is left, and it is narrower than it was: the recompiler's generated code for the arena
+stand-in is holding a base register that points at released memory. Either a code-cache block is
+released while a core is still executing inside it, or the base is computed from a block that was
+never committed. Those need opposite fixes -- a pin or reference count against release, versus a
+block that must not be published unbacked -- and the run that separates them is AddressSanitizer over
+the same capture workload, which will name the function and the offset instead of leaving a base
+register to be interpreted.
 
 So the two candidates this section weighed -- the payload clobbering `r3`, and the frame not being
 re-entrant -- are **both refuted by the guest state**, and the fault is in the emulator's handling
