@@ -853,6 +853,49 @@ A property worth knowing before reading the tables: consecutive offsets overlap.
 transform at byte 80 is also the tail of a window at 84 and 92, so a real field shows up as a
 cluster of nearby offsets, and the bar takes the one held by the most objects.
 
+### The loose bar over 836,990 assembled uniform buffers, and what the run said about itself
+
+The same two classes, the same movement bar, over what the title assembles for a named node's
+draw:
+
+    836,990 assemblies scanned, 95 candidate offsets in either class, 398,118 with no block
+    sources, 0 past the bound
+    rigid bar:   4 offsets ever in this class, 0 held often enough, 0 seen to move
+    affine bar: 95 offsets ever, 23 held often enough, 18 of those seen to move, best offset 36
+      offset 36: 262,978 assemblies, 63 repeat comparisons, 1 moved, 62 still,
+                 delta 1.2913326, rows off unit by 364193.062, 1 identity
+
+**The strict bar's negative stands and is now the better-measured one**: four offsets were ever
+a rigid 3x4 across 836,990 assemblies, none in 20% of them, none seen to move.
+
+**The loose bar's positive is not believable, and the report says why in its own numbers.**
+Three things in that line are disqualifying, and each is now a bar or a field:
+
+- **`rows off unit by 364193`** is not a transform with scale, it is a projection constant.
+  The loose class had a determinant *floor* and no ceiling, so any 3x3 of coordinate-like
+  floats counted. There is now a ceiling -- `kScaleCeiling = 100`, generous on purpose, because
+  the point is to exclude the numbers that are arithmetic rather than to find a transform at one
+  scale -- and `classify()` returns *which* refusal it is: `Singular`, `TooLarge`, `NotFinite`.
+  "Rows off unit by inf" is no longer producible.
+- **`1 identity` and `63 repeat comparisons` against `262,978 assemblies`.** The whole locator
+  rests on "did this value change between two draws of one object", and that comparison
+  happened 63 times. `1 moved` out of 63 is not evidence about a quarter of a million
+  assemblies. The report now carries `identitiesSeen` and `identitiesRefusedForTracking` at the
+  top so the denominator cannot be read past.
+- **The cause is the identity, and it contradicts the code's own comment.**
+  `RecordedUniformAssembly::blockSources` is documented as "the engine's own storage for the
+  object, and the only identity a recorded draw carries". Measured: it matched exactly **one**
+  identity across the 438,872 assemblies that had sources. The uniform block is re-uploaded at
+  a new guest address each frame, so the set of addresses is nearly unique per draw and the same
+  object's assemblies never meet. The comment is wrong and has been corrected in place.
+
+The identity the objective names is the **node**, and the node is not in this record: the
+binder sees it, at `node + 0xa1c`, and the assembly hook does not. Correlating the two is the
+fix, and until it is done the movement counts in this report are counts over a handful of
+comparisons -- so the uniform-buffer negative is the *strict* bar's, and the loose bar there is
+not yet a measurement. The comment on `identityOf` now says so where the next reader will find
+it.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It

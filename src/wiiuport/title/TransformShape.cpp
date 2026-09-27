@@ -29,6 +29,25 @@ bool TransformShape::isRigid(const float* words) {
 }
 
 bool TransformShape::isAffine(const float* words) {
+    return classify(words) == Affine::Yes;
+}
+
+TransformShape::Affine TransformShape::classify(const float* words) {
+    for (size_t word = 0; word < kWords; word++) {
+        if (!std::isfinite(words[word])) {
+            return Affine::NotFinite;
+        }
+    }
+    if (determinantOf(words) <= kDeterminantFloor) {
+        return Affine::Singular;
+    }
+    if (scaleOf(words) > kScaleCeiling) {
+        return Affine::TooLarge;
+    }
+    return Affine::Yes;
+}
+
+double TransformShape::determinantOf(const float* words) {
     // Doubled rather than floated: a determinant of 1e-15 from denormal rows is a degenerate
     // triple, and the comparison is against 1e-6, so float precision is not the binding
     // constraint here -- but the products of three guest floats are computed in double so that
@@ -42,8 +61,7 @@ bool TransformShape::isAffine(const float* words) {
     const double g = words[6];
     const double h = words[7];
     const double i = words[8];
-    const double determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
-    return std::fabs(determinant) > kDeterminantFloor;
+    return std::fabs(a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g));
 }
 
 float TransformShape::scaleOf(const float* words) {

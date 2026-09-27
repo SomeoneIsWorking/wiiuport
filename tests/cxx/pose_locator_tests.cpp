@@ -8,6 +8,7 @@
 #include "suites.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
 
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -199,13 +200,12 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
                       "answer different questions and neither is standing in for the other");
     }
 
-    // **A report a client can parse, whatever the guest's memory holds.** The loose class
-    // admits any non-singular 3x3, which includes rows long enough to overflow a float to
-    // infinity; a numeric formatter writes those as `inf`, JSON allows neither, and a parser
-    // stops at the first one. It happened here first -- `GET /blocks` came back as something
-    // no client could read and the run called it an I/O failure. The fix is one formatter,
-    // shared, which is what makes it hold in both locators rather than in whichever was
-    // fixed last.
+    // **A window holding a non-finite value is not a transform at all**, and saying so beats
+    // counting it and reporting an infinite scale. Guest memory holds values large enough to
+    // overflow a float, and the loose class used to admit them: the first run of it named an
+    // offset in the assembled buffers with "rows off unit by 364193" -- arithmetic wearing a
+    // 3x3's shape. A non-finite window is refused, and the reason is a classification rather
+    // than a number nobody can read.
     {
         ObjectPoseLocator locator;
         for (int seen = 0; seen < 6; seen++) {
@@ -218,15 +218,52 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
             locator.onAssemblyRecorded(assembly(words, {0x3e000000u}));
         }
         const std::string body = locator.json();
-        check::isTrue(body.find(":inf") == std::string::npos &&
-                          body.find(":nan") == std::string::npos,
-                      "no bare inf or nan appears as a value, because a JSON parser stops at "
-                      "the first one and the whole report is then unreadable: " +
-                          body);
-        check::isTrue(body.find("\"inf\"") != std::string::npos,
-                      "and the fact appears as a quoted string instead, so it survives as a fact");
-        check::isTrue(body.front() == '{' && body.find("}\n") != std::string::npos,
-                      "and the body is still one object that ends");
+        const std::string affine = section(body, "affine");
+        check::isTrue(field(affine, "bestOffset") == "null",
+                      "an offset whose rows are 364193 times unit is not named, because that is "
+                      "a projection constant and not a pose: " +
+                          affine);
+        check::isTrue(field(affine, "candidates") == "0",
+                      "and the loose class counts no such window at all, rather than counting "
+                      "it and reporting a scale no reader can use");
+    }
+
+    // A scale beyond the ceiling is refused, and one inside it is not. The ceiling is
+    // generous on purpose -- a hundredfold -- because the point is to exclude the numbers that
+    // are arithmetic, not to find a transform at exactly one scale.
+    {
+        std::vector<float> scaled(12, 0.0f);
+        putPose(scaled, 0, 0.0f, 2.5f);
+        std::vector<float> huge(12, 0.0f);
+        putPose(huge, 0, 0.0f, ObjectPoseLocator::Shape::kScaleCeiling * 2.0f);
+        check::isTrue(ObjectPoseLocator::Shape::isAffine(scaled.data()),
+                      "a transform with rows 2.5 long is in the loose class");
+        check::isTrue(!ObjectPoseLocator::Shape::isRigid(scaled.data()),
+                      "and is not in the strict one, which is the whole point of having both");
+        check::isTrue(ObjectPoseLocator::Shape::classify(huge.data()) ==
+                          ObjectPoseLocator::Shape::Affine::TooLarge,
+                      "and a row length past the ceiling is refused with the reason given, not "
+                      "merely refused");
+        // 3e19 is a finite float -- 3e38 is the ceiling, and it was worth checking rather than
+        // assuming -- so the case above is `TooLarge`, not `NotFinite`. A real infinity has to
+        // be put in deliberately, and guest memory can hold one: a value divided to overflow,
+        // or a half-written register.
+        std::vector<float> overflowing(12, 0.0f);
+        const float big[12] = {3.0e19f, 0.0f, 0.0f,    0.0f, 2.0e19f, 0.0f,
+                               0.0f,    0.0f, 1.0e19f, 5.0f, 6.0f,    7.0f};
+        for (size_t word = 0; word < 12; word++) {
+            overflowing[word] = big[word];
+        }
+        check::isTrue(ObjectPoseLocator::Shape::classify(overflowing.data()) ==
+                          ObjectPoseLocator::Shape::Affine::TooLarge,
+                      "so rows of 3e19 -- finite, and far past the ceiling -- are refused as too "
+                      "large rather than as unreadable");
+        overflowing[0] = std::numeric_limits<float>::infinity();
+        check::isTrue(ObjectPoseLocator::Shape::classify(overflowing.data()) ==
+                          ObjectPoseLocator::Shape::Affine::NotFinite,
+                      "and a window that really does hold an infinity is a different refusal "
+                      "again, because \"rows off unit by inf\" is not a number anybody can "
+                      "read");
     }
 
     // A buffer larger than the scan's bound is reported unscanned, not scanned in part: a

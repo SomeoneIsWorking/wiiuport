@@ -97,6 +97,18 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
 
   private:
     // The identity of a draw's object: its block sources, as the fork hands them over.
+    //
+    // **Measured not to recur, and that is a finding, not a detail.** Over 836,990 assembled
+    // buffers this matched exactly one identity across 438,872 that had sources: the uniform
+    // block is re-uploaded at a new guest address each frame, so the set of addresses is
+    // nearly unique per draw and the same object's assemblies never meet. The comparison the
+    // whole locator rests on -- "did this value change between two draws of one object" --
+    // therefore happens a handful of times, not hundreds of thousands.
+    //
+    // The identity the objective names is the node, and the node is not in this record: the
+    // binder sees it and the assembly hook does not. Correlating the two is the fix, and until
+    // it is done the movement counts here are reported with the denominator beside them rather
+    // than left to be divided from the assembly count.
     static std::string identityOf(const frame::RecordedUniformAssembly& assembly);
     // The last transform seen at an offset for one identity, so the next can be compared
     // with it. Bounded, and the refusal is counted. The offset is in BYTES, the unit the

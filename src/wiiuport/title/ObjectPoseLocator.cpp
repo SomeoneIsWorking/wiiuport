@@ -213,6 +213,24 @@ std::string ObjectPoseLocator::json() const {
     body.number("candidates", m_candidates.size());
     body.raw("motionEpsilon", JsonBody::real(static_cast<double>(Shape::kMotionEpsilon)));
     body.raw("determinantFloor", JsonBody::real(static_cast<double>(Shape::kDeterminantFloor)));
+    body.raw("scaleCeiling", JsonBody::real(static_cast<double>(Shape::kScaleCeiling)));
+    // **The coverage the movement counts rest on, at the top of the report where it cannot
+    // be read past.** Measured: 836,990 assemblies, 438,872 of them with block sources, and
+    // exactly ONE identity ever matched a previous reading -- 63 repeat comparisons against
+    // 262,978 assemblies at the offset it named. So the movement counts in this report are
+    // counts over a handful of comparisons, not over the assemblies beside them, and a reader
+    // who divides one by the other is dividing the wrong things.
+    //
+    // The cause is in the identity itself. `blockSources` is documented as "the engine's own
+    // storage for the object, and the only identity a recorded draw carries", and the
+    // measurement contradicts that: the uniform block is re-uploaded at a new address each
+    // frame, so the set of addresses is nearly unique per draw and the same object's
+    // assemblies never meet. The objective's answer is the node, and the node is not in this
+    // record -- the binder sees it and the assembly hook does not. Until the two are
+    // correlated, `movementHere` is a measurement over a very small denominator and the
+    // belief bars below cannot be believed from it.
+    body.number("identitiesSeen", static_cast<uint64_t>(m_seen.size()));
+    body.number("identitiesRefusedForTracking", m_identitiesRefused);
     // Two bars over two classes, and the answer to where to look next is which of them
     // fired. `rigid` alone means the value is a pose; `affine` alone means it is a transform
     // carrying scale, which the strict bar would never have counted; neither means the pose
