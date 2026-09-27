@@ -84,6 +84,25 @@ class WindWakerPaint {
     // Fields of the display object the report reads: its phase, the interval
     // it was given, the flags the frame function toggles, and the frame counter
     // it advances. Read only, never written.
+    // **The frame's five indirect call targets, read at its entry.**
+    //
+    // **Every call in the frame is a `bctrl` through a target loaded out of `*(display+0x24)`** --
+    // the frame does `lwz r10, 0x24(r30)` and then every target load is `0x??(r10)`: `+0xd4` at
+    // 0x0274c28c, `+0xdc` at 0x0274c2a0, `+0x6c` at 0x0274c2b4, `+0xec` at 0x0274c308, and `+0xe4`
+    // at 0x0274c390 -- with the argument rebuilt as `or r3, r30, r30` each time.
+    //
+    // **The offsets are on the pointer, not on the display.** A first version of this read them as
+    // `display + 0xd4` and got four zeroes and one `0x00400000` where the title's own running
+    // frame has call targets, which is what a wrong base looks like and not what a title with no
+    // call targets looks like. The base is read first and the offsets applied to it.
+    static constexpr uint32_t kFrameTargetBaseOffset = 0x24;
+    static constexpr std::array<uint32_t, 5> kFrameCallTargetOffsets{0x6c, 0xd4, 0xdc, 0xec, 0xe4};
+    // How many paints of readings the report keeps. Two, because the question is what the second
+    // paint of a pass sees that the first did not, and a pair is the only shape that shows it.
+    static constexpr size_t kFrameSamples = 2;
+    // The fields read at every paint: the two the objective names, plus the five call targets.
+    static constexpr size_t kRecentWords = 2 + kFrameCallTargetOffsets.size();
+
     static constexpr uint32_t kPhaseOffset = 0x28;
     static constexpr uint32_t kIntervalOffset = 0x50;
     static constexpr uint32_t kFlagsOffset = 0x74;
@@ -332,6 +351,14 @@ class WindWakerPaint {
         // sequence, which is the difference between "the toggle is not happening"
         // and "the toggle is not visible in one sample".
         std::array<uint32_t, 2> recent{0, 0};
+        // The five call targets as read at the last paint, and the last two paints' readings of
+        // everything: the two fields the objective names and the five targets, one row per paint.
+        std::array<uint32_t, kFrameCallTargetOffsets.size()> callTargets{0};
+        uint32_t callTargetBase = 0;
+        std::array<std::array<uint32_t, kRecentWords>, kFrameSamples> samples{};
+        // False until there are two paints to compare, because one paint's reading is not a pair
+        // and a report that showed it as one would be showing nothing.
+        bool samplesValid = false;
         // Held for the whole time the display thread is inside the frame, and
         // taken by whoever rewrites the words that route it here.
         //

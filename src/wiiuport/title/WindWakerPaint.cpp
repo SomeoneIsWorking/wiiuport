@@ -463,6 +463,40 @@ void WindWakerPaint::Frame::OnCall(std::span<const uint32_t, 32> gpr, uint32_t /
             recent[1] = phase;
         }
     }
+    // The five call targets, at the same lock and the same moment as the pair above, so a sample
+    // is one paint's reading of the whole display rather than a mixture of two.
+    //
+    // A target that is a small number rather than a code address is the near-null dereference, and
+    // the report says so per sample rather than leaving a reader to compare five hex numbers by
+    // eye.
+    {
+        uint32_t base = 0;
+        const bool haveBase = m_readWord(display + kFrameTargetBaseOffset, base) && base != 0;
+        if (haveBase) {
+            for (size_t index = 0; index < kFrameCallTargetOffsets.size(); index++) {
+                uint32_t value = 0;
+                if (m_readWord(base + kFrameCallTargetOffsets[index], value)) {
+                    callTargets[index] = value;
+                }
+            }
+        }
+        callTargetBase = haveBase ? base : 0;
+        // Shift the two samples down, so the report's first entry is this paint and its second is
+        // the one before. A pair of paints, not a pair of passes: with a stand-in that paints
+        // twice, consecutive paints are the two halves of one pass.
+        for (size_t index = kFrameSamples - 1; index > 0; index--) {
+            for (size_t word = 0; word < kRecentWords; word++) {
+                samples[index][word] = samples[index - 1][word];
+            }
+        }
+        for (size_t word = 0; word < 2; word++) {
+            samples[0][word] = recent[word];
+        }
+        for (size_t word = 0; word < kFrameCallTargetOffsets.size(); word++) {
+            samples[0][2 + word] = callTargets[word];
+        }
+        samplesValid = m_paints.load(std::memory_order_relaxed) >= kFrameSamples;
+    }
 }
 
 std::string WindWakerPaint::enable(Mode mode) {
@@ -750,6 +784,29 @@ std::string WindWakerPaint::disableLocked() {
     return {};
 }
 
+namespace {
+
+// Whether every one of a paint's call targets is an address the title's own code could be at.
+//
+// The frame's image runs 0x02000020 to 0x028f87f4, and the title calls through the import thunks
+// just above it. **A target outside that is a value, not a call target** -- which is what the
+// second paint's near-null dereference looks like from the display's side, and this says so per
+// sample rather than leaving a reader to compare five hex numbers by eye.
+bool targetInImage(uint32_t address) {
+    return address >= 0x02000020u && address < 0x028f88d4u;
+}
+
+bool targetsInImage(const std::array<uint32_t, WindWakerPaint::kRecentWords>& sample) {
+    for (size_t word = 2; word < sample.size(); word++) {
+        if (!targetInImage(sample[word])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 std::string WindWakerPaint::json() const {
     std::scoped_lock lock(m_mutex);
     JsonBody body;
@@ -788,6 +845,41 @@ std::string WindWakerPaint::json() const {
         std::scoped_lock lock(m_frame.mutex);
         body.number("flagsAtLastPaint", m_frame.recent[0]);
         body.number("phaseAtLastPaint", m_frame.recent[1]);
+        // The five indirect call targets, at the last paint, and the last two paints' readings of
+        // all seven words. **The pair is the measurement**: with a stand-in that paints twice,
+        // consecutive paints are the two halves of one pass, so a target that differs between them
+        // is what the second paint found where the first left something else. One paint's reading
+        // says nothing about that, which is why the report carries two and a `samplesValid` beside
+        // them rather than showing a single row as though it were a comparison.
+        body.number("indirectBaseAtLastPaint", m_frame.callTargetBase);
+        JsonBody targets;
+        for (size_t index = 0; index < WindWakerPaint::kFrameCallTargetOffsets.size(); index++) {
+            targets.number(std::to_string(WindWakerPaint::kFrameCallTargetOffsets[index]).c_str(),
+                           m_frame.callTargets[index]);
+        }
+
+        body.object("callTargetsAtLastPaint", targets.text());
+        body.raw("samplesValid", m_frame.samplesValid ? "true" : "false");
+        JsonBody pair;
+        for (size_t paint = 0; paint < WindWakerPaint::kFrameSamples; paint++) {
+            JsonBody one;
+            one.number("flags", m_frame.samples[paint][0]);
+            one.number("phase", m_frame.samples[paint][1]);
+            for (size_t index = 0; index < WindWakerPaint::kFrameCallTargetOffsets.size();
+                 index++) {
+                one.number(
+                    ("target_" + std::to_string(WindWakerPaint::kFrameCallTargetOffsets[index]))
+                        .c_str(),
+                    m_frame.samples[paint][2 + index]);
+            }
+            // A target that is not a code address, named here rather than left to be spotted: the
+            // frame's own code is in the image at 0x02000020-0x028f87f4, and anything outside it
+            // that is also not one of the MMU ranges is a value, not a pointer.
+            one.string("allTargetsInImage",
+                       targetsInImage(m_frame.samples[paint]) ? "true" : "false");
+            pair.object(std::to_string(paint).c_str(), one.text());
+        }
+        body.object("lastTwoPaints", pair.text());
     }
     // The display pointer, the vtable it holds and its fields are one reading
     // of the probe's state under its lock, not three unlocked ones.
