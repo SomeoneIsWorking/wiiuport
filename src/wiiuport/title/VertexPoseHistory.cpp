@@ -89,58 +89,76 @@ void VertexPoseHistory::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw
         known = m_nodes.end() - 1;
         known->address = node;
     }
-    // One sample per frame. A node drawn forty times in one frame is forty views of one
-    // instant, and comparing them would report a static field as a static field for the wrong
-    // reason.
-    if (!known->samples.empty() && known->samples.back().frame == frame) {
+    // One sample per shape per frame, matched to the previous sample of the same shape.
+    //
+    // A node drawn forty times in one frame is forty views of one instant, and comparing two of
+    // them would report a static field as static for the wrong reason. A node drawn twice in
+    // one frame with two different meshes is two shapes, and comparing them would report a
+    // shape change that never happened. And a node drawn twice in one frame with the SAME bytes
+    // still needs both samples: "compared, and found identical" is the evidence that a
+    // stationary object stays stationary, and the first version here dropped the earlier
+    // sample when the bytes matched -- which deleted the comparison the verdict reports.
+    std::vector<Node::Sample>& samples = known->samples;
+    const auto sameShape = [stride = buffer.stride, size = bytes.size()](const Node::Sample& one) {
+        return one.stride == stride && one.bytes.size() == size;
+    };
+    // A re-draw of the same shape in the same frame replaces its sample rather than adding one.
+    samples.erase(std::remove_if(samples.begin(), samples.end(),
+                                 [&](const Node::Sample& one) {
+                                     return sameShape(one) && one.frame == frame;
+                                 }),
+                  samples.end());
+    if (samples.size() >= kShapesPerNode * kSamplesPerShape) {
         return;
     }
-    if (known->samples.size() >= kSamplesPerNode) {
-        known->samples.erase(known->samples.begin());
-    }
-    known->samples.push_back(Node::Sample{frame, buffer.stride, std::move(bytes)});
+    samples.push_back(Node::Sample{frame, buffer.stride, std::move(bytes)});
     known->stride = buffer.stride;
     known->componentBytes = at.sizeInBytes;
     known->offset = at.offset;
 }
 
-VertexPoseHistory::Verdict VertexPoseHistory::verdictOf(const Node& node, uint64_t* differingBytes,
-                                                        float* biggestDelta) {
+VertexPoseHistory::Verdict VertexPoseHistory::verdictOf(const Node::Sample& before,
+                                                        const Node::Sample& after,
+                                                        uint32_t componentBytes,
+                                                        uint64_t* differingBytes,
+                                                        float* biggestDelta, uint64_t* outOfRange) {
     *differingBytes = 0;
     *biggestDelta = 0.0f;
-    if (node.samples.size() < kSamplesPerNode) {
-        return Verdict::OneSample;
-    }
-    const Node::Sample& before = node.samples[0];
-    const Node::Sample& after = node.samples[1];
+    // A mismatched pair cannot be reached through the pairing, which matches on shape, so this
+    // is a guard rather than a verdict: if a future change lets two shapes meet here, the
+    // answer is "nothing was compared" and not a number about unrelated bytes.
     if (before.stride != after.stride || before.bytes.size() != after.bytes.size()) {
-        // The draw's shape changed between the two ticks. Not "identical" and not "blendable":
-        // there is no correspondence between the two samples' components to interpolate, and
-        // a lerp across it would be arithmetic on unrelated numbers.
-        return Verdict::Uncomparable;
+        return Verdict::UnpairedShapes;
     }
-    const size_t components =
-        after.bytes.size() / (node.componentBytes / 4 == 0 ? 1 : node.componentBytes / 4);
     for (size_t byte = 0; byte < after.bytes.size(); byte++) {
         if (before.bytes[byte] != after.bytes[byte]) {
             (*differingBytes)++;
         }
     }
-    // The magnitude, component by component, where the component is a float. A twelve-byte
-    // attribute is three of them.
-    if (node.componentBytes % 4 == 0) {
-        const size_t perVertex = node.componentBytes;
-        const size_t vertices = after.bytes.size() / (perVertex == 0 ? 1 : perVertex);
+    // The magnitude, component by component, where a component is four bytes of float. Reported
+    // in the attribute's own units so it can be compared with the travel a scene actually has.
+    if (componentBytes >= 4 && componentBytes % 4 == 0) {
+        const size_t vertices = after.bytes.size() / componentBytes;
         for (size_t vertex = 0; vertex < vertices; vertex++) {
-            for (size_t offset = 0; offset + 4 <= perVertex; offset += 4) {
+            for (size_t offset = 0; offset + 4 <= componentBytes; offset += 4) {
                 float a = 0.0f;
                 float b = 0.0f;
-                const size_t at = vertex * perVertex + offset;
+                const size_t at = vertex * componentBytes + offset;
                 if (!readFloat(before.bytes.data() + at, &a) ||
                     !readFloat(after.bytes.data() + at, &b)) {
                     continue;
                 }
-                *biggestDelta = std::max(*biggestDelta, std::fabs(b - a));
+                const float difference = std::fabs(b - a);
+                if (difference > kComponentCeiling) {
+                    // A position does not move by 10^34 between two frames. Bytes read as a
+                    // float that give that magnitude are not a position in this layout -- the
+                    // attribute was named across objects and this draw's stride packs something
+                    // else at that offset -- and reporting the magnitude as movement would be a
+                    // number that looks like a result and is not one. Counted instead.
+                    (*outOfRange)++;
+                    continue;
+                }
+                *biggestDelta = std::max(*biggestDelta, difference);
             }
         }
     }
@@ -148,6 +166,64 @@ VertexPoseHistory::Verdict VertexPoseHistory::verdictOf(const Node& node, uint64
         return Verdict::Identical;
     }
     return Verdict::Blendable;
+}
+
+// A node is as blendable as its best-matched shape, and the report says how many shapes were
+// paired -- because a node with one paired shape out of four has not been shown to be static,
+// it has been shown to be under-sampled.
+VertexPoseHistory::Verdict VertexPoseHistory::verdictOf(const Node& node, uint64_t* differingBytes,
+                                                        float* biggestDelta,
+                                                        uint64_t* outOfRange) const {
+    *differingBytes = 0;
+    *biggestDelta = 0.0f;
+    *outOfRange = 0;
+    bool anyPaired = false;
+    Verdict best = Verdict::UnpairedShapes;
+    // Grouped by shape, not by adjacency. A node with four shapes appends them interleaved --
+    // placeholder, mesh, placeholder, mesh -- so "consecutive and equal in shape" pairs almost
+    // nothing and reported six of eight objects blendable off a stride that was not the
+    // position's. Each shape's own samples are collected first and then paired in frame order.
+    std::vector<std::vector<const Node::Sample*>> byShape;
+    for (const Node::Sample& sample : node.samples) {
+        std::vector<const Node::Sample*>* group = nullptr;
+        for (std::vector<const Node::Sample*>& candidate : byShape) {
+            if (candidate.front()->stride == sample.stride &&
+                candidate.front()->bytes.size() == sample.bytes.size()) {
+                group = &candidate;
+                break;
+            }
+        }
+        if (group == nullptr) {
+            byShape.push_back({&sample});
+        } else {
+            group->push_back(&sample);
+        }
+    }
+    // The out-of-range components are counted across every shape before the walk returns, so
+    // one blendable shape does not hide the others' unreadable magnitudes.
+    uint64_t outOfRangeTotal = 0;
+    for (std::vector<const Node::Sample*>& group : byShape) {
+        for (size_t index = 1; index < group.size(); index++) {
+            const Node::Sample& before = *group[index - 1];
+            const Node::Sample& after = *group[index];
+            uint64_t differing = 0;
+            uint64_t shapeOut = 0;
+            float biggest = 0.0f;
+            const Verdict one =
+                verdictOf(before, after, node.componentBytes, &differing, &biggest, &shapeOut);
+            anyPaired = true;
+            outOfRangeTotal += shapeOut;
+            if (one == Verdict::Blendable) {
+                *differingBytes = differing;
+                *biggestDelta = biggest;
+                *outOfRange = outOfRangeTotal + shapeOut;
+                return one;
+            }
+            best = one;
+        }
+    }
+    *outOfRange = outOfRangeTotal;
+    return anyPaired ? best : Verdict::UnpairedShapes;
 }
 
 const char* VertexPoseHistory::nameOf(Verdict verdict) {
@@ -158,8 +234,8 @@ const char* VertexPoseHistory::nameOf(Verdict verdict) {
         return "identical";
     case Verdict::Blendable:
         return "blendable";
-    case Verdict::Uncomparable:
-        return "uncomparable";
+    case Verdict::UnpairedShapes:
+        return "unpairedShapes";
     }
     return "unknown";
 }
@@ -171,18 +247,17 @@ VertexPoseHistory::Tally VertexPoseHistory::tally() const {
     out.refused = m_refused;
     for (const Node& node : m_nodes) {
         uint64_t differing = 0;
+        uint64_t outOfRange = 0;
         float biggest = 0.0f;
-        switch (verdictOf(node, &differing, &biggest)) {
+        switch (verdictOf(node, &differing, &biggest, &outOfRange)) {
         case Verdict::Blendable:
             out.blendable++;
             break;
         case Verdict::Identical:
             out.identical++;
             break;
-        case Verdict::Uncomparable:
-            out.uncomparable++;
-            break;
         case Verdict::OneSample:
+        case Verdict::UnpairedShapes:
             break;
         }
     }
@@ -205,30 +280,27 @@ std::string VertexPoseHistory::json() const {
     // should not have to be assembled from the table below.
     uint64_t blendable = 0;
     uint64_t identical = 0;
-    uint64_t uncomparable = 0;
     uint64_t oneSample = 0;
     for (const Node& node : m_nodes) {
         uint64_t differing = 0;
+        uint64_t outOfRange = 0;
         float biggest = 0.0f;
-        switch (verdictOf(node, &differing, &biggest)) {
+        switch (verdictOf(node, &differing, &biggest, &outOfRange)) {
         case Verdict::Blendable:
             blendable++;
             break;
         case Verdict::Identical:
             identical++;
             break;
-        case Verdict::Uncomparable:
-            uncomparable++;
-            break;
         case Verdict::OneSample:
+        case Verdict::UnpairedShapes:
             oneSample++;
             break;
         }
     }
     body.number("blendable", blendable);
     body.number("identical", identical);
-    body.number("uncomparable", uncomparable);
-    body.number("oneSample", oneSample);
+    body.number("unpairedShapes", oneSample);
 
     JsonBody nodes;
     size_t shown = 0;
@@ -238,8 +310,11 @@ std::string VertexPoseHistory::json() const {
         }
         uint64_t differing = 0;
         float biggest = 0.0f;
-        const Verdict verdict = verdictOf(node, &differing, &biggest);
-        const size_t bytes = node.samples.empty() ? 0 : node.samples.back().bytes.size();
+        uint64_t outOfRange = 0;
+        const Verdict verdict = verdictOf(node, &differing, &biggest, &outOfRange);
+        const Node::Sample* latest = node.samples.empty() ? nullptr : &node.samples.back();
+        const size_t bytes = latest == nullptr ? 0 : latest->bytes.size();
+        const uint32_t stride = latest == nullptr ? 0 : latest->stride;
         JsonBody one;
         one.number("node", node.address);
         one.string("verdict", nameOf(verdict));
@@ -249,13 +324,41 @@ std::string VertexPoseHistory::json() const {
         one.number("framesApart", node.samples.size() < 2
                                       ? 0
                                       : node.samples.back().frame - node.samples.front().frame);
-        one.number("stride", node.stride);
+        one.number("stride", stride);
         one.number("componentBytes", node.componentBytes);
         one.number("offsetInStride", node.offset);
-        one.number("vertices", node.stride == 0 ? 0 : bytes / node.componentBytes);
+        one.number("vertices", node.componentBytes == 0 ? 0 : bytes / node.componentBytes);
         one.number("positionBytes", bytes);
-        one.number("differingBytes", differing);
-        one.raw("biggestComponentDelta", JsonBody::real(static_cast<double>(biggest)));
+        // **Null, not zero, when nothing was compared.** The count and the magnitude are
+        // computed only on the comparable path, so reporting them as 0 for an uncomparable
+        // node would say "no bytes differ" about a pair of samples that were never compared --
+        // which is the same lie as "moved 18, biggest delta 0.000000", one class further out.
+        // A reader must be able to tell a measurement of zero from the absence of one.
+        if (verdict == Verdict::UnpairedShapes) {
+            one.raw("differingBytes", "null");
+            one.raw("biggestComponentDelta", "null");
+            one.raw("compared", "false");
+            one.raw("magnitudeBelievable", "null");
+        } else {
+            one.number("differingBytes", differing);
+            one.raw("biggestComponentDelta", JsonBody::real(static_cast<double>(biggest)));
+            one.raw("compared", "true");
+            one.number("componentsOutOfRange", outOfRange);
+            one.raw("magnitudeBelievable", outOfRange == 0 ? "true" : "false");
+        }
+        // The shapes themselves, when nothing was paired: a reader who sees "unpairedShapes"
+        // needs to see how many shapes and how big, because "nothing was paired" and "one shape
+        // of one was" are different under-samplings.
+        one.number("shapes", node.samples.size());
+        JsonBody shapes;
+        for (size_t index = 0; index < node.samples.size() && index < kShapesPerNode; index++) {
+            JsonBody shape;
+            shape.number("frame", node.samples[index].frame);
+            shape.number("stride", node.samples[index].stride);
+            shape.number("bytes", static_cast<uint32_t>(node.samples[index].bytes.size()));
+            shapes.object(std::to_string(index), shape.text());
+        }
+        one.object("sampledShapes", shapes.text());
         nodes.object(std::to_string(shown), one.text());
         shown++;
     }

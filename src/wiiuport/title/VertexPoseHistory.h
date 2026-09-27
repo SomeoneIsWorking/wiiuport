@@ -65,7 +65,7 @@ class VertexPoseHistory final : public frame::DrawRecordedListener {
         uint64_t tracked = 0;
         uint64_t blendable = 0;
         uint64_t identical = 0;
-        uint64_t uncomparable = 0;
+        uint64_t unpairedShapes = 0;
         uint64_t refused = 0;
     };
 
@@ -81,12 +81,36 @@ class VertexPoseHistory final : public frame::DrawRecordedListener {
     // bug in the bound, and silently allocating for it is how a host runs out of memory in a
     // frame.
     static constexpr uint32_t kMaxPositionBytes = 1u << 20;
-    // How many distinct nodes are tracked, and how many samples each keeps.
+    // **How far a position component may move between two frames before the bytes are not
+    // believed to be a position.** A scene is metres; a view matrix is metres. The first run of
+    // this reported component deltas of 1.06e+38 and called them movement -- which is what
+    // bytes that are not a float at that offset look like when read as one. The attribute was
+    // named across objects and this draw's stride packs something else at offset zero, so the
+    // magnitude is a signal that the layout differs and not a measurement. Generous on purpose:
+    // the point is to catch 10^38, not to bound a scene.
+    static constexpr float kComponentCeiling = 1.0e6f;
+    // How many distinct nodes are tracked, how many *shapes* each keeps a sample of, and how
+    // many samples each shape keeps. A node is drawn several times a frame -- a placeholder, a
+    // depth pass, a colour pass -- and a bound on shapes is what stops one node's whole
+    // pipeline from filling the history.
     static constexpr size_t kNodes = 8;
-    static constexpr size_t kSamplesPerNode = 2;
+    static constexpr size_t kShapesPerNode = 4;
+    static constexpr size_t kSamplesPerShape = 2;
 
   private:
-    // One node's samples, oldest first.
+    // One node's samples.
+    //
+    // **Keyed by the draw's own shape, and that is the fix for a schedule that measured
+    // nothing.** The first version kept the first draw of each frame per node, and the run came
+    // back with six of eight objects "uncomparable" for a reason the report then made visible:
+    // their first sample was 36 bytes at a stride of 32, which is ONE vertex. A node's first
+    // draw each frame is a single-vertex placeholder and its real mesh comes later in the same
+    // frame, so sampling the first compared a placeholder with a mesh and called the difference
+    // a shape change. A sample is now matched to the previous sample of the SAME shape -- same
+    // stride, same length -- so a node's placeholder is compared with the next frame's
+    // placeholder and its mesh with the next frame's mesh. The shape is a property of the draw,
+    // so this is the draw's own correspondence and not an inference about which draw is "the"
+    // one.
     struct Node {
         uint32_t address = 0;
 
@@ -105,15 +129,29 @@ class VertexPoseHistory final : public frame::DrawRecordedListener {
         uint32_t offset = 0;
     };
 
-    // The outcome for one node's two samples.
+    // The outcome for one matched pair of samples of one shape.
     enum class Verdict : uint8_t {
+        // Only one sample of this shape, so nothing to compare it with.
         OneSample,
+        // Two samples of one shape and not one byte differs: a static mesh.
         Identical,
+        // Two samples of one shape and the value moved: a pose.
         Blendable,
-        Uncomparable
+        // Every shape of this node has a single sample, so nothing was compared. A node that
+        // draws a different mesh on each tick lands here rather than in a verdict about two
+        // shapes, because there is no comparison to have a verdict about.
+        UnpairedShapes
     };
 
-    static Verdict verdictOf(const Node& node, uint64_t* differingBytes, float* biggestDelta);
+    static Verdict verdictOf(const Node::Sample& before, const Node::Sample& after,
+                             uint32_t componentBytes, uint64_t* differingBytes, float* biggestDelta,
+                             uint64_t* outOfRange);
+    // The same over every paired shape of one node, which is the unit the report and the tally
+    // use: a node is as blendable as its best-matched shape, and the report says how many
+    // shapes were paired, because a node with one paired shape out of four has not been shown
+    // to be static -- it has been shown to be under-sampled.
+    Verdict verdictOf(const Node& node, uint64_t* differingBytes, float* biggestDelta,
+                      uint64_t* outOfRange) const;
     static const char* nameOf(Verdict verdict);
 
     const ObjectIdentityScope* m_scope = nullptr;
