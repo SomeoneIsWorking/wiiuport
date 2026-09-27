@@ -10,6 +10,8 @@
 #include "suites.h"
 #include "wiiuport/title/DrawAttributeCensus.h"
 
+#include <cstddef>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -31,21 +33,45 @@ std::string field(const std::string& body, const std::string& name) {
     return body.substr(start, end - start);
 }
 
-// A draw the way the title lays one out: one buffer of a stated stride, and an attribute table
-// of stated entries. The numbers are a fixture, and the census's job is to say what it would
-// make of whatever it is handed.
+// A draw the way the title lays one out: one buffer of a stated stride, an attribute table of
+// stated entries, and -- because the census now READS the values at a candidate offset to apply
+// its magnitude bar -- real bytes behind the buffer. The bytes are a fixture: `g_buffer` holds
+// a stride's worth of zeros with a float written at the head of each vertex, which is what a
+// position at offset 0 looks like.
+//
+// `data` was nullptr here until the magnitude bar existed, and the suite core-dumped on it: the
+// census read through it. A null buffer is refused in the product, and a fixture that does not
+// model the thing the code reads is a fixture that finds the crash rather than the bug.
+std::vector<std::byte> g_buffer;
+
 Prepared aDraw(uint32_t stride, uint32_t bufferBytes) {
     // Value-initialised, and it has to be: `DrawPrepared` is a plain aggregate with no default
     // member initialisers, so a default-constructed one carries whatever was on the stack in
     // `vertexAttributeCount` and `vertexBufferCount`. The first version of this fixture did
     // that, and the suite read 110 attributes out of a draw that declared none -- and named a
     // position correctly in another test purely by luck.
+    g_buffer.assign(bufferBytes == 0 ? 16 : bufferBytes, std::byte{0});
     Prepared draw{};
     draw.vertexBufferCount = 1;
-    draw.vertexBuffers[0].data = nullptr;
+    draw.vertexBuffers[0].data = g_buffer.data();
     draw.vertexBuffers[0].sizeInBytes = bufferBytes;
     draw.vertexBuffers[0].stride = stride;
     draw.vertexBuffers[0].slot = 0;
+    return draw;
+}
+
+// Writes a float at the head of each vertex, so the magnitude bar has positions to believe.
+Prepared aDrawWithPositions(uint32_t stride, uint32_t vertices, float scale) {
+    Prepared draw = aDraw(stride, stride * vertices);
+    // Written through memcpy rather than a cast: `std::byte` is the buffer's own type and
+    // casting a `std::byte*` to `float*` is not allowed, which is the point of it.
+    for (uint32_t vertex = 0; vertex < vertices; vertex++) {
+        for (uint32_t component = 0; component < 3; component++) {
+            const float value = scale * static_cast<float>(component + 1);
+            std::memcpy(g_buffer.data() + (vertex * stride) + component * sizeof(float), &value,
+                        sizeof(value));
+        }
+    }
     return draw;
 }
 
@@ -200,6 +226,58 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
                       "a stride with no objects of its own names nothing");
         check::isTrue(census.positionFor(32).known,
                       "while the stride the objects were seen at still does");
+    }
+
+    // **The magnitude bar, and the case the real title forced.** Seven objects agreeing that the
+    // stride-20 position is at offset 0 clears any bar over agreement -- and those twelve bytes
+    // are partly position and partly the eight other bytes in the stride, so reading them gave
+    // 1e+38 for some objects and a believable 0.107 for others. A count cannot tell those apart,
+    // because every one of those objects agreed. Only the values can, so a candidate whose
+    // components have ever read as something a position is not is not named, and the report
+    // says how many so a layout that fails this reads as unsolved rather than as empty.
+    {
+        wiiuport::title::ObjectIdentityScope scope;
+        DrawAttributeCensus census(&scope);
+        for (uint32_t object = 1; object <= 5; object++) {
+            scope.bind(0x43e50000u + object * 0x300u);
+            Prepared draw = aDrawWithPositions(20, 8, 1.0f);
+            addAttribute(draw, 0, 0x30, 12, 0);
+            census.onDrawRecorded(draw);
+        }
+        const DrawAttributeCensus::Position clean = census.positionFor(20);
+        const std::string body = census.json();
+        check::isTrue(clean.known,
+                      "a layout whose offset holds plausible positions is named: " + body);
+        check::isTrue(body.find("\"magnitudeBar\":\"pass\"") != std::string::npos,
+                      "and the report says the magnitude bar passed rather than leaving the "
+                      "reader to assume it: " +
+                          body);
+    }
+
+    // The same layout, the same seven objects, and bytes that are not a position. The count is
+    // identical -- which is the whole point -- and the answer is different.
+    {
+        wiiuport::title::ObjectIdentityScope scope;
+        DrawAttributeCensus census(&scope);
+        for (uint32_t object = 1; object <= 5; object++) {
+            scope.bind(0x43e60000u + object * 0x300u);
+            Prepared draw = aDrawWithPositions(20, 8, 1.0f);
+            addAttribute(draw, 0, 0x30, 12, 0);
+            // One component in 10^38: the signature is untouched, the values are not positions.
+            const float wild = 3.0e38f;
+            std::memcpy(g_buffer.data() + sizeof(float), &wild, sizeof(wild));
+            census.onDrawRecorded(draw);
+        }
+        const DrawAttributeCensus::Position dirty = census.positionFor(20);
+        const std::string body = census.json();
+        check::isTrue(!dirty.known,
+                      "the same five objects and the same signature name nothing when the values "
+                      "at that offset are not positions: " +
+                          body);
+        check::isTrue(body.find("\"magnitudeBar\":\"fail\"") != std::string::npos,
+                      "and the report says the magnitude bar failed, so an unsolved layout reads "
+                      "as unsolved rather than as a layout with no position: " +
+                          body);
     }
 
     // One object cannot agree with another, so nothing is named however many times it is drawn.
