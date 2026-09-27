@@ -441,12 +441,37 @@ That fits every observation, which is why it is worth the two withdrawals:
 
 ### The frame's own dispatch chain, and three payloads that did not fix it
 
-The frame's body was disassembled as far as its exit, and the dispatch is this:
+**The frame's first eight words, read out of the listing's own bytes** (`q_both_searches.py`, via
+`instruction.getBytes()` -- this Ghidra binding's `Memory.getBytes` returns zeros, and a search
+built on it would find nothing while looking as though it had worked):
 
 ```
-0x0274c278  or    r30,r3,r3          <- the display pointer
-0x0274c27c  bl    0x0274b054
-0x0274c288  lwz   r10,0x24(r30)
+0x0274c264  0x7c0802a6  mfspr  r0                <- SPR 8, the link register, into r0
+0x0274c268  0x9421ffe8  stwu   r1,-0x18(r1)
+0x0274c26c  0x93c10010  stw    r30,0x10(r1)
+0x0274c270  0x93e10014  stw    r31,0x14(r1)
+0x0274c274  0x9001001c  stw    r0,0x1c(r1)
+0x0274c278  0x7c7e1b78  or     r30,r3,r3           <- the display pointer
+0x0274c27c  0x4bffedd9  bl     0x0274b054
+0x0274c280  0x807e0018  lwz    r3,0x18(r30)        <- the first sub-object
+```
+
+**Three things this corrects.** The listing previously shown here started at `0x0274c278` and so
+**omitted the entire five-word prologue**, which means the `lwz` it showed at `0x0274c288` is the
+image's `0x0274c280`. The offsets past the first eight words are *not* re-verified by this read, and
+the ones before it are now measured rather than quoted. The first sub-object is at
+**`display+0x18`, not `display+0x24`** -- so "all five call targets come from `*(display+0x24)`" is
+wrong by an offset, and the display probe that reads the call targets through `*(display+0x24)` has
+been reading a field the frame does not read.
+
+And the prologue says something about the objective's payload: **the frame's first instruction
+clobbers `r0` with the link register**, storing it at `0x1c(r1)`. `r0` is therefore not a register
+the frame preserves, and a stand-in that expects `r0` to still hold something of its own across the
+call is expecting a register the callee's first instruction overwrites.
+
+The rest of the dispatch, as listed before:
+
+```
 0x0274c28c  lwz   r12,0xd4(r10)
 0x0274c290  mtspr CTR,r12
 0x0274c294  or    r3,r30,r30
@@ -632,19 +657,132 @@ and that value -- not the rewritten one -- is what a payload reaching the frame 
 needs. The contradiction is therefore resolvable from inside the mechanism, and the resolution is
 one value, not a new mechanism: the payload's call target has to be the slot's *original* contents.
 
-**That is a finding about the payload, not about the fault**, and it is the kind the objective
-should have: reaching the frame through the vtable needs the vtable *somewhere the payload can read
-it*, and the eleven words name `r0` without anything putting it there. The paint mod knows the
-vtable -- it reads it from the display and patches slot `0xcc` in it on every arming -- so the
-missing piece is one word the mod supplies rather than one the payload guesses, and a run of that
-is the shape this file's modes never had.
+**And supplying it costs a word the objective's payload does not contain.** The payload's only load
+is `lwz r12, 0xcc(r0)` -- a fixed displacement off a register the stand-in does not own. To make
+that load return the mod's saved value, the mod would have to put the frame's address somewhere the
+payload reaches, and every way of doing that needs either a different displacement (`lwz r12, 0xd0(r0)`
+to a neighbouring slot the mod writes), an absolute load of a literal, or a PC-relative
+materialisation (`lis`+`ori`). **All of those are derived words, not lifts**, and this project has
+measured what a derived word costs twice: a branch displacement worked out by hand landed four bytes
+past its target and was caught only because a test happened to notice, and an `or` encoding worked
+out from the manual matched *nothing* in nine megabytes of PowerPC.
+
+**So the two routes are mutually exclusive as they stand, and the measurements say which works.**
+
+- **The literal-`bl` route** -- modes 2, 3, 9 and 10 -- reaches the frame every time and faults on
+  the second call, on a guest load at `0x198`, with the guest otherwise healthy. The display object
+  is cleared: its flag, its phase and all five of its call targets are identical across the two
+  paints, and the divergence is in state the five callees hold.
+- **The vtable route** -- the objective's own eleven words -- cannot reach the frame at all, because
+  the slot it reads is the slot the mod rewrote.
+
+**And the one shape that reaches sixty does neither.** Mode 6 is a single `b` at the frame with the
+swap interval at one vblank a flip, and it measures 59.99 and 60.12 paints a second against 30.12
+unmodded, in adjacent windows, twice. **The sixty comes from the flip interval, not from painting
+twice** -- so the picture rate does not need a second pass through the display frame at all, and the
+fifty-nine-to-sixty measurement stands on its own without the second paint.
+
+**The conclusion this section reached is withdrawn**, because the evidence under it is not what it was
+taken to be. It said the two routes were "mutually exclusive" and that conditions 3, 4 and 5 were
+therefore "in tension on this title". That rested on the fault being the display frame's own
+non-re-entrancy -- on a guest `lwz` at `0x3c(rA)` inside the title's code. The run below puts the
+faulting instruction **outside the title's RPX entirely**, so "the frame is not re-entrant" was never
+measured; it was assumed from where the fault surfaced, and the surface was the emulator's interpreter
+rather than the frame. Nothing here establishes a tension, and the in-between frame is not shown to be
+out of reach. What is left is a located fault with a named address and no named cause yet.
+
+### The fault, located properly: the interpreter, and not the title's own code
+
+Two independent runs of mode 3 under gdb, each with the capture workload that the fault needs, both
+faulting the same way:
+
+```
+#0  ppcMem_readDataU32 (hCPU=..., address=1763)   at PPCInterpreterImpl.cpp:72
+#1  PPCInterpreterContainer<...>::PPCInterpreter_LWZ (hCPU=..., Opcode=2147682018)
+                                              at PPCInterpreterLoadStore.hpp:285
+#2  PPCInterpreterSlim_executeInstruction       at PPCInterpreterImpl.cpp:1257
+#3  coreinit::__OSFiberThreadEntry              at coreinit_Thread.cpp:1365
+```
+
+**Three facts, and each one contradicts something this file has said.**
+
+**It is the interpreter, not recompiled code.** The whole previous reading of this fault -- the
+`movbe 0x3c(%r13,%rax,1)` in a generated prologue, `%r13` as `memory_base`, the address
+`0x7ffed4000198` -- was taken from a thread that `guestpcs.py` believed was in recompiled code. It
+was not; the fault is `PPCInterpreterSlim_executeInstruction`, the JIT's *fallback*. Per this
+project's own rule that the interpreter is a bounded fallback used only after the recompiler reports
+a block cannot be compiled, **the second pass is running where the recompiler declined**, and that is
+a fact about the patch rather than about the title's draw path. The `lwz` handler passes
+`(rA ? hCPU->gpr[rA] : 0) + imm`, so with `imm = 0x6e2` and `rA = 0` the guest read guest address
+`0x6e2` with `r0` contributing nothing.
+
+**The instruction is not in the title's RPX.** The opcode word the interpreter was executing is
+`0x800306e2` in one run and `0x800006e2` in the other -- the same `0x6e2` displacement off `r0` with
+`r0 = 0`, differing only in the destination register. Searched over the analyzed program:
+
+```
+scanned 9,432,460 executable bytes in 17 blocks
+  control 0x7c0802a6 (the frame's first word, mfspr r0): 23,265 matches
+  sought  0x800006e2 (lwz r0,0x6e2(r0)):                  0 matches
+verdict: the control was found, so the search works; the faulting opcode is not in this program
+```
+
+**So the faulting code is in one of the other modules** -- coreinit, rpl, or another of the title's
+RPX files -- and not in `cking.elf`. That moves the question: it is no longer "what state does the
+display object leave behind", but "which library function runs on the second pass with `r0 = 0`".
+A near-null base register in a *system* library is a different failure with a different fix, and the
+five callees of the frame are no longer the place to look.
+
+### A search that reported a falsifier it had not earned
+
+Worth recording because it nearly became a retraction of a correct reading. Searching the image for
+the fault's `0x3c` displacement, over every function:
+
+```
+instruction.getOpObjects(0)   ->   "lwz r0"            for lwz r3,0x48(r0)
+instruction.toString()        ->   "lwz r3,0x48(r0)"
+```
+
+`getOpObjects(0)` returns **one operand object, not the instruction's text**, and the displacement is
+not in it. A search matching `"0x3c("` against that string found **0 of 29,408 functions** -- a
+plausible-looking falsifier of this file's `0x3c` reading, produced by a string that never contains
+a displacement. Searched against the full text, the same scan finds **2,120 of 29,408**, rendering as
+`lwz r12,0x3c(r10)`. **The `0x3c` reading was never falsified**, and the retraction was about to be
+written from an instrument that could not have found a match whatever the image held.
+
+### The guest-memory dump had been reading the host's
+
+The fault harness printed the stand-in's block with `x/8wx 0x00e05880` and the vtable slot with
+`x/1wx 0x10004f54`. gdb has no view of the guest: those are host addresses, and the answers are
+visible in the output. `0x00e05880` came back as four words gdb attributed to
+`_ZN7glslang16TOutputTraverser10visitUnaryE+3872` **inside the wiiuport binary** -- the stand-in's
+block was being read out of the emulator's own text segment -- and the vtable slot and the frame both
+answered `Cannot access memory at address`. Every "the arena holds" claim from a run before this was a
+host read. `memory_base` is cemu's global (`MMU.h:19`, `MMU.cpp:8`) and `memory_base + guest` is a
+host address, so `scratch/frame-loop/arena.py` now reads guest memory that way, prints the mapping it
+read through, and **checks the frame's first word against the image's `0x7c0802a6` before treating
+any of its output as evidence**.
+
+Two more defects in the same instrument, both found by its own output rather than by reading it:
+
+- The guest-CPU sampler read the CPU state from `%rsp`, which is right only in recompiled code
+  (`REG_RESV_HCPU` is `X86_REG_RSP`); in the interpreter it is the first argument. On a thread in the
+  interpreter it returned the host stack pointer, and the "guest pc" that came out was a host return
+  address with the top bit set. It now names the register it used and whether that was the interpreter
+  or the recompiler.
+- That sampler also ended by detaching, which killed the inferior before the guest dump that runs after
+  it: `memory_base` read back as `0x0` and the dump read host addresses again -- the same defect, once
+  removed. And the runtime addresses were read *after* the two holding windows, by which time the fault
+  had happened and the channel was refusing connections, so the one run that mattered recorded only
+  that it could not be read. They are read at arming time now, while the product still answers.
 
 **This is where the double-paint fault stands, as known rather than as a theory.** The guest is
-healthy at the fault; the fault is a guest load at `0x198` in recompiled code; the display object is
-cleared (its flag, its phase and all five of its call targets are identical across the two paints);
-four payload shapes built on four readings have each been measured -- three fault, and the
-objective's own does not fault and does not paint. The candidates left are the five callees' own
-state, and the vtable register the objective's payload assumes.
+healthy at the fault; the fault is a host segfault in the **interpreter's** guest load on the display
+fiber, at a guest address of `0x6e2` with `r0 = 0`; **the instruction is not in the title's RPX**;
+the display object is cleared (its flag, its phase and all five of its call targets are identical
+across the two paints); five payload shapes built on five readings have each been measured -- four
+fault, and the objective's own neither faults nor paints. The candidates left are the five callees'
+own state, and the modules outside the title's own code.
 
 ### A real bug found on the way, which is not this fault
 
