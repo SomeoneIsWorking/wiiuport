@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstring>
 #include <set>
 #include <tuple>
 
@@ -88,6 +90,33 @@ void DrawAttributeCensus::onDrawRecorded(const LatteFrameHooks::DrawPrepared& dr
             m_attributesOutOfRange.fetch_add(1, std::memory_order_relaxed);
             continue;
         }
+        // The magnitudes at this offset, read now while the buffer is valid. A count of how
+        // many objects agree on a signature cannot tell a position from bytes that share its
+        // stride: every one of seven stride-20 objects agreed, and reading them gave 1e+38 for
+        // some and a believable 0.107 for others. Only the values can.
+        uint64_t read = 0;
+        uint64_t implausible = 0;
+        const LatteFrameHooks::DrawPrepared::VertexBuffer& source =
+            draw.vertexBuffers[attribute.buffer];
+        if (source.data != nullptr) {
+            const uint32_t perVertex = attribute.sizeInBytes / 4;
+            const uint32_t vertices = source.stride == 0 ? 0 : source.sizeInBytes / source.stride;
+            const auto* base = static_cast<const uint8_t*>(source.data) + attribute.offset;
+            for (uint32_t vertex = 0; vertex < vertices && vertex < kMagnitudeSamples; vertex++) {
+                for (uint32_t component = 0; component < perVertex; component++) {
+                    uint32_t word = 0;
+                    std::memcpy(&word, base + (vertex * source.stride) + component * 4,
+                                sizeof(word));
+                    float value = 0.0f;
+                    std::memcpy(&value, &word, sizeof(value));
+                    read++;
+                    if (!std::isfinite(value) || std::fabs(value) > kComponentCeiling) {
+                        implausible++;
+                    }
+                }
+            }
+        }
+
         Signature seen;
         seen.semanticId = attribute.semanticId;
         seen.format = attribute.format;
@@ -99,6 +128,8 @@ void DrawAttributeCensus::onDrawRecorded(const LatteFrameHooks::DrawPrepared& dr
         seen.bufferBytes = draw.vertexBuffers[attribute.buffer].sizeInBytes;
         seen.draws = 1;
         seen.nodes = object == 0 ? 0u : 1u;
+        seen.componentsRead = read;
+        seen.componentsImplausible = implausible;
 
         std::scoped_lock lock(m_mutex);
         auto node = std::find_if(m_nodes.begin(), m_nodes.end(), [object](const Node& one) {
@@ -117,6 +148,8 @@ void DrawAttributeCensus::onDrawRecorded(const LatteFrameHooks::DrawPrepared& dr
             known = node->signatures.insert(known, seen);
         }
         known->draws++;
+        known->componentsRead += read;
+        known->componentsImplausible += implausible;
     }
 }
 
@@ -180,6 +213,7 @@ DrawAttributeCensus::Position DrawAttributeCensus::positionForLocked(uint32_t st
     }
     const uint64_t needed = nodes / 2 + 1;
     std::map<Key, std::set<uint32_t>> across;
+    std::map<Key, uint64_t> implausible;
     for (const Node& node : m_nodes) {
         if (node.address == 0) {
             continue;
@@ -193,11 +227,21 @@ DrawAttributeCensus::Position DrawAttributeCensus::positionForLocked(uint32_t st
                 continue;
             }
             across[keyOf(signature)].insert(node.address);
+            implausible[keyOf(signature)] += signature.componentsImplausible;
         }
     }
     Position out;
     uint64_t bestObjects = 0;
     for (const auto& [key, objects] : across) {
+        // **The count bar AND the magnitude bar.** Seven objects agreeing that the stride-20
+        // position is at offset 0 is not enough, because those twelve bytes are partly position
+        // and partly the eight other bytes in the stride. An offset whose values have ever read
+        // as something a position is not, is not named -- and the report says how many, so a
+        // layout that fails this is a layout the census has not solved rather than a layout with
+        // no position.
+        if (implausible[key] > 0) {
+            continue;
+        }
         if (objects.size() >= needed && objects.size() > bestObjects) {
             bestObjects = objects.size();
             out.semanticId = std::get<0>(key);
@@ -272,6 +316,15 @@ std::string DrawAttributeCensus::json() const {
             entry.second += signature.draws;
         }
     }
+    // How many components read as something a position is not, per signature. Collected over
+    // every object, because the magnitude bar is a property of the layout rather than of one
+    // draw.
+    std::map<Key, uint64_t> implausibleCounts;
+    for (const Node& node : m_nodes) {
+        for (const Signature& signature : node.signatures) {
+            implausibleCounts[keyOf(signature)] += signature.componentsImplausible;
+        }
+    }
     std::vector<std::pair<Key, std::pair<uint64_t, uint64_t>>> ordered(across.begin(),
                                                                        across.end());
     std::sort(ordered.begin(), ordered.end(), [](const auto& left, const auto& right) {
@@ -300,6 +353,11 @@ std::string DrawAttributeCensus::json() const {
         one.number("stride", std::get<6>(key));
         one.number("nodes", counts.first);
         one.number("draws", counts.second);
+        one.number("componentsImplausible", implausibleCounts.at(key));
+        // A quoted string, because `pass` and `fail` are words and not JSON literals. Written
+        // raw it came out as `"magnitudeBar":pass`, which is the fifth unquoted-value report
+        // this project has produced and the reason there is one formatter and a rule.
+        one.string("magnitudeBar", implausibleCounts.at(key) == 0 ? "pass" : "fail");
         one.raw("positionSized",
                 (std::get<2>(key) == kPositionBytes || std::get<2>(key) == kPositionBytesPadded)
                     ? "true"

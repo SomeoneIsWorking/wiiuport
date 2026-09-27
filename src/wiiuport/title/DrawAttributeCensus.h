@@ -95,6 +95,15 @@ class DrawAttributeCensus final : public frame::DrawRecordedListener {
     uint64_t nodesTracked() const;
 
     // One attribute signature, as seen at one draw.
+    //
+    // **`implausible` is the count condition's other half, and the real title needed it.** The
+    // stride-20 layout had seven objects agreeing on "semantic 0, format 0x30, 12 bytes, buffer
+    // 0, offset 0", which clears any bar over agreement -- and the twelve bytes there are partly
+    // position and partly not, because eight other bytes share the stride. Reading them gave a
+    // largest component delta of 1e+38 for some objects and a believable 0.107 for others. A
+    // count of agreement cannot tell those apart, because every one of those objects agreed;
+    // only the magnitudes can. So a candidate also carries how many of the components read at
+    // its offset were implausible as positions, and the belief needs that to be zero.
     struct Signature {
         uint32_t semanticId = 0;
         uint32_t format = 0;
@@ -108,6 +117,9 @@ class DrawAttributeCensus final : public frame::DrawRecordedListener {
         uint64_t nodes = 0;
         uint32_t stride = 0;
         uint32_t bufferBytes = 0;
+        // Components read at this offset, and how many were implausible as positions.
+        uint64_t componentsRead = 0;
+        uint64_t componentsImplausible = 0;
         bool operator<(const Signature& other) const;
     };
 
@@ -120,6 +132,16 @@ class DrawAttributeCensus final : public frame::DrawRecordedListener {
     // every attribute.
     static constexpr size_t kPositionBytes = 12;
     static constexpr size_t kPositionBytesPadded = 16;
+    // **How large a position component may be, and why the census reads values at all.** A
+    // scene is metres and a view matrix is metres; a component of 1e+38 read at an offset where
+    // a position should be is not a position, and reading the twelve bytes of a stride-20 layout
+    // at offset 0 produced exactly that. Generous on purpose: the point is to catch 1e+38 and
+    // denormals, not to bound a world.
+    static constexpr float kComponentCeiling = 1.0e6f;
+    // How many vertices' worth of components are read per draw per candidate. A handful is
+    // enough to see whether an offset holds positions, and reading every vertex of a million-
+    // vertex mesh to find that out would be a census that costs more than the frame it watches.
+    static constexpr uint32_t kMagnitudeSamples = 4;
     // How many signatures the report names, most-recurring first.
     static constexpr size_t kExamples = 12;
 
