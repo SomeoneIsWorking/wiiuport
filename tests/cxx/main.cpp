@@ -41,6 +41,7 @@ int main(int argc, char** argv) {
     wiiuport::tests::runPaintTests();
     wiiuport::tests::runBlockCensusTests();
     wiiuport::tests::runLogicGateTests();
+    wiiuport::tests::runObjectPoseHistoryTests();
     wiiuport::tests::runReplayTests();
     wiiuport::tests::runSearchTests();
     wiiuport::tests::runInputTests();

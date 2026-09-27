@@ -54,11 +54,22 @@ bool readWord(uint32_t address, uint32_t& value) {
     return g_fake->readWord(address, value);
 }
 
+// The pose seam, the same guest read a word at a time: the census's own tests are
+// about the descriptor, and the pose history is exercised where it is measured.
+bool readWords(uint32_t address, uint32_t* values, uint32_t count) {
+    for (uint32_t word = 0; word < count; word++) {
+        if (!g_fake->readWord(address + 4 * word, values[word])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 UniformBlockCensus makeCensus(FakeGuest& guest) {
     g_fake = &guest;
     g_first = nullptr;
     g_second = nullptr;
-    return UniformBlockCensus(&keepRegistration, &readWord);
+    return UniformBlockCensus(&keepRegistration, &readWord, &readWords);
 }
 
 // One binding, as the draw makes it: the sub-object is the first argument.

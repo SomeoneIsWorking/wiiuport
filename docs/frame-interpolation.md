@@ -494,6 +494,80 @@ mode 3 can, and faults. The same-pass comparison is therefore still owed, and th
 analysis — the same pair against the pair a tick apart, with the paint count over the same
 window — is the read that settles it.
 
+## The blend: which node field holds the pose, and when it is written
+
+Located, not searched for. The per-object uniform block binder at `0x027ff88c` is one of
+the two sub-objects a node's draw calls, and all it does is work out where the object's
+block lives and bind it per stage:
+
+```
+entry = object + 0x10 + *(int *)(object + 0x4c) * 0x1c;
+GX2Set{Vertex,Geometry,Pixel}UniformBlock(index, *(u32 *)(entry + 0x0c), *(u32 *)(entry + 4));
+```
+
+So identity is the node, and the node's own descriptor is where the block is named. Two
+things were read out of that rather than guessed at:
+
+- **The block's address is the descriptor entry's word at `+0x04`.** The two slots of
+  every object measured are exactly `0x100` apart, five objects in a row, and the word at
+  `+0x0c` the binder hands to `GX2Set*UniformBlock` is `0x40` for every one of them — a
+  constant, and so an offset within the block rather than a size. A uniform block is 256
+  bytes and its address is in the descriptor.
+- **The pose is twelve floats at `+0xc4` of that block.** Three rows of unit length and
+  mutually perpendicular to six decimal places, a translation beside them in the same
+  twelve words, and a zero fourth float in each group of four, so a 3x4 and not a 4x4
+  with a row dropped.
+
+**And whether the previous tick's block is still there when this tick paints is answered,
+and the answer is no.** The ring turns — 898,547 cursor switches over 3,023,213 repeat
+bindings, 0.297 per binding — but reading both slots whole finds the *other* slot zero at
+the pose's own offsets. The two readings were different findings and the earlier one was
+wrong: the ring turning is not the previous tick's values being in memory, so a blend
+cannot read N-1 out of the ring. That claim is withdrawn in `project-state.md` and in the
+title's own document.
+
+### So the blend has to capture, and the question is where
+
+Both ends of the lerp have to be in memory at one moment, and the ring does not hold the
+previous tick. So one of them has to be kept — and *where* is decided by something the
+code does not say: whether the title writes the pose **before** the binder runs or after.
+
+- **Written before.** The value at the binder is this tick's and the value kept from the
+  previous binding is the last tick's. Both are in memory at the binding, the binder is the
+  only place the mechanism has to touch, and the in-between frame is a lerp of two reads.
+- **Written after.** The value at the binder is the *previous* tick's, and the current
+  tick's has to be read where it is written — a different probe at a different address,
+  found by asking who fills the descriptor. The title's own document names that as the open
+  read, and this decides whether it is still open.
+
+`title::ObjectPoseHistory` measures it, from the binder probe that is already installed, on
+the display thread inside the title's own draw. For each tracked object it reads the pose
+at both blocks the descriptor names, keeps the last three readings with the address each
+came from, and counts: bindings seen, comparisons against a previous reading of the *same*
+block, how many of those found a changed float, the largest single-float change, and
+whether the other slot ever held what the bound block held a binding ago.
+
+**A block that changes address is not compared with the one it replaced.** Comparing across
+that would be comparing two objects' poses and calling it one object moving, which is the
+same class of mistake as reading a string where a variable was expected.
+
+Two defects the tests caught while it was being written, both of which would have made the
+report say something other than what it measured:
+
+- **The reading ring never shifted.** The loop that moved the oldest reading up had an
+  off-by-one that made it do nothing, so the second reading of every object was the
+  *first* reading of the object before it, and the third onwards was zeroes. A report that
+  carries zeroes where a history should be is a report nobody can check.
+- **An unreadable other slot was invisible.** The bound block's unreadability was counted
+  and the other slot's was not, so a ring that could not be asked looked like a ring that
+  was never asked. They are different findings and there are now two counters.
+
+The instrument showed the other answer here, which is what caught the first: a fake that
+wrote the pose's first three words at byte offsets `+0, +1, +2` instead of `+0, +4, +8`
+reads as a block that does not read at all, so every reading came back unreadable — and the
+first version of the test asserted against that, because an assertion written from the code
+rather than from the question agrees with whatever the code does.
+
 ## The gate that comes before any blending
 
 **Null interpolation.** With the blend forced to the identity at t=1, the replayed frame

@@ -679,6 +679,11 @@ class BlockCensus:
     cursor_switches: int
     cursor_compared: int
     examples: tuple[Binding, ...]
+    # The report as it came, so a member this dataclass does not model is still
+    # reachable. Modelling every member means a field per question the product grows,
+    # and a caller that cannot see a member cannot report it -- which is how a measured
+    # answer goes missing rather than going unread.
+    body: str
 
     def render(self) -> str:
         spread = ", ".join(
@@ -838,7 +843,14 @@ def set_gate(
 
 
 def read_blocks(port: int = DEFAULT_PORT, timeout: float = 2.0) -> BlockCensus:
-    payload = _get("/blocks", port, timeout)
+    raw = request_bytes("GET", "/blocks", port, timeout)
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError as malformed:
+        raise ControlUnavailable(
+            f"GET /blocks answered something that is not JSON: {malformed}; body was "
+            f"{raw[:200].decode('utf-8', 'replace')!r}"
+        ) from malformed
     require_fields(
         "GET /blocks",
         payload,
@@ -883,6 +895,7 @@ def read_blocks(port: int = DEFAULT_PORT, timeout: float = 2.0) -> BlockCensus:
             )
             for one in payload.get("examples", {}).values()
         ),
+        body=raw.decode("utf-8"),
     )
 
 
