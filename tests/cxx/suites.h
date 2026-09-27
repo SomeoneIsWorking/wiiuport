@@ -14,6 +14,7 @@ void runPaintTests();
 void runBlockCensusTests();
 void runLogicGateTests();
 void runObjectPoseHistoryTests();
+void runGlobalPoseCensusTests();
 void runObjectPoseLocatorTests();
 void runNodePoseLocatorTests();
 void runJsonBodyTests();

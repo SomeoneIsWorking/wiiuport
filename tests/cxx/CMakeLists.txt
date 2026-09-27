@@ -8,6 +8,7 @@ add_executable(wiiuport_tests
   control_tests.cpp
   logic_gate_tests.cpp
   pose_history_tests.cpp
+  global_pose_tests.cpp
   json_body_tests.cpp
   node_pose_tests.cpp
   object_identity_scope_tests.cpp

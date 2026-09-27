@@ -32,6 +32,7 @@
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
 #include "wiiuport/title/DrawAttributeCensus.h"
+#include "wiiuport/title/GlobalPoseCensus.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/NodePoseLocator.h"
 #include "wiiuport/title/ObjectIdentityScope.h"
@@ -168,6 +169,16 @@ class Runtime {
                              &GuestPatching::ReadWord};
     title::UniformBlockCensus m_blocks{&GuestCallProbes::Register, &GuestPatching::ReadWord,
                                        &GuestPatching::ReadWords, &m_poseLocator, &m_nodePose};
+    // The data-area scan: two snapshots of the title's `.data` and `.bss` a frame apart, looking
+    // for a transform that changed. It is the one instrument that can find a *global* uniform, and
+    // a camera is a global uniform -- which is why the per-draw assembly scan could not.
+    title::GlobalPoseCensus m_globalPose{&GuestPatching::ReadWords, [this]() {
+                                             // The paint counter, because a frame here means a
+                                             // presented frame -- the same counter the paint mod
+                                             // counts with, so "one frame apart" means one present
+                                             // apart and not one interpreter iteration apart.
+                                             return m_paint.paintCounter().load();
+                                         }};
     title::WindWakerPaint m_paint{&GuestCallProbes::Register,      &GuestPatching::AllocateCode,
                                   &GuestPatching::WriteWord,       &GuestPatching::ReadWord,
                                   &GuestPatching::SetSwapInterval, &GuestPatching::SwapInterval};
@@ -205,6 +216,7 @@ class Runtime {
         .callers = m_callers,
         .paint = m_paint,
         .blocks = m_blocks,
+        .globalPose = m_globalPose,
         .logic = m_logic,
         .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,
