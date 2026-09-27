@@ -109,7 +109,10 @@ void Runtime::installHooks() {
     m_blocks.setIdentityScope(&m_objectScope);
     m_recorder.setObjectScope(&m_objectScope);
     m_recorder.addDrawRecordedListener(&m_drawAttributes);
+    m_vertexHistory.setFrameCounter(&m_paint.paintCounter());
+    m_recorder.addDrawRecordedListener(&m_vertexHistory);
     m_blocks.setDrawAttributeCensus(&m_drawAttributes);
+    m_blocks.setVertexPoseHistory(&m_vertexHistory);
     m_nodePose.install();
     m_paint.install();
     m_blocks.install();

@@ -145,6 +145,10 @@ class Runtime {
     // tables. The pose is not a transform anywhere, so the blend writes vertex bytes at the
     // game's own draw, and this is what tells it where they are.
     title::DrawAttributeCensus m_drawAttributes{&m_objectScope};
+    // Whether two ticks' position bytes exist to be blended, per node. The falsifier for the
+    // vertex-stream blend, and it is a separate class because a history that also did the
+    // blending could not be asked whether blending was possible.
+    title::VertexPoseHistory m_vertexHistory{&m_objectScope, &m_drawAttributes, nullptr};
     interp::ObjectBlend m_objectBlend{interp::ContinuousInterpolator::kBlendPoint};
     interp::ReplayBlend m_replayBlend{m_objectBlend, m_substitution};
     guest::BufferWriters m_writers;

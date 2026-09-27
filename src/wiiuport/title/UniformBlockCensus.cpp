@@ -61,6 +61,10 @@ void UniformBlockCensus::setDrawAttributeCensus(const DrawAttributeCensus* draws
     m_drawAttributes = draws;
 }
 
+void UniformBlockCensus::setVertexPoseHistory(const VertexPoseHistory* history) {
+    m_vertexHistory = history;
+}
+
 void UniformBlockCensus::setIdentityScope(ObjectIdentityScope* scope) {
     m_scope = scope;
 }
@@ -323,6 +327,10 @@ std::string UniformBlockCensus::json() const {
     // open when they ask where the position is: three places the pose was looked for, and the
     // attribute table that says where it now is.
     body.object("drawAttributes", m_drawAttributes == nullptr ? "null" : m_drawAttributes->json());
+    // And the falsifier: whether two ticks' position bytes exist to be blended at all, per
+    // node, with the four answers kept apart. A report that only said "blendable: 3" would not
+    // say what happened to the other five.
+    body.object("vertexHistory", m_vertexHistory == nullptr ? "null" : m_vertexHistory->json());
     if (!m_refusal.empty()) {
         body.string("refusal", m_refusal);
     }
