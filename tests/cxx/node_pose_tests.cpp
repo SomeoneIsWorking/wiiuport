@@ -621,6 +621,50 @@ void wiiuport::tests::runNodePoseLocatorTests() {
                       "what the loose bar is willing to call a matrix");
     }
 
+    // **The report must parse, whatever the guest's memory holds.** The loose class admits
+    // any non-singular 3x3, which includes rows long enough to overflow a float to infinity
+    // and rows of denormals whose determinant underflows; a numeric formatter writes those
+    // as `inf` and `nan`, JSON allows neither, and one of them made the whole body
+    // unparseable -- `GET /blocks` answered with something no client could read and the run
+    // reported it as an I/O failure rather than as what it was. So a non-finite measurement
+    // is a fact about memory, not a number, and it is written as a string.
+    {
+        std::map<uint32_t, std::vector<float>> memory;
+        for (uint32_t object = 1; object <= 3; object++) {
+            std::vector<float> words = withNothing();
+            // A row long enough that x*x overflows a float to infinity, and a det that does
+            // not underflow, so the loose bar counts it. Its scale is then not a number.
+            const float huge[12] = {3.0e19f, 0.0f, 0.0f,    0.0f, 2.0e19f, 0.0f,
+                                    0.0f,    0.0f, 1.0e19f, 5.0f, 6.0f,    7.0f};
+            for (size_t word = 0; word < 12; word++) {
+                words[20 + word] = huge[word] * (1.0f + 0.1f * static_cast<float>(object));
+            }
+            memory[object] = words;
+        }
+        NodePoseLocator locator = makeLocator();
+        g_nodes = &memory;
+        locator.install();
+        g_locator = &locator;
+        for (uint32_t object = 1; object <= 3; object++) {
+            for (int scan = 0; scan < 3; scan++) {
+                locator.observe(object);
+            }
+        }
+        const std::string body = locator.json();
+        g_nodes = nullptr;
+        check::isTrue(body.find(":inf") == std::string::npos &&
+                          body.find(":nan") == std::string::npos &&
+                          body.find(":infinity") == std::string::npos,
+                      "no bare inf, nan or infinity appears as a value, because a JSON parser "
+                      "stops at the first one and the whole report is then unreadable: " +
+                          body);
+        check::isTrue(body.find("\"inf\"") != std::string::npos ||
+                          body.find("\"-inf\"") != std::string::npos,
+                      "and a non-finite measurement is written as a quoted string, so the fact "
+                      "survives as a fact: " +
+                          body.substr(0, 200));
+    }
+
     // The report is one object that ends, because a client parses it, and it names both
     // kinds and the vtable's target -- three addresses a reader would otherwise have to
     // find in the code.

@@ -16,7 +16,18 @@ namespace {
 // Nine significant digits, not six fixed decimals: a difference of one part in 10^40 prints
 // as zero under %.6f, and a reader told "moved 18, biggest delta 0.000000" has no way to
 // tell a bit of noise from a value that was never computed.
+//
+// **And never `inf` or `nan`, because the client parses this.** The loose class admits any
+// non-singular 3x3, which includes rows long enough to overflow a float to infinity and rows
+// of denormals whose determinant underflows to zero; %.9g writes those as `inf` and `nan`,
+// which JSON does not allow, and one of them made the whole report unparseable -- `GET
+// /blocks` answered with something no client could read, and the run said so as an I/O
+// failure rather than as what it was. A non-finite value is a fact about the guest's
+// memory, not a number, so it is written as a quoted string and the reader is told.
 std::string number(float value) {
+    if (!std::isfinite(value)) {
+        return value > 0.0f ? "\"inf\"" : (value < 0.0f ? "\"-inf\"" : "\"nan\"");
+    }
     char text[32];
     std::snprintf(text, sizeof(text), "%.9g", static_cast<double>(value));
     return {text};
