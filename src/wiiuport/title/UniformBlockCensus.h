@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Cafe/HW/Espresso/GuestCallProbes.h"
+#include "wiiuport/title/DrawAttributeCensus.h"
 #include "wiiuport/title/NodePoseLocator.h"
 #include "wiiuport/title/ObjectIdentityScope.h"
 #include "wiiuport/title/ObjectPoseHistory.h"
@@ -101,6 +102,10 @@ class UniformBlockCensus {
     // Null is allowed and means no publication, and a report then says so rather than implying
     // the assemblies have no object.
     void setIdentityScope(ObjectIdentityScope* scope);
+
+    // The draw attribute census, reported beside the pose search. Null is allowed and reported
+    // as null, so a build that wires no census does not look like a run that found nothing.
+    void setDrawAttributeCensus(const DrawAttributeCensus* draws);
 
     UniformBlockCensus(Register registerProbe, ReadWord readWord,
                        ObjectPoseHistory::ReadWords readWords,
@@ -211,6 +216,7 @@ class UniformBlockCensus {
     const ObjectPoseLocator* m_locator = nullptr;
     NodePoseLocator* m_nodes = nullptr;
     ObjectIdentityScope* m_scope = nullptr;
+    const DrawAttributeCensus* m_drawAttributes = nullptr;
     Binder m_first{*this, false};
     Binder m_second{*this, true};
     std::atomic<uint64_t> m_bindings{0};

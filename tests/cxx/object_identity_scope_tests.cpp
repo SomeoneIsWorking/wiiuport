@@ -41,8 +41,8 @@ void wiiuport::tests::runObjectIdentityScopeTests() {
     {
         ObjectIdentityScope scope;
         check::isTrue(scope.current() == 0, "with nothing bound, a read is zero");
-        check::isTrue(field(scope.json(), "assemblyQueries") == "1", "and the read is counted");
-        check::isTrue(field(scope.json(), "assemblyQueriesWithObject") == "0",
+        check::isTrue(field(scope.json(), "reads") == "1", "and the read is counted");
+        check::isTrue(field(scope.json(), "readsWithObject") == "0",
                       "and counted as a read that found nothing, which is the coverage number "
                       "that matters");
     }
@@ -56,7 +56,7 @@ void wiiuport::tests::runObjectIdentityScopeTests() {
                       "and still what a second read returns, because one binding covers several "
                       "of a draw's uniform uploads");
         const ObjectIdentityScope::Report r = scope.report();
-        check::isTrue(r.binds == 1 && r.assemblyQueries == 2 && r.assemblyQueriesWithObject == 2,
+        check::isTrue(r.binds == 1 && r.reads == 2 && r.readsWithObject == 2,
                       "one bind, two reads, both with an object");
         check::isTrue(r.bindsSinceLastQuery == 0,
                       "and nothing bound between the reads, which is the possible-error count a "
@@ -79,7 +79,7 @@ void wiiuport::tests::runObjectIdentityScopeTests() {
         check::isTrue(r.bindsSinceLastQuery == 2,
                       "and the report says two binds happened since the previous read, so a "
                       "reader can see that the slot moved and judge the identity themselves");
-        check::isTrue(r.binds == 3 && r.assemblyQueries == 2,
+        check::isTrue(r.binds == 3 && r.reads == 2,
                       "with every bind and every read counted, neither of which can be dropped "
                       "from the total");
     }
