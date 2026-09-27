@@ -1177,6 +1177,53 @@ magnitude condition, not a count: a per-layout position whose components are imp
 a position, and a layout that fails it is a layout the census has not solved rather than a layout
 with a position at offset 0.
 
+### Withdrawn: the believable 0.107 was the census reading a non-position
+
+The previous entry reported a largest component delta of **0.106766738** on a stride-20 layout
+and called it "a tenth of a unit of travel, which is what a position does", and said there was
+something real. **That was wrong, and the magnitude bar is what showed it.** Those twelve bytes
+at offset 0 are not a position; one component in them read as 3e+38, which is what the
+out-of-range count had been saying all along. A delta of 0.107 beside a delta of 1e+38 in the
+same twelve bytes was never a position, and reading it as one was the same class of mistake as
+every other one this session: a number that looks like a result.
+
+The census now reads the values at a candidate offset and will not name a position whose
+components have ever read as something a position is not. The layouts it now reports:
+
+    stride 20: 7 objects, positionKnown=false
+    stride 28: 1 object,  positionKnown=false      (one object cannot clear a cross-object bar)
+    stride 32: 7 objects, semantic 1,  12 bytes, offset 12
+    stride 48: 3 objects, semantic 14, 16 bytes, offset 0
+    stride 64: 7 objects, positionKnown=false
+    stride 80: 2 objects, positionKnown=false
+    stride 96: 5 objects, semantic 4,  12 bytes, offset 48
+
+**Seven layouts, and the position at a different offset in each** -- offset 12, offset 0, offset
+48. The stride-32 answer moved from `semantic 0, offset 0` to `semantic 1, offset 12` and the
+stride-64 layout now names nothing at all. So the answer the census had been giving for two of
+the four layouts it claimed was a position at offset 0 or 16 was **wrong**, and only the count
+bar had let it through.
+
+And the falsifier, on the corrected positions:
+
+    488,712 draws seen, 403,774 with no position named, 4 nodes tracked
+    0 blendable, 3 identical, 0 valueUnchanged, 1 with nothing paired
+
+    node 1046041348: identical, 4 vertices, stride 32, 0 differing bytes, delta 0, 101 frames apart
+    node 1160971032: identical, 4 vertices, stride 32, 0 differing bytes, delta 0
+    node 1160969272: identical, 4 vertices, stride 32, 0 differing bytes, delta 0
+
+**Zero blendable.** `drawsWithoutPosition` rose from 188,522 to 403,774 of 488,712 draws, because
+most draws are now correctly refused: their layout has no position this census is willing to
+name. **The vertex-stream blend has no ingredient on these objects, and the one time it appeared
+to have one, the census was reading bytes that are not positions.**
+
+Four of the seven layouts are unresolved, and "unresolved" is the honest word: the magnitude bar
+refuses them rather than naming a position and reading rubbish. A layout the census has not
+solved is a different thing from a layout with no position, and the report says which --
+`positionKnown: false` beside the layout, with the implausible-component count in the
+histogram.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It
