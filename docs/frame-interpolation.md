@@ -1394,6 +1394,92 @@ labelled as the pass rate, not as the tick. **The `display+0x74` / `+0x28` toggl
 it was measured over roughly 300 paints with the pair sampled at every paint, and it is unaffected by
 the reservation fix, which moved no field the frame reads.
 
+### The affine class was already here, already firing, and a second copy of it was the wrong answer
+
+The rigid predicate asks for three rows of unit length, and the argument for looking again is sound:
+a world matrix is `T * R * S`, so a title that scales anything writes rows whose lengths are the
+scale factors, and those rows are a pose the strict class cannot see. `TransformShape` already owns
+the second reading, beside the first:
+
+```
+isRigid   three unit rows, pairwise perpendicular                     the strict class
+isAffine  a non-singular 3x3 whose rows are within kScaleCeiling     the loose class
+          of unit length, and classify() says which of three ways
+          it said no: "singular", "tooLarge", "NotFinite"
+```
+
+**And the loose class is not hypothetical. The uniform census asks it on every assembled buffer and
+it fires, with denominators:**
+
+```
+821216 assemblies scanned, 92 candidate offsets in either class, 397100 with no block sources
+  rigid bar:  4 offsets ever in this class, 0 held often enough, 0 of those seen to move
+  affine bar: 92 offsets ever in this class, 11 held often enough, 11 of those seen to move
+    offset 60:  206388 assemblies, 206382 repeat comparisons, 15739 moved, 190643 still
+    offset 52:  191468 assemblies, 186997 repeat comparisons, 15258 moved, 171739 still
+    offset 56:  189108 assemblies, 189102 repeat comparisons, 15502 moved, 173600 still
+    offset 68:  188187 assemblies, 188181 repeat comparisons, 15740 moved, 172441 still
+    offset 36:  186891 assemblies, 160857 repeat comparisons,   852 moved, 160005 still
+    offset  4:  180790 assemblies, 170562 repeat comparisons,   959 moved, 169603 still
+    offset 104: 176611 assemblies, 176460 repeat comparisons,  6232 moved, 170228 still
+    offset 92:  174901 assemblies, 173940 repeat comparisons,  6225 moved, 167715 still
+```
+
+**The strict class found nothing and the loose class found eleven offsets that move.** That is the
+answer to "which node field holds the pose" as far as this instrument goes, and it was sitting in a
+report the project already prints. The strict class's zero is not evidence of absence; it is evidence
+that the strict class cannot see what is there.
+
+**Three runs, and the best offset is 60 in every one of them:**
+
+```
+821216 assemblies, 92 candidates in either class, 11 held often enough, 11 seen to move, best 60
+823431 assemblies, 92 candidates,               11 held often enough, 11 seen to move, best 60
+1198624 assemblies, 92 candidates,               6 held often enough,  6 seen to move, best 60
+```
+
+**The number of moving offsets is 11, 11 and 6 and that is reported rather than smoothed.** The
+census names an offset in at least 164,243 of the assemblies and the denominator is the assembly
+count, so the count of named offsets moves with the window length; the best offset does not. The
+strict class's count is 4, 0, 0 in the same three runs, and 0 held often enough in all of them.
+
+**What is still missing, and it is the half that matters.** The census keys its (identity, offset)
+pairs on `blockSources`, which is withdrawn as a block address, and the run says so in its own words:
+491,896 guest draws with 0 objects tracked, "no object was fed at all, so this run says nothing about
+the title", and the binder-fed `ObjectPoseHistory` reads 0 observations against 823,431 assemblies.
+**So the offsets are measured and the identity is not:** a pose in a uniform buffer, at a known
+offset, that moves -- and not yet tied to the node the objective names as the identity for a blend.
+
+### And the wrong move was to write a third rule, which is worth recording because it nearly stuck
+
+The first thing done here was to add an affine predicate to `ObjectPoseHistory` -- a 4x4 test, with
+the basis in the rows and the basis in the columns counted separately, on the reasoning that a
+64-byte block is exactly one 4x4. It passed its own tests, and it was **wrong**: `TransformShape`
+owns both classes and the census already measures with them, so the new predicate duplicated a rule
+that has an owner *and* was a different rule from the one the census uses. Two instruments would have
+disagreed for a reason neither could see -- one counting 4x4 windows at two layouts, the other 3x4
+windows at one, both called "the affine class".
+
+It is deleted. `ObjectPoseHistory` now asks `TransformShape` the same question the census asks, over
+the same twelve-word windows, and a hit in one and a hit in the other are one finding rather than two.
+`JsonBody` gained a `signedNumber` on the way, because a translation's second component is negative
+in general and casting it to `uint64_t` reported `18446744073709548616` -- a field a reader has to
+know is a wrap is a field nobody reads correctly twice.
+
+**What the tests pin, and what they deliberately do not.** The loose class is loose on purpose -- it
+exists to tell a field that is present-and-scaled from a field that is absent, and a class that
+accepted only perfect transforms could not -- so a synthetic block fires at windows other than the
+one written. The assertions are therefore **about the offset under test and never about the block's
+total**: a scaled 3x4 written at word 32 is in the class at word 32 and is not in the strict class at
+all; a rigid 3x4 written where the strict class looks is in both, so the loose one widens rather than
+replaces; a singular 3x4 and a 364,193-fold 3x4 are not in the class at their own offsets, which is
+the determinant floor and the scale ceiling doing their work. **The last of those numbers is the one
+measured on this title** -- a loose class with a floor and no ceiling named byte 36 in 262,978 of
+836,990 buffers -- so the test fails if the ceiling is ever raised past it.
+
+With every window accepted instead, the same binary fails 5 checks, including both offset
+assertions; with the class restored, 1714 pass.
+
 ### Correctly paired at last: the fault is in the title's own code, and the gdb window was a host read
 
 One run reporting both the counter and the window, which is the only way the two may be paired:
@@ -2077,10 +2163,22 @@ one descriptor, and following the call graph from either would have found the ot
 is the entry's word at `+0x0c`, which reads `0x40` for every object measured — and in the
 fork's own `GX2SetVertexUniformBlock` the three arguments are `(index, size, address)` from
 `hCPU->gpr[3..5]`, so **`0x40` is the block's size in bytes, not an offset inside a 256-byte
-block.** A 64-byte block cannot hold twelve floats, and a 256-byte window around one holds no
-rigid transform in any of 233 scans. Both readings now agree, and they agree that the pose is in
-a *different* block: the one the record's index range names, addressed through GX2's own
-uniform block table.
+block.** Both readings now agree, and they agree that the pose is in a *different* block: the one
+the record's index range names, addressed through GX2's own uniform block table.
+
+**One sentence here was arithmetic, and it was wrong, and it may have ended the search early:**
+"A 64-byte block cannot hold twelve floats." Twelve floats are 48 bytes and 48 ≤ 64, so a 64-byte
+block can hold one with room to spare, and 64 bytes is also exactly one 4x4. The other half of the
+sentence -- that a 256-byte window around the block holds no rigid transform in any of 233 scans --
+is a measurement and stands; **what it showed is that the block holds no *unscaled* transform, not
+that it holds no pose.** `isPose` asks for three rows of unit length, and a world matrix is
+`T * R * S`: a title that scales anything writes rows whose lengths are the scale factors, and
+those rows are a pose the rigid test cannot see. A second predicate now scans the same blocks for
+an affine 4x4 -- three mutually perpendicular non-degenerate basis vectors and the three zeroes and
+one in the cells its layout puts them, in both the basis-in-rows and basis-in-columns layouts
+counted separately, since the two are transposes and one number for both would hide which matched.
+Its tests pin a scaled matrix found where the rigid one finds nothing, a shear rejected, and the two
+layouts told apart. **What it finds on the title is measured in the run below.**
 
 **Which the fork already holds.** `LatteFrameHooks::UniformAssembly` is the fork's record of one
 draw's assembled uniforms, and it carries:
