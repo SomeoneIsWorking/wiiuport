@@ -41,8 +41,24 @@ void VertexPoseHistory::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw
         m_drawsWithoutPosition.fetch_add(1, std::memory_order_relaxed);
         return;
     }
-    const DrawAttributeCensus::Position at = m_attributes->position();
-    if (!at.known || at.buffer >= draw.vertexBufferCount) {
+    // The position for THIS draw's own layout, not a global one. A title has several vertex
+    // layouts and each packs its position at its own offset: the run that found this compared
+    // five objects cleanly at stride 32 and read 18 and 60 components out of range at strides
+    // of 20 and 64, because a position named across layouts is one layout's answer.
+    //
+    // Asked per buffer, because the stride that identifies the layout is the stride of the
+    // buffer the position is *in* -- which is not known until the census answers, and guessing
+    // buffer zero would be exactly the single-layout assumption this replaces. A draw's buffers
+    // are a handful, so asking each is bounded and exact.
+    DrawAttributeCensus::Position at;
+    for (uint32_t index = 0; index < draw.vertexBufferCount && !at.known; index++) {
+        const DrawAttributeCensus::Position candidate =
+            m_attributes->positionFor(draw.vertexBuffers[index].stride);
+        if (candidate.known && candidate.buffer < draw.vertexBufferCount) {
+            at = candidate;
+        }
+    }
+    if (!at.known) {
         m_drawsWithoutPosition.fetch_add(1, std::memory_order_relaxed);
         return;
     }

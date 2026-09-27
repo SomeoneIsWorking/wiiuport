@@ -134,6 +134,74 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
                       "sixteen are both in the bar and not just one");
     }
 
+    // **Two layouts, two positions, and the stride is what separates them.** This is the case
+    // the real title forced: five objects compared cleanly at stride 32 while two at strides of
+    // 20 and 64 read 18 and 60 components out of range, because the attribute the census named
+    // sits at offset 0 *of its own layout*. One global answer is one layout's answer, and the
+    // stride was recorded on the signature while excluded from its identity -- so a stride-32
+    // draw and a stride-20 draw whose fields agreed folded into one signature and the majority
+    // counted both. Here the same semantic, format, size and buffer appear at two strides with
+    // two different offsets, and each is named for its own layout.
+    {
+        wiiuport::title::ObjectIdentityScope scope;
+        DrawAttributeCensus census(&scope);
+        for (uint32_t object = 1; object <= 4; object++) {
+            scope.bind(0x43e00000u + object * 0x200u);
+            Prepared wide = aDraw(32, 32 * 20);
+            addAttribute(wide, 0, 0x30, 12, 0);
+            addAttribute(wide, 6, 0x1e, 8, 12);
+            census.onDrawRecorded(wide);
+            // **The same offset in both layouts**, which is the collision the stride's absence
+            // from the key caused. With different offsets the two signatures differ anyway and
+            // the test proves nothing -- which is how the first version of this test passed
+            // against the exact mutation it was written for.
+            Prepared narrow = aDraw(20, 20 * 20);
+            addAttribute(narrow, 0, 0x30, 12, 0);
+            addAttribute(narrow, 6, 0x1e, 8, 12);
+            census.onDrawRecorded(narrow);
+        }
+        const DrawAttributeCensus::Position at32 = census.positionFor(32);
+        const DrawAttributeCensus::Position at20 = census.positionFor(20);
+        const std::string body = census.json();
+        check::isTrue(at32.known && at32.offset == 0 && at32.stride == 32,
+                      "the stride-32 layout's position is at offset 0: " + body);
+        check::isTrue(at20.known && at20.offset == 0 && at20.stride == 20,
+                      "and the stride-20 layout's is at offset 0 of ITS OWN layout, which a "
+                      "single global answer counted as the same signature");
+        check::isTrue(body.find("\"layouts\"") != std::string::npos,
+                      "and both layouts are in the report, because the number of layouts is what "
+                      "the one global answer was hiding");
+        // The histogram, not the layouts block: two entries at the SAME offset, one per stride.
+        // The layouts block lists both strides either way, so it cannot tell whether the key
+        // separated them -- and with the stride out of the key the two collapse into one entry
+        // whose object count is the sum of two layouts, which is how one global position was
+        // reported in the first place.
+        const size_t head = body.find("\"signatures\":{");
+        const std::string histogram = head == std::string::npos ? "" : body.substr(head);
+        const size_t atOffset = histogram.find("\"offsetInStride\":0,\"stride\":20");
+        check::isTrue(atOffset != std::string::npos,
+                      "the histogram carries a stride-20 entry at offset 0: " + histogram);
+        check::isTrue(histogram.find("\"offsetInStride\":0,\"stride\":32") != std::string::npos,
+                      "and a stride-32 entry at the same offset, so the key keeps two layouts "
+                      "apart rather than summing their objects: " +
+                          histogram);
+    }
+
+    // A stride nobody has two objects for names nothing, rather than falling back to the
+    // global answer -- a fallback would be the bug again, wearing a different hat.
+    {
+        wiiuport::title::ObjectIdentityScope scope;
+        DrawAttributeCensus census(&scope);
+        for (uint32_t object = 1; object <= 4; object++) {
+            scope.bind(0x43e40000u + object * 0x200u);
+            census.onDrawRecorded(aMeshDraw());
+        }
+        check::isTrue(!census.positionFor(999).known,
+                      "a stride with no objects of its own names nothing");
+        check::isTrue(census.positionFor(32).known,
+                      "while the stride the objects were seen at still does");
+    }
+
     // One object cannot agree with another, so nothing is named however many times it is drawn.
     {
         wiiuport::title::ObjectIdentityScope scope;
