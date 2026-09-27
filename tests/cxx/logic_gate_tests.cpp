@@ -41,8 +41,14 @@ constexpr uint32_t kBlock = 0x00e07000;
 FakeGuest* g_fake = nullptr;
 GuestCallProbes::Probe* g_probe = nullptr;
 
-void keepRegistration(uint32_t, uint32_t, GuestCallProbes::Probe& probe) {
+// Whether the registration asked to keep the entry. It must not: a probe that
+// holds the tick's entry takes it from the caller census for the rest of the run,
+// and the only symptom is a count of zero that reads as a title that never ticks.
+bool g_holdsEntry = true;
+
+void keepRegistration(uint32_t, uint32_t, GuestCallProbes::Probe& probe, bool holdsEntry) {
     g_probe = &probe;
+    g_holdsEntry = holdsEntry;
 }
 
 uint32_t allocateCode(uint32_t) {
@@ -60,6 +66,7 @@ bool readWord(uint32_t address, uint32_t& value) {
 LogicGate makeGate(FakeGuest& guest) {
     g_fake = &guest;
     g_probe = nullptr;
+    g_holdsEntry = true;
     return LogicGate(&keepRegistration, &allocateCode, &writeWord, &readWord);
 }
 
@@ -173,6 +180,9 @@ void wiiuport::tests::runLogicGateTests() {
         LogicGate gate = makeGate(guest);
         gate.install();
         linked();
+        check::isTrue(!g_holdsEntry,
+                      "the gate's probe asks not to keep the tick's entry, so the caller census "
+                      "on that address can still take it");
         check::isTrue(gate.enable().empty(), "the gate installs over the tick's body");
         uint32_t word = 0;
         check::isTrue(readWord(LogicGate::kTickBody, word) && word != LogicGate::kTickSecond,

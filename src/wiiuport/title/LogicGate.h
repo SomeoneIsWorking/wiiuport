@@ -65,9 +65,13 @@ class LogicGate {
     // that says the counters are zero can be read against the space they are in.
     static constexpr uint32_t kBlockBytes = 4 * kBlockWords;
 
-    // The fork's seams, injected so this is testable without a guest.
+    // The fork's seams, injected so this is testable without a guest. The last
+    // argument says the probe does not keep the tick's entry: this one wants the
+    // moment the title was linked and nothing after, and holding the entry would
+    // take it from the caller census for the rest of the run -- which showed up as
+    // the tick being counted zero times while the display thread painted 1479.
     using Register = void (*)(uint32_t entry, uint32_t firstInstruction,
-                              GuestCallProbes::Probe& probe);
+                              GuestCallProbes::Probe& probe, bool holdsEntry);
     using AllocateCode = uint32_t (*)(uint32_t sizeInBytes);
     using WriteWord = bool (*)(uint32_t guestAddress, uint32_t value);
     using ReadWord = bool (*)(uint32_t guestAddress, uint32_t& value);

@@ -144,7 +144,13 @@ LogicGate::LogicGate(Register registerProbe, AllocateCode allocateCode, WriteWor
 }
 
 void LogicGate::install() {
-    m_register(kTick, kTickFirst, *m_moment);
+    // Momentary, and the reason matters: the gate needs the link-time moment to
+    // take its memory out of the loader's arena, and nothing after it. A probe
+    // that kept the tick's entry would refuse every other probe on that address
+    // for the rest of the run, so the caller census -- the only thing that counts
+    // the simulation -- would see no calls at all. That is not a hypothetical: it
+    // is what this registration did, and it read as a title that never ticks.
+    m_register(kTick, kTickFirst, *m_moment, false);
 }
 
 void LogicGate::onInstalled(GuestCallProbes::Installation installation) {

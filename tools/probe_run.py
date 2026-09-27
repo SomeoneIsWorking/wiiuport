@@ -84,6 +84,21 @@ def measure(
             print(f"  refused to arm {name}: {str(unavailable)[:80]}", flush=True)
             return
         print(f"  window {name}: mod {'on ' if on else 'off'}", flush=True)
+        # What the gate says about itself, every window: its probe's installation
+        # and the words at the tick's entry and the one after it. A rate of zero
+        # with the gate in is either "no calls came" or "the gate is not wired to
+        # the tick", and only these three say which.
+        try:
+            gate = read_gate(args.port)
+            print(
+                f"    gate {'in ' if gate.enabled else 'out'}: "
+                f"{gate.probe}, block {gate.block}, at the tick's entry {gate.word_at_entry}, "
+                f"at the word after it {gate.word_at_body}, "
+                f"calls {gate.calls}, ticks {gate.ticks}",
+                flush=True,
+            )
+        except ControlUnavailable as unavailable:
+            print(f"    the gate did not answer: {str(unavailable)[:60]}", flush=True)
         time.sleep(1.0)
         paints_before = read_paint(args.port).paints
         ticks_before, _ = _logic_count(args.port)
@@ -210,6 +225,18 @@ def main(argv: list[str] | None = None) -> int:
             except ControlUnavailable:
                 pass
         say(f"after settling, last paints {paints}")
+        # The caller census, which is the instrument the logic rate rests on, and
+        # so has to be shown rather than trusted: a census that counts nothing is
+        # indistinguishable from a call that does not happen, and only the
+        # addresses it was given can tell the two apart.
+        try:
+            for entry in read_callers(args.port):
+                print(
+                    f"  census {entry.entry:#010x} {entry.installation}: {entry.calls} calls",
+                    flush=True,
+                )
+        except ControlUnavailable as unavailable:
+            print(f"  the caller census did not answer: {str(unavailable)[:70]}", flush=True)
         if args.measure and alive():
             measure(running, args, say)
         if alive():

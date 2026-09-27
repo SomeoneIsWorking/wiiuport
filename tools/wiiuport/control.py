@@ -713,13 +713,23 @@ class BlockCensus:
 
 @dataclass(frozen=True)
 class GateState:
-    """What the logic gate is doing, and the two counts it keeps in guest memory."""
+    """What the logic gate is doing, and the two counts it keeps in guest memory.
+
+    The three descriptive fields exist so that a count of zero can be read. Zero
+    is either "no calls came" or "the gate is not wired to the tick", they are the
+    same number, and the difference is whether the probe installed and what the two
+    words the gate works through actually hold right now.
+    """
 
     tick: int
     enabled: bool
     calls: int | None
     ticks: int | None
     refusal: str
+    probe: str = "unreported"
+    block: str = "unreported"
+    word_at_entry: str = "unreported"
+    word_at_body: str = "unreported"
 
     def render(self) -> str:
         return (
@@ -744,6 +754,10 @@ def read_gate(port: int = DEFAULT_PORT, timeout: float = 2.0) -> GateState:
     )
     return GateState(
         tick=int(payload["tick"], 16),
+        probe=str(payload.get("probe", "unreported")),
+        block=str(payload.get("block", "unreported")),
+        word_at_entry=str(payload.get("wordAtTickEntry", "unreported")),
+        word_at_body=str(payload.get("wordAtTickBody", "unreported")),
         enabled=bool(payload["enabled"]),
         calls=None if payload["callsCount"] is None else int(payload["callsCount"]),
         ticks=None if payload["ticksCount"] is None else int(payload["ticksCount"]),

@@ -64,7 +64,7 @@ uint32_t g_lastBlock = 0;
 // the title does -- through the probe -- instead of reaching inside the mod.
 GuestCallProbes::Probe* g_probe = nullptr;
 
-void keepRegistration(uint32_t, uint32_t, GuestCallProbes::Probe& probe) {
+void keepRegistration(uint32_t, uint32_t, GuestCallProbes::Probe& probe, bool /*holdsEntry*/) {
     g_probe = &probe;
 }
 

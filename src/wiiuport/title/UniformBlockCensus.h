@@ -61,8 +61,12 @@ class UniformBlockCensus {
     static constexpr size_t kExamples = 8;
 
     // The fork's seams, injected so this is testable without a guest.
+    // The flag says whether the probe keeps the entry. Every registration here is
+    // a standing one -- each exists to count calls for the whole run -- so each
+    // passes true. The parameter is here so that one `GuestCallProbes::Register`
+    // address fits every seam the product hands it to.
     using Register = void (*)(uint32_t entry, uint32_t firstInstruction,
-                              GuestCallProbes::Probe& probe);
+                              GuestCallProbes::Probe& probe, bool holdsEntry);
     using ReadWord = bool (*)(uint32_t guestAddress, uint32_t& value);
 
     UniformBlockCensus(Register registerProbe, ReadWord readWord);

@@ -212,12 +212,47 @@ path. The gate's probe reports `installed`, and it reports the words sitting at 
 tick's entry and at the one after it, so a zero can be told apart from a gate that
 is not connected; that distinction is the reason those three fields exist.
 
-**So the gate is a falsifier that has fired.** The risk it was built for is not
-this title's, and the gate is not needed for the presentation rate. It stays,
-because a falsifier that has answered is worth more than a guess that has not, and
-because the open question is the mirror image: *which* call runs the simulation
-here. That is reverse engineering, not a measurement, and it is not answered by any
-of the above.
+**And the census was blind, which made the zero a finding about the instrument
+rather than about the title.** The gate registered its own probe on the tick's
+entry to learn when the title was linked, and a probe that holds an entry takes
+it: every other registration for that address is refused for the rest of the run
+with `EntryHeldOther`, and there is no way to take it back. So the caller census
+on `0x025d42ec` could never install, in any run, gate on or gate off, and read zero
+-- which is exactly what "the title never ticks" looks like. The control settles it:
+`0x025f172c`, the per-frame entry the decompilation names, was probed alongside it
+and counted **2020 calls for 2020 paints**.
+
+**The tick is called once per paint.** So the objective's named risk is *true*, and
+the earlier reading of this section was wrong: the logic is slaved to the flip, one
+tick for one paint, and the gate is exactly the right instrument for it. With the
+census able to see the tick at last, the measured rates are:
+
+```
+off   30.17 paints/s, 30.17 logic/s over 6.0s   (181 paints, 181 ticks)
+on    60.00 paints/s,  0.00 logic/s over 6.0s   (360 paints, 0 ticks)
+off   30.00 paints/s, 30.00 logic/s over 6.0s   (180 paints, 180 ticks)
+on    60.00 paints/s,  0.00 logic/s over 6.0s   (360 paints, 0 ticks)
+```
+
+The on windows read zero from the gate's own counters, and that is now a statement
+about the gate rather than about the simulation. The gate is **wired and never
+entered**, and each of those is measured rather than inferred:
+
+- its probe reports `installed`, and it now asks not to keep the entry, so the
+  census on that address installs and counts;
+- the word it writes at `0x025d42f0` is exactly the branch its own encoder
+  computes for its block: `0x4a8315a0` for a block at `0x00e05890`;
+- all eighteen words of its payload read back from guest memory and match the
+  payload the code builds, the two lifted instructions included;
+- the two counters at `0x00e058d0` and `0x00e058d4` are still zero after six
+  seconds at sixty paints a second.
+
+So the gate's code is in place, its branch is in place and correct, and nothing
+executes it. The paint mod's stand-in lives in the same loader arena and does
+execute -- reached through a vtable, that is, through an indirect call the CPU
+resolves at the call. The gate is reached by a *relative branch* out of recompiled
+code, across about 30 MiB backwards. That difference is the next thing to test, and
+it is a question about the recompiler rather than about this title.
 
 **What the title's own code says about it.** `FUN_025f172c` is the per-frame
 entry, and it calls the tick unconditionally:
