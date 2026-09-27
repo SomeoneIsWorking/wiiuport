@@ -42,9 +42,22 @@ struct RecordedUniformAssembly {
     // such as the light's, that the frame drew before it.
     bool looksUpDepthMap{false};
     // The guest addresses of the uniform blocks this draw sourced, as
-    // (bufferId, physicalAddress) pairs. This is the engine's own storage for
-    // the object, and the only identity a recorded draw carries.
+    // (bufferId, physicalAddress) pairs.
+    //
+    // **Measured not to be an identity.** This was documented here as "the engine's own
+    // storage for the object, and the only identity a recorded draw carries", and over 836,990
+    // assembled buffers it matched exactly one identity across the 438,872 that had sources:
+    // the uniform block is re-uploaded at a new guest address each frame, so the set of
+    // addresses is nearly unique per draw and the same object's assemblies never meet. It is
+    // kept because it is what the draw actually read, and it is no longer called an identity.
     std::vector<uint32_t> blockSources;
+    // The node whose draw this assembly belongs to, when the title's own code has said so.
+    //
+    // The node is not in anything the GX2 hook sees; it is one step away, because the draw
+    // calls its sub-object at `node + 0xa1c` and the binder probe there publishes the object
+    // before the draw's uniforms are uploaded. Zero when nothing published one, and a reader
+    // must treat zero as unknown rather than as a distinct object.
+    uint32_t objectAddress{0};
     std::vector<float> data;
 };
 

@@ -102,6 +102,12 @@ void Runtime::installHooks() {
     // The frame counter, wired before the install: the locator samples an object once per
     // frame, and a sample taken twice inside one frame cannot see a pose move.
     m_nodePose.setFrameCounter(&m_paint.paintCounter());
+    // The two ends of the correlation, and it is worth saying which is which: the census
+    // publishes the object a binding named, and the recorder reads it for each assembly. The
+    // node itself is never passed between them -- the binder and the GX2 hook are different
+    // call sites, and the slot is the whole of the join.
+    m_blocks.setIdentityScope(&m_objectScope);
+    m_recorder.setObjectScope(&m_objectScope);
     m_nodePose.install();
     m_paint.install();
     m_blocks.install();

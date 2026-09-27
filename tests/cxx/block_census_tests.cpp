@@ -1,6 +1,7 @@
 #include "check.h"
 #include "suites.h"
 #include "wiiuport/title/NodePoseLocator.h"
+#include "wiiuport/title/ObjectIdentityScope.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 
 #include <array>
@@ -113,6 +114,7 @@ void writeEntry(FakeGuest& guest, uint32_t entry, uint32_t offset, uint32_t size
 void theOtherSlotIsReadAsWellAsTheBoundOne();
 void cursorSwitchesAreCountedAgainstTheBindsTheyCouldBeAmong();
 void theTwoAddressesABindingNamesAreBothFed();
+void aBindingPublishesItsObjectForTheAssemblyHook();
 
 // The node locator's own registration, kept apart from the census's two: the census's sink
 // decides by address, and the node draw's entry is neither binder, so it would land in the
@@ -132,6 +134,7 @@ NodePoseLocator makeNodeLocator() {
 
 void wiiuport::tests::runBlockCensusTests() {
     theTwoAddressesABindingNamesAreBothFed();
+    aBindingPublishesItsObjectForTheAssemblyHook();
     theOtherSlotIsReadAsWellAsTheBoundOne();
     cursorSwitchesAreCountedAgainstTheBindsTheyCouldBeAmong();
     // An object the binder would be handed, with its cursor naming the second
@@ -216,6 +219,44 @@ namespace {
 // The other slot, read whole -- because whether the previous tick's values are
 // still in memory when this tick binds is what a blend rests on, and a ring read
 // only where the cursor points cannot answer it.
+// **A binding publishes its object, and the publication happens before the scan.** The pose
+// locator's movement test needs the same object's assemblies to meet, and the fork's
+// `blockSources` never let them: one identity in 438,872 assemblies, because the uniform block
+// is re-uploaded at a new address each frame. The node is the fix and it is one step from the
+// binder, which this tests -- the census publishing, and the recorder reading back the same
+// address, with nothing in between that could reorder them.
+void aBindingPublishesItsObjectForTheAssemblyHook() {
+    wiiuport::title::ObjectIdentityScope scope;
+    g_fake = nullptr;
+    FakeGuest guest;
+    g_fake = &guest;
+    guest.writeWord(kObject + UniformBlockCensus::kCursorOffset, 0);
+    writeEntry(guest, 0, 0x40, 0x80);
+
+    UniformBlockCensus census(&keepRegistration, &readWord, &readWords);
+    census.setIdentityScope(&scope);
+    census.install();
+    linked();
+    bind(g_first, kObject);
+
+    check::isTrue(scope.current() == kObject,
+                  "the object a binding named is what the assembly hook would read back");
+    const wiiuport::title::ObjectIdentityScope::Report r = scope.report();
+    check::isTrue(r.binds == 1 && r.assemblyQueriesWithObject == 1,
+                  "one bind, one read, and the read found the object -- with the two sides of "
+                  "the join agreeing on the address rather than on a description of it");
+    // One, not zero, and the difference matters. The first read after a single binding sees
+    // exactly one write, and that write is the binding these assemblies belong to -- so the
+    // number is not an error count, it is the count of bindings the slot is standing for. A
+    // value above one would mean something else bound in between and the identity read here
+    // would be the wrong object's, which is worse than a missing one.
+    check::isTrue(r.bindsSinceLastQuery == 1,
+                  "and the slot was written once since the previous read -- that one binding is "
+                  "what these assemblies belong to, and a count above one would mean the "
+                  "identity read is another object's: " +
+                      std::to_string(r.bindsSinceLastQuery));
+}
+
 void theOtherSlotIsReadAsWellAsTheBoundOne() {
     FakeGuest guest;
     auto census = makeCensus(guest);

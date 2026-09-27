@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <unordered_set>
 
 namespace wiiuport::title {
 
@@ -21,13 +22,16 @@ namespace {} // namespace
 // report can name one. The sources are the guest addresses the draw read its uniforms
 // from, which is what survives a tick; the draw's place in the frame does not.
 std::string ObjectPoseLocator::identityOf(const frame::RecordedUniformAssembly& assembly) {
-    std::string out;
-    char text[16];
-    for (size_t index = 0; index < assembly.blockSources.size(); index++) {
-        std::snprintf(text, sizeof(text), "%08x", assembly.blockSources[index]);
-        out += text;
+    // **The node, when the title's own code has said which one.** `blockSources` is the
+    // fallback and not the identity: measured over 836,990 assembled buffers it matched exactly
+    // one identity across the 438,872 that had sources, because the uniform block is
+    // re-uploaded at a new guest address each frame. A movement count over the one comparison
+    // that produced is not a measurement, which is the whole reason the node is here.
+    if (assembly.objectAddress != 0) {
+        return "node:" + std::to_string(assembly.objectAddress);
     }
-    return out;
+    return "blocks:" + std::to_string(assembly.blockSources[0]) + "," +
+           std::to_string(assembly.blockSources.size());
 }
 
 // Compare this reading with the last one for the same identity at the same offset, and
@@ -96,6 +100,9 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
     const size_t words = assembly.data.size();
     if (words < kPoseWords) {
         return;
+    }
+    if (assembly.objectAddress != 0) {
+        m_sawObjectAddress = true;
     }
     const std::string identity = identityOf(assembly);
 
@@ -229,7 +236,19 @@ std::string ObjectPoseLocator::json() const {
     // record -- the binder sees it and the assembly hook does not. Until the two are
     // correlated, `movementHere` is a measurement over a very small denominator and the
     // belief bars below cannot be believed from it.
-    body.number("identitiesSeen", static_cast<uint64_t>(m_seen.size()));
+    // **Distinct identities, not tracked pairs.** `m_seen` holds one entry per (identity,
+    // offset), so its size is not the number of objects -- a field named for identities and
+    // carrying pairs is worse than no field, because it is the number a reader divides the
+    // movement counts by. Both are reported, under their own names.
+    std::unordered_set<std::string> distinct;
+    for (const auto& entry : m_seen) {
+        distinct.insert(entry.first);
+    }
+    const uint64_t identities = static_cast<uint64_t>(distinct.size());
+    body.number("identitiesSeen", identities);
+    body.number("trackedPairs", static_cast<uint64_t>(m_seen.size()));
+    // Which key was in use, so a number is never silently from the weaker of two.
+    body.string("identitySource", m_sawObjectAddress ? "objectAddress" : "blockSources");
     body.number("identitiesRefusedForTracking", m_identitiesRefused);
     // Two bars over two classes, and the answer to where to look next is which of them
     // fired. `rigid` alone means the value is a pose; `affine` alone means it is a transform

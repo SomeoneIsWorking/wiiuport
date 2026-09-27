@@ -2,6 +2,7 @@
 
 #include "Cafe/HW/Espresso/GuestCallProbes.h"
 #include "wiiuport/title/NodePoseLocator.h"
+#include "wiiuport/title/ObjectIdentityScope.h"
 #include "wiiuport/title/ObjectPoseHistory.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
 
@@ -95,6 +96,12 @@ class UniformBlockCensus {
     // uniform buffer the game assembled for a named node's draw. Null is allowed and
     // reported as null, because a census that requires a locator cannot be built without
     // one and there is no reason it should have to be.
+    // Where a binding's object is published for the assembly hook to read, so a recorded
+    // assembly carries the node it belongs to rather than the addresses it happened to read.
+    // Null is allowed and means no publication, and a report then says so rather than implying
+    // the assemblies have no object.
+    void setIdentityScope(ObjectIdentityScope* scope);
+
     UniformBlockCensus(Register registerProbe, ReadWord readWord,
                        ObjectPoseHistory::ReadWords readWords,
                        const ObjectPoseLocator* locator = nullptr,
@@ -203,6 +210,7 @@ class UniformBlockCensus {
     ObjectPoseHistory m_poseHistory;
     const ObjectPoseLocator* m_locator = nullptr;
     NodePoseLocator* m_nodes = nullptr;
+    ObjectIdentityScope* m_scope = nullptr;
     Binder m_first{*this, false};
     Binder m_second{*this, true};
     std::atomic<uint64_t> m_bindings{0};
