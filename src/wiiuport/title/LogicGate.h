@@ -40,24 +40,35 @@ namespace wiiuport::title {
 // is the only direction measured to hold.
 class LogicGate {
   public:
-    // The tick, and the instruction after the one the probe replaced. The gate
-    // takes *that* word for its branch, not the entry: the entry is the probe's,
-    // and the tick cannot be entered past its prologue because its epilogue reads
-    // the saved link register back out of the caller's frame and returns through
-    // it. So the gate supplies the prologue itself and branches to the body after
-    // it -- which is why kTickSecond is the word it checks for.
+    // The tick, and the instruction the gate continues at.
+    //
+    // The probe holds the entry and its stub runs the entry's own first
+    // instruction, so the gate takes over at the *second*: kTickBody is
+    // kTick + 4, and a call the gate lets through is the title's tick entered the
+    // way the title enters it. That word is checked rather than assumed, because a
+    // revision whose tick starts differently gets a refusal instead of a gate that
+    // ran the wrong code -- and because the tick's epilogue reads the saved link
+    // register back out of the caller's frame, so entering it anywhere but here
+    // returns through a register nobody saved.
     static constexpr uint32_t kTick = 0x025d42ec;
     static constexpr uint32_t kTickFirst = 0x7c0802a6;  // mfspr r0,LR
     static constexpr uint32_t kTickSecond = 0x90010004; // stw  r0,0x4(r1)
     static constexpr uint32_t kTickBody = kTick + 4;
     // The per-frame entry, read so the report can name what it is gating.
     static constexpr uint32_t kFrameEntry = 0x025f172c;
-    // The block's shape: the gate's own words, then the two counters it keeps.
-    // Both counters are in guest memory, so the host can read the logic's rate
-    // and the call rate without a probe. `kThroughWord` is where the gate's
+    // The block's shape: the gate's own words. `kThroughWord` is where the gate's
     // through path starts, after the skipped path's return.
+    //
+    // The through path is one word, a branch to kTickBody, and nothing else: the
+    // probe's stub has already run the entry's first instruction, so the title
+    // runs every remaining one itself. It used to be three words that supplied
+    // the tick's prologue and branched to the word *after* it -- correct for a
+    // gate that replaced the tick's second instruction, wrong for a gate entered
+    // at it. It skipped the tick's `stw r0,0x4(r1)`, so the tick returned
+    // through a link register it had never saved and the title spun in a wait
+    // loop at 0x027f09d8, forever, with a control channel still answering.
     static constexpr size_t kThroughWord = 13;
-    static constexpr size_t kGateWords = 16;
+    static constexpr size_t kGateWords = 14;
     // The code block holds only the sixteen instructions; the two counters the
     // guest writes are in a block of their own, in memory it may write.
     static constexpr size_t kBlockWords = kGateWords;
@@ -74,8 +85,11 @@ class LogicGate {
     // moment the title was linked and nothing after, and holding the entry would
     // take it from the caller census for the rest of the run -- which showed up as
     // the tick being counted zero times while the display thread painted 1479.
+    // `resume` is where the call continues: zero is the instruction after the
+    // entry, and the gate passes its own block, which is the only way into the
+    // trampoline area that is known to arrive.
     using Register = void (*)(uint32_t entry, uint32_t firstInstruction,
-                              GuestCallProbes::Probe& probe, bool holdsEntry);
+                              GuestCallProbes::Probe& probe, bool holdsEntry, uint32_t resume);
     using AllocateCode = uint32_t (*)(uint32_t sizeInBytes);
     // The counters are words the *guest* stores into, which is a different kind of
     // memory from words it executes: they were in the code block, and a guest
@@ -110,8 +124,17 @@ class LogicGate {
     // one is the experiment, and the census is the observer.
     static std::vector<uint32_t> throughPayload(uint32_t blockAddress, int flavour);
 
-    // Puts the tick's own entry back.
+    // Puts the gate's block back to its pass-through word, so the tick runs on
+    // every call again. The title's own code is not touched: the probe holds the
+    // entry and the block is where the decision lives.
     std::string disable();
+
+    // Where the standing probe's call continues: the gate's block, always. That
+    // is the wiring rather than a choice -- the stub's branch is fixed when the
+    // probe is installed, so a call cannot be sent somewhere else afterwards --
+    // and it is why the block holds a pass-through word whenever the gate is out
+    // instead of being left unfilled. Zero when the gate was never wired.
+    uint32_t resumeTarget() const;
 
     bool enabled() const {
         return m_enabled;
@@ -129,6 +152,11 @@ class LogicGate {
 
   private:
     void onInstalled(GuestCallProbes::Installation installation);
+    void onCounted(GuestCallProbes::Installation installation);
+    // Writes the gate's block as a bare pass-through to the instruction after the
+    // tick's entry. True when the block took it. This is the gate's out state,
+    // and it is why the block is never empty while a call can reach it.
+    bool passThrough();
 
     Register m_register;
     AllocateCode m_allocateCode;
@@ -137,8 +165,13 @@ class LogicGate {
     ReadWord m_readWord;
     std::atomic<uint32_t> m_block{0};
     std::atomic<uint32_t> m_counters{0};
-    uint32_t m_original = 0;
     int m_throughFlavour = 2;
+    // Which payload is in, and which flavour of the pass-through control, so that
+    // enabling the same thing twice is a no-op while enabling a *different* thing
+    // is not. Without these, a report could say the gate is on and the block
+    // could hold the control.
+    bool m_through = false;
+    int m_installedFlavour = 0;
     bool m_enabled = false;
     mutable std::mutex m_mutex;
     std::string m_refusal;
@@ -148,6 +181,11 @@ class LogicGate {
     // look the same from the outside: zeros.
     class Moment;
     Moment* m_moment = nullptr;
+    // The standing probe on the tick: it counts the calls and its resume is the
+    // gate's block.
+    class Counter;
+    Counter* m_counter = nullptr;
+    std::optional<GuestCallProbes::Installation> m_counted;
     std::optional<GuestCallProbes::Installation> m_probe;
 };
 

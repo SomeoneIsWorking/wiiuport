@@ -51,10 +51,15 @@ GuestCallProbes::Probe* g_probe = nullptr;
 // tick's entry takes it from the caller census for the rest of the run, the second
 // because the count of entries is the whole diagnosis.
 std::vector<std::pair<uint32_t, bool>> g_registrations;
+uint32_t g_resume = 0;
 
-void keepRegistration(uint32_t entry, uint32_t, GuestCallProbes::Probe& probe, bool holdsEntry) {
+void keepRegistration(uint32_t entry, uint32_t, GuestCallProbes::Probe& probe, bool holdsEntry,
+                      uint32_t resume) {
     g_probe = &probe;
     g_registrations.emplace_back(entry, holdsEntry);
+    if (holdsEntry && resume != 0) {
+        g_resume = resume;
+    }
 }
 
 // Whether the registration for `entry` asked to keep it. A registration that is
@@ -94,6 +99,7 @@ LogicGate makeGate(FakeGuest& guest) {
     g_fake = &guest;
     g_probe = nullptr;
     g_registrations.clear();
+    g_resume = 0;
     return LogicGate(&keepRegistration, &allocateCode, &allocateData, &writeWord, &readWord);
 }
 
@@ -141,7 +147,7 @@ void wiiuport::tests::runLogicGateTests() {
     // title and a payload this size is mostly the cost of being sure.
     {
         const auto words = LogicGate::payload(kBlock, kCounters);
-        check::isTrue(words.size() == LogicGate::kGateWords, "the gate is sixteen words");
+        check::isTrue(words.size() == LogicGate::kGateWords, "the gate is fourteen words");
         if (words.size() != LogicGate::kGateWords) {
             return;
         }
@@ -150,7 +156,6 @@ void wiiuport::tests::runLogicGateTests() {
         const uint32_t calls = kCounters + 4 * LogicGate::kCallsWord;
         const uint32_t ticks = kCounters + 4 * LogicGate::kTicksWord;
         const uint32_t through = kBlock + 4 * LogicGate::kThroughWord;
-        const uint32_t tail = through + 8;
         // Every word below is written as opcode, then source in bits 21-25, then
         // destination in bits 16-20, then the immediate -- the order the
         // encodings actually have. The two that were got wrong first time are
@@ -185,17 +190,15 @@ void wiiuport::tests::runLogicGateTests() {
         // A skipped call returns with the link register as the caller left it:
         // the gate has not touched r0 or r1 on this path.
         check::isTrue(words[12] == 0x4e800020, "and a skipped call returns: blr");
-        // The through path supplies the tick's own first two instructions, lifted
-        // whole from 0x025d42ec and 0x025d42f0 of the title's image, because the
-        // tick cannot be entered past them: its epilogue reads the saved link
-        // register back out of the caller's frame and returns through it.
-        check::isTrue(words[13] == 0x7c0802a6, "a call it lets through saves LR as the title does");
-        check::isTrue(words[14] == 0x90010004,
-                      "and stores it in the caller's frame as the title does");
-        // Then a tail branch, so the tick's own return goes to the title's caller
-        // and not back into this memory: 0x025d42f4 less 0x00e07038.
-        check::isTrue(words[15] == (18u << 26) | ((LogicGate::kTickBody + 4 - tail) & 0x03fffffcu),
-                      "and the tick is branched at, not called: 0x025d42f4");
+        // The through path is one branch, to the title's own *second* instruction.
+        // The probe's stub has already run the first one, so the title runs the
+        // rest itself. Branching to the word after the second is what froze the
+        // title: the tick's epilogue returns through the link register its second
+        // instruction saved into the caller's frame, so a tick that skipped the
+        // store returns through a register nobody saved.
+        check::isTrue(words[13] == (18u << 26) | ((LogicGate::kTickBody - through) & 0x03fffffcu),
+                      "and a call it lets through continues at the tick's own second instruction, "
+                      "0x025d42f0, with the title running every instruction after it");
     }
     // A block the tick and the gate cannot both reach is refused rather than
     // written with a displacement that lands elsewhere.
@@ -209,20 +212,76 @@ void wiiuport::tests::runLogicGateTests() {
         LogicGate gate = makeGate(guest);
         gate.install();
         linked();
+        // Two registrations on the tick: a momentary one that only asks for the
+        // link-time moment and gives the entry back, and a standing one that
+        // takes it and sends the call to the gate. The momentary one must not
+        // keep the entry, or the standing one is refused for the rest of the run.
+        check::isTrue(g_registrations.size() >= 2,
+                      "the gate registers twice on the tick: once for the moment, once to "
+                      "hold the entry and redirect");
         check::isTrue(!holdsEntry(LogicGate::kTick),
-                      "the gate's probe on the tick asks not to keep the entry, so the caller "
-                      "census on that address can still take it");
-        check::isTrue(holdsEntry(kBlock),
-                      "and the probe on the gate's own block does keep it, because counting the "
-                      "gate's entries is what says whether the gate is reached at all");
-        check::isTrue(gate.enable().empty(), "the gate installs over the tick's body");
+                      "and the momentary one does not keep the entry, so the standing one can "
+                      "take it");
+        check::isTrue(g_resume == kBlock,
+                      "the standing probe on the tick resumes at the gate's own block, which is "
+                      "the only way into the trampoline area known to arrive: a branch written "
+                      "by the host into a guest function's interior does not");
         uint32_t word = 0;
-        check::isTrue(readWord(LogicGate::kTickBody, word) && word != LogicGate::kTickSecond,
-                      "and the tick's body now branches somewhere else");
+        // The call arrives at that block whatever the gate is doing, so the block
+        // holds a pass-through from the moment it exists. A freshly allocated
+        // block is zeroes and a zero word is an illegal instruction, which is
+        // what an un-gated gate did: not run the tick, but fault inside the
+        // simulation.
+        check::isTrue(readWord(kBlock, word) &&
+                          word == ((18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu)),
+                      "and the gate's block is a bare pass-through to the tick's own body before "
+                      "the gate is ever enabled");
+        const uint32_t passThrough = (18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu);
+        check::isTrue(gate.enable().empty(), "the gate installs");
+        check::isTrue(readWord(kBlock, word) && word != passThrough,
+                      "and enabling it puts the counting payload there instead of the "
+                      "pass-through");
+        // Enabling the *same* payload again changes nothing; enabling a different
+        // one does. Without that, a run that installs the pass-through control
+        // first cannot reach the gate at all -- the second enable answers "already
+        // on" -- and the report says the gate is in while the block holds the
+        // control, which is a measurement of the control called a gate.
+        const std::vector<uint32_t> counting = LogicGate::payload(kBlock, kCounters);
+        check::isTrue(gate.enable().empty(), "enabling it again is not a refusal");
+        check::isTrue(readWord(kBlock, word) && word == counting[0],
+                      "and leaves the same payload in place");
+        check::isTrue(gate.enable(false, 2).empty(), "and asking for the same gate again is not "
+                                                     "either");
+        check::isTrue(gate.enable(true, 1).empty(), "but the pass-through control can be installed "
+                                                    "over it");
+        check::isTrue(readWord(kBlock, word) &&
+                          word == ((18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu)),
+                      "and the block is that control's one word");
+        check::isTrue(gate.enable(false, 2).empty(),
+                      "and the gate can be reached again from the control without going out "
+                      "first");
+        check::isTrue(readWord(kBlock, word) && word == counting[0],
+                      "with its own payload back in the block");
+        // Nothing is written into the title's code. That is the change: a host
+        // branch at an interior address does not arrive, and writing one would
+        // also take the tick's second instruction away for good.
+        check::isTrue(readWord(LogicGate::kTickBody, word) && word == LogicGate::kTickSecond,
+                      "and the tick's own second instruction is left exactly as it was");
+        check::isTrue(gate.resumeTarget() == kBlock, "and the probe resumes at the gate");
         check::isTrue(gate.enabled(), "the report says it is in");
         check::isTrue(gate.disable().empty(), "and it comes back out");
+        // The stub's branch is fixed at install, so the call cannot be sent
+        // somewhere else afterwards: the resume stays the gate's block and the
+        // block goes back to its pass-through word. A freshly allocated block is
+        // zeroes, and a zero word is an illegal instruction.
+        check::isTrue(gate.resumeTarget() == kBlock,
+                      "and out of the gate the call still arrives at the same block");
+        check::isTrue(readWord(kBlock, word) &&
+                          word == ((18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu)),
+                      "and the block is its pass-through word again, so a call that arrives now "
+                      "runs the tick rather than whatever the payload left behind");
         check::isTrue(readWord(LogicGate::kTickBody, word) && word == LogicGate::kTickSecond,
-                      "with the tick's own second instruction back");
+                      "with the tick's own second instruction still where it was");
         check::isTrue(!gate.enabled(), "and the report says it is out");
         check::isTrue(gate.disable().empty(), "and disabling twice is not a refusal");
     }

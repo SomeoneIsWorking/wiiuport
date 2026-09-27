@@ -34,7 +34,8 @@ bool refusePresent(const LatteFrameHooks::PresentArguments&) {
 }
 
 void noRegistration(uint32_t /*entry*/, uint32_t /*firstInstruction*/,
-                    GuestCallProbes::Probe& /*probe*/, bool /*holdsEntry*/ = true) {
+                    GuestCallProbes::Probe& /*probe*/, bool /*holdsEntry*/ = true,
+                    uint32_t /*resume*/ = 0) {
 }
 
 uint32_t noCodeSpace(uint32_t /*sizeInBytes*/) {

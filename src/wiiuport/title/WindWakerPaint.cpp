@@ -270,7 +270,7 @@ void WindWakerPaint::install() {
     m_frame.setReservation([this](std::string& refusal) {
         reserve(refusal);
     });
-    m_register(kDisplayFrame, kDisplayFrameFirst, m_frame, true);
+    m_register(kDisplayFrame, kDisplayFrameFirst, m_frame, true, 0);
 }
 
 void WindWakerPaint::reserve(std::string& refusal) {

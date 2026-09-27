@@ -73,7 +73,7 @@ std::optional<std::vector<CallerCensus::Target>> CallerCensus::parse(std::string
 void CallerCensus::install(std::span<const Target> targets) {
     for (const Target& target : targets) {
         m_entries.push_back(std::make_unique<Entry>(target));
-        m_register(target.entry, target.firstInstruction, *m_entries.back(), true);
+        m_register(target.entry, target.firstInstruction, *m_entries.back(), true, 0);
     }
 }
 

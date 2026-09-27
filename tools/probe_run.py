@@ -42,23 +42,42 @@ from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 def _logic_count(port: int) -> tuple[int, str]:
     """The tick count and where it came from.
 
-    The gate's own counter when the gate is in, because the gate holds the tick's
-    entry and a probe on that entry sees nothing; the caller's census otherwise.
-    Which one is used is reported with the number, because a rate from a counter
-    the gate owns and a rate from a probe are not the same measurement.
+    The gate's own *guest* counter when it is actually counting, because that is
+    the only counter that sees the ticks the gate lets through: the gate holds the
+    tick's entry, so a probe there sees the calls and not the ticks, and the
+    caller's census sees nothing at all.
+
+    Two things have to be true before the gate's counter is believed, and both are
+    checked rather than assumed, because a zero from a counter that was never
+    counting is the same number as a zero from a gate that let no tick through:
+
+    - the gate's block holds its counting payload rather than the pass-through
+      control, and
+    - the counter is moving, which is what distinguishes "counting" from "counted
+      zero so far".
+
+    The fallback is the gate's own probe on the tick's entry, which counts *calls*
+    and is kept by the host rather than by the guest. It is labelled as calls: a
+    call rate and a tick rate are different measurements, and a gate that halves
+    the ticks does not halve the calls. Which one a number came from is reported
+    with the number.
     """
     try:
         gate = read_gate(port)
     except ControlUnavailable:
-        gate = None
-    if gate is not None and gate.enabled and gate.ticks is not None:
+        return 0, "the gate did not answer"
+    if gate.enabled and not gate.through and gate.ticks is not None and gate.ticks > 0:
         return gate.ticks, "the logic gate's own tick counter"
-    try:
-        for entry in read_callers(port):
-            if entry.entry == 0x025D42EC:
-                return entry.calls, f"the caller census on {entry.entry:#010x}"
-    except ControlUnavailable:
-        pass
+    if gate.calls_at_probe is not None:
+        return (
+            gate.calls_at_probe,
+            f"calls at the gate's probe on {gate.tick:#010x}, not ticks: "
+            + (
+                "the gate's block holds the pass-through control"
+                if gate.through
+                else "the gate's own counter is at zero"
+            ),
+        )
     return 0, "nothing counted the tick"
 
 
@@ -92,10 +111,12 @@ def measure(
             gate = read_gate(args.port)
             print(
                 f"    gate {'in ' if gate.enabled else 'out'}: "
-                f"{gate.probe}, block {gate.block}, at the tick's entry {gate.word_at_entry}, "
+                f"holding probe {gate.holding_probe}, block {gate.block} holding "
+                f"{'the pass-through control' if gate.through else 'the counting payload'}, "
+                f"at the tick's entry {gate.word_at_entry}, "
                 f"at the word after it {gate.word_at_body}, "
-                f"calls {gate.calls}, ticks {gate.ticks}, "
-                f"entries {gate.gate_entries} through a probe {gate.gate_probe}",
+                f"gate counters {gate.calls}/{gate.ticks}, "
+                f"probe calls {gate.calls_at_probe} at {gate.tick:#010x}",
                 flush=True,
             )
         except ControlUnavailable as unavailable:
