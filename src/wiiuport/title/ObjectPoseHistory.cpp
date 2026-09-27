@@ -1,6 +1,7 @@
 #include "wiiuport/title/ObjectPoseHistory.h"
 
 #include "wiiuport/title/JsonBody.h"
+#include "wiiuport/title/TransformShape.h"
 
 #include <algorithm>
 #include <array>
@@ -142,6 +143,34 @@ void ObjectPoseHistory::observe(uint32_t object, uint32_t block, uint32_t otherB
                 m_offsets[offset]++;
             }
         }
+        // The same windows, asked of `TransformShape::isAffine` -- the class that also
+        // accepts a scaled pose. Reported beside the rigid one rather than instead of it: a
+        // rigid hit is a pose with no scale, an affine hit is a pose with scale, and which of
+        // the two the block holds is the difference between "the pose is at this offset" and
+        // "the pose is nowhere here". The translation is the last group of the twelve, which
+        // is where `TransformShape` reads it.
+        for (size_t offset = 0; offset + kPoseWords <= kBlockWords; offset++) {
+            if (!Shape::isAffine(reinterpret_cast<const float*>(whole.data()) + offset)) {
+                continue;
+            }
+            m_affineHits++;
+            m_affineOffsets[offset]++;
+            if (m_affineExampleOffset == 0 && offset != 0) {
+                // One example, as numbers, so a reader can see what matched rather than
+                // taking the count's word for it. The block is gone by the time a report is
+                // asked for, so it is captured here. Offset zero is skipped for the example
+                // only -- a matrix at the block's first word is still counted.
+                m_affineExampleOffset = static_cast<uint64_t>(offset * 4);
+                m_affineExample.clear();
+                for (size_t word = 0; word < kPoseWords; word++) {
+                    m_affineExample +=
+                        (word == 0 ? "" : " ") + number(asFloat(whole[offset + word]));
+                }
+                for (size_t axis = 0; axis < 3; axis++) {
+                    m_affineTranslation[axis] = asFloat(whole[offset + 9 + axis]);
+                }
+            }
+        }
     }
     if (!readable) {
         m_unreadable++;
@@ -221,6 +250,33 @@ std::string ObjectPoseHistory::json() const {
     body.number("poseWords", kPoseWords);
     body.number("unitTolerance", static_cast<uint64_t>(kUnitTolerance * 1000.0f));
     body.number("perpendicularTolerance", static_cast<uint64_t>(kPerpendicularTolerance * 1000.0f));
+    // The second class, and the denominator it was measured over: how many windows it was
+    // asked about, so a zero here means "no scaled pose in any of these windows" rather than
+    // "not looked for". The rigid scan's own counts are the `m_offsets` table below.
+    body.number("affineWindowsScanned", kBlockWords - kPoseWords + 1);
+    body.number("affineHits", m_affineHits);
+    {
+        uint64_t offsetHits = 0;
+        std::string where;
+        for (size_t offset = 0; offset < m_affineOffsets.size(); offset++) {
+            if (m_affineOffsets[offset] == 0) {
+                continue;
+            }
+            offsetHits += m_affineOffsets[offset];
+            where += (where.empty() ? "" : " ") + std::to_string(offset * 4) +
+                     "b:" + std::to_string(m_affineOffsets[offset]);
+        }
+        body.number("affineOffsetsWithHits", offsetHits);
+        body.string("affineOffsetList", where);
+    }
+    if (!m_affineExample.empty()) {
+        body.string("affineExample", m_affineExample);
+        body.number("affineExampleOffsetBytes", m_affineExampleOffset);
+        for (size_t axis = 0; axis < 3; axis++) {
+            body.signedNumber("affineExampleTranslation" + std::to_string(axis),
+                              static_cast<int64_t>(m_affineTranslation[axis] * 1000.0f));
+        }
+    }
     body.number("observations", m_observations.load());
     body.number("poseBindings", m_poseBlocks);
     body.number("notPoseBindings", m_notPoseBlocks);

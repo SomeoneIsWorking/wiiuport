@@ -1,5 +1,7 @@
 #pragma once
 
+#include "wiiuport/title/TransformShape.h"
+
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -129,6 +131,10 @@ class ObjectPoseHistory {
     // A pose is a rigid transform: three rows of unit length, mutually perpendicular,
     // with a translation beside them. Tested, not assumed, and the count of blocks that
     // pass is the report's answer to which blocks the blend can act on.
+    // `TransformShape` owns both shape classes, and the uniform census already scans with
+    // them, so this file asks that class the same question rather than keeping a second
+    // rule: a hit here and a hit there are then one finding and not two.
+    using Shape = TransformShape;
     static bool isPose(const std::array<uint32_t, kPoseWords>& words);
     bool readPose(uint32_t block, std::array<uint32_t, kPoseWords>& pose) const;
 
@@ -147,6 +153,29 @@ class ObjectPoseHistory {
     std::array<uint64_t, kBlockWords - 2> m_offsets{};
     std::vector<uint32_t> m_scanned;
     uint64_t m_scans = 0;
+
+    // **The same scan under the class a scaled world matrix falls into.**
+    //
+    // `TransformShape` owns both classes -- `isRigid` for three unit perpendicular rows and
+    // `isAffine` for a non-singular 3x3 within a stated scale ceiling -- and the uniform
+    // census already scans with them. This scan used to carry a *second* 4x4 rule written
+    // here, which was wrong twice: it duplicated a rule that has an owner, and it was a
+    // different rule from the one the census measures, so two instruments could have
+    // disagreed for a reason neither could see. It is gone; this scan asks `TransformShape`
+    // the same question the census asks, so a hit here and a hit there are one finding.
+    //
+    // The second class is not redundant. A rule that accepts only a rigid transform reports
+    // "nothing found" identically for a field that is absent and for a field that is present
+    // and carries scale, and those two point at different places to look next. Measured on
+    // this title: 92 offsets were ever in the affine class, 11 held it often enough, and 11
+    // of those were seen to move.
+    std::array<uint64_t, kBlockWords - 2> m_affineOffsets{};
+    uint64_t m_affineHits = 0;
+    // The first thing the second class matched, kept as numbers rather than as one string: a
+    // report field a reader has to parse is a field a test cannot compare against.
+    std::array<float, 3> m_affineTranslation{};
+    uint64_t m_affineExampleOffset = 0;
+    std::string m_affineExample;
 };
 
 } // namespace wiiuport::title

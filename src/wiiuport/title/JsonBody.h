@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -66,6 +67,19 @@ class JsonBody {
 
     void string(const std::string& name, const std::string& value) {
         raw(name.c_str(), "\"" + value + "\"");
+    }
+
+    // Signed, because a translation's second component is negative in general and a
+    // `uint64_t` cast of a negative float reports 18446744073709548616 -- a number a
+    // reader has to know is a wrap, which is a field nobody reads correctly twice.
+    void signedNumber(const char* name, int64_t value) {
+        std::array<char, 32> text{};
+        std::snprintf(text.data(), text.size(), "%lld", static_cast<long long>(value));
+        raw(name, text.data());
+    }
+
+    void signedNumber(const std::string& name, int64_t value) {
+        signedNumber(name.c_str(), value);
     }
 
     void number(const char* name, uint64_t value) {

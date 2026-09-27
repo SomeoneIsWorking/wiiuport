@@ -26,6 +26,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <string>
@@ -77,6 +78,50 @@ void putPose(std::map<uint32_t, uint32_t>& words, uint32_t block, float spin) {
     }
 }
 
+// A 3x4 with rows of the given lengths, each pair perpendicular, and a translation beside
+// them. Scales of 1 give a rigid transform; anything else is a scaled one -- **which is the
+// case the strict class cannot see, and the reason the loose class exists.** A title that
+// scales anything writes rows whose lengths are the scale factors, and those rows are a pose.
+void putScaled3x4(std::map<uint32_t, uint32_t>& words, uint32_t block, size_t offset, float scaleX,
+                  float scaleY, float scaleZ) {
+    const float s = std::sin(0.7f);
+    const float c = std::cos(0.7f);
+    const float rows[12] = {
+        c * scaleX,  s * scaleX, 0.0f,   // row 0
+        -s * scaleY, c * scaleY, 0.0f,   // row 1
+        0.0f,        0.0f,       scaleZ, // row 2
+        12.0f,       -3.0f,      7.5f,   // the translation beside it
+    };
+    for (size_t word = 0; word < 12; word++) {
+        words[block + 4 * (offset + word)] = floatBits(rows[word]);
+    }
+}
+
+// A 3x4 whose 3x3 is singular: a zero row. A bar that accepts a degenerate basis finds a
+// matrix in every block, and this is what stops that.
+void putSingular3x4(std::map<uint32_t, uint32_t>& words, uint32_t block, size_t offset) {
+    const float rows[12] = {
+        1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, // the zero row
+        1.0f, 2.0f, 3.0f,
+    };
+    for (size_t word = 0; word < 12; word++) {
+        words[block + 4 * (offset + word)] = floatBits(rows[word]);
+    }
+}
+
+// A 3x4 with a 3x3 whose rows are 364,193 units long: the shape the loose class has to
+// refuse, because that is arithmetic wearing a matrix's shape rather than a transform. The
+// number is the one measured on the title, and it is why `TransformShape::kScaleCeiling`
+// exists.
+void putHugeScale3x4(std::map<uint32_t, uint32_t>& words, uint32_t block, size_t offset) {
+    const float rows[12] = {
+        364193.0f, 0.0f, 0.0f, 0.0f, 364193.0f, 0.0f, 0.0f, 0.0f, 364193.0f, 1.0f, 2.0f, 3.0f,
+    };
+    for (size_t word = 0; word < 12; word++) {
+        words[block + 4 * (offset + word)] = floatBits(rows[word]);
+    }
+}
+
 // Something at `+0xc4` that is not a pose: what most of the title's blocks hold there.
 void putNotPose(std::map<uint32_t, uint32_t>& words, uint32_t block, float value) {
     const uint32_t base = block + ObjectPoseHistory::kPoseOffset;
@@ -100,7 +145,141 @@ std::string field(const std::string& body, const std::string& name) {
 
 } // namespace
 
+// The second predicate, read through the same seam the first one is tested through, so what
+// is asserted is what the report says rather than a copy of the test's own arithmetic.
+namespace {
+
+struct AffineOutcome {
+    uint64_t hits = 0;
+    std::string offsets;
+};
+
+AffineOutcome affineOutcome(const std::string& body) {
+    AffineOutcome out;
+    out.hits = std::strtoull(field(body, "affineHits").c_str(), nullptr, 10);
+    out.offsets = field(body, "affineOffsetList");
+    return out;
+}
+
+// Whether the loose class fired at one offset, in bytes.
+//
+// **The assertion is about the offset under test and never about the block's total.** The loose
+// class is loose on purpose -- it exists to tell a field that is present-and-scaled from a field
+// that is absent, and a class that only accepted perfect transforms could not -- so a synthetic
+// block finds shapes at windows other than the one written, and a test that asserted a total of
+// one would be asserting that the class is tighter than it is documented to be. What has to hold
+// is that the twelve words written at `offsetBytes` are, or are not, in the class.
+bool hitAt(const AffineOutcome& out, uint32_t offsetBytes) {
+    return out.offsets.find(std::to_string(offsetBytes) + "b:") != std::string::npos;
+}
+
+// A block of `count` words, all zero, with a matrix written into it. The zeros matter: an
+// offset the writer did not fill must not be able to satisfy the predicate, and a block of
+// zeroes is the case that would if the test were reading the wrong cells.
+std::map<uint32_t, uint32_t> blankBlock(uint32_t block) {
+    std::map<uint32_t, uint32_t> words;
+    for (uint32_t word = 0; word < 64; word++) {
+        words[block + 4 * word] = floatBits(0.0f);
+    }
+    return words;
+}
+
+} // namespace
+
 void wiiuport::tests::runObjectPoseHistoryTests() {
+    {
+        // **A scaled pose is found, and the strict class misses it.** Rows 2, 0.5 and 3
+        // long: `isRigid` rejects them by construction, and the loose class accepts them.
+        // Asserting both halves is what makes the widening safe to rely on -- if the loose
+        // class were only the strict one the first would fail, and if it were anything at
+        // all the negatives below would.
+        auto words = blankBlock(0x200);
+        putScaled3x4(words, 0x200, 32, 2.0f, 0.5f, 3.0f);
+        g_words = &words;
+        ObjectPoseHistory history(&readWords);
+        history.observe(7, 0x200, 0);
+        const std::string body = history.json();
+        g_words = nullptr;
+        const AffineOutcome out = affineOutcome(body);
+        check::isTrue(hitAt(out, 128),
+                      "a scaled 3x4 is in the loose class at the offset it was written to, 32 "
+                      "words in, of " +
+                          std::to_string(out.hits) + " hits over the block: " + out.offsets);
+        check::isTrue(std::strtoull(field(body, "poseBindings").c_str(), nullptr, 10) == 0,
+                      "and the strict class finds nothing in it, which is why the loose class "
+                      "exists");
+        check::isTrue(out.offsets.find("128b:") != std::string::npos,
+                      "at the offset it was written to, 32 words in: " + out.offsets);
+        check::isTrue(field(body, "affineExampleOffsetBytes") == "128",
+                      "and the example's own offset is that one: " +
+                          field(body, "affineExampleOffsetBytes"));
+        check::isTrue(field(body, "affineExampleTranslation0") == "12000" &&
+                          field(body, "affineExampleTranslation1") == "-3000" &&
+                          field(body, "affineExampleTranslation2") == "7500",
+                      "and its translation is the one written, in thousandths -- 12, -3, 7.5 as " +
+                          field(body, "affineExampleTranslation0") + ", " +
+                          field(body, "affineExampleTranslation1") + ", " +
+                          field(body, "affineExampleTranslation2"));
+    }
+    {
+        // **A rigid pose is in both classes**, so the loose one widens the strict one and is
+        // not a different thing: a unit-length 3x4 passes both.
+        auto words = blankBlock(0x400);
+        putScaled3x4(words, 0x400, ObjectPoseHistory::kPoseOffset / 4, 1.0f, 1.0f, 1.0f);
+        g_words = &words;
+        ObjectPoseHistory history(&readWords);
+        history.observe(7, 0x400, 0);
+        const std::string body = history.json();
+        g_words = nullptr;
+        const AffineOutcome out = affineOutcome(body);
+        // The strict class is asked at `kPoseOffset`, which is where it looks, so the rigid
+        // matrix is written there -- at a 3x4's twelve words rather than a 4x4's sixteen.
+        check::isTrue(std::strtoull(field(body, "poseBindings").c_str(), nullptr, 10) == 1,
+                      "a rigid 3x4 at the strict class's own offset is one binding: " +
+                          field(body, "poseBindings"));
+        check::isTrue(hitAt(out, ObjectPoseHistory::kPoseOffset),
+                      "and the loose class fires at the same offset, so it widens the strict one "
+                      "rather than replacing it: " +
+                          out.offsets);
+    }
+    {
+        // **A singular 3x4 is in neither class.** A zero row has a determinant of zero, and a
+        // bar that accepted a degenerate basis would find a matrix in every block -- which is
+        // what `TransformShape::kDeterminantFloor` prevents, and a test that had only ever
+        // seen a pass could not tell whether it was preventing anything.
+        auto words = blankBlock(0x300);
+        putSingular3x4(words, 0x300, 0);
+        g_words = &words;
+        ObjectPoseHistory history(&readWords);
+        history.observe(7, 0x300, 0);
+        const std::string body = history.json();
+        g_words = nullptr;
+        const AffineOutcome out = affineOutcome(body);
+        check::isTrue(!hitAt(out, 0),
+                      "a singular 3x4 is not in the loose class at its own offset, which is "
+                      "what the determinant floor is for: " +
+                          out.offsets);
+        check::isTrue(std::strtoull(field(body, "poseBindings").c_str(), nullptr, 10) == 0,
+                      "nor in the strict one");
+    }
+    {
+        // **A 364,193-fold scale is in neither class.** This is the shape measured on the
+        // title that put the ceiling in `TransformShape` in the first place: a loose class
+        // with a floor and no ceiling named it at byte 36 in 262,978 of 836,990 buffers. The
+        // number is the measured one, so this fails if the ceiling is ever raised past it.
+        auto words = blankBlock(0x600);
+        putHugeScale3x4(words, 0x600, 0);
+        g_words = &words;
+        ObjectPoseHistory history(&readWords);
+        history.observe(7, 0x600, 0);
+        const std::string body = history.json();
+        g_words = nullptr;
+        const AffineOutcome out = affineOutcome(body);
+        check::isTrue(
+            out.hits == 0,
+            "a 364193-fold scale is not a pose, and that is the ceiling doing its work: " +
+                std::to_string(out.hits) + " hits");
+    }
     // A pose that changes between bindings of the same block is written before the
     // bind: that is the answer the blend rests on, as a count over a denominator.
     {
