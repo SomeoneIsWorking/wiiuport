@@ -1094,14 +1094,69 @@ frame.** Its displaced word is `or r30,r3,r3` -- the frame's sixth word, where t
 link-register defect above was fixed -- and its resume is `0x0274c27c`, which is the frame's seventh
 word. So the probe is installed exactly where it was moved to, and it resumes exactly where it should.
 
-**And the fault's program counter, `0x00e0586c`, is that stub's second word.** The stub begins at
-`0x00e05868`; `0x00e0586c` is the displaced instruction, `or r30,r3,r3` -- **a register move, which
-cannot fault.** Reaching it with a register file holding four words at four-byte spacing and a stack
-pointer that is not a guest address is the shape of an instruction that was never meant to be running.
+**And the fault's program counter cannot be paired with those addresses, which is a correction to what
+this section first said.** It said `0x00e0586c` is that stub's second word. **It is not, and the error is
+worth naming: the counter is from a run *before* the probe moved and the layout is from a run *after*.**
+Moving the probe from the frame's first word to its sixth changed the displaced word from `0x7c0802a6`
+to `0x7c7e1b78`, which changed what the loader's arena held and **moved the stubs** -- in the earlier run
+a stub with the old displaced word was at `0x00e058b4`, and `0x00e0586c` was thirty bytes before *that*,
+not four bytes into the one just read.
 
-**So the guest is inside the frame's own probe, on the frame's own displaced word, with the frame's own
-probe correct in memory.** That is the narrowest the fault has been, and it is the same place in every
-run.
+**A program counter and a memory layout have to come from the same run to be paired**, and this file
+has now made that mistake twice in one shape: once with gdb's byte-reversed words, and once with two
+runs' addresses. What the four stubs *do* establish, from one run, is that the frame's probe is
+installed exactly where it was moved to, displaced word `or r30,r3,r3` and resume `0x0274c27c`.
+
+So the location of the fault within the stub is **not yet established**, and the next measurement is the
+one that settles it: a single run that reports both the counter and the window around the payload,
+which the fault harness now dumps in the same pass for exactly this reason.
+
+### Correctly paired at last: the fault is in the title's own code, and the gdb window was a host read
+
+One run reporting both the counter and the window, which is the only way the two may be paired:
+
+```
+OSSched[core=1]  via recompiled  guest pc=0x0274c27c  lr=0x0274c280  r1=0x0e275a38
+  r0..r7 = 00e05884 0e275a38 10008000 00000000 0e275a24 0e275a28 0e275a30 44213980
+```
+
+**`pc = 0x0274c27c` is the display frame's own seventh word** -- in the title's code, and the first
+time this fault has been located there rather than in the loader's arena. `lr = 0x0274c280` is its
+eighth, so the frame is two words past its probe's resume and is executing normally.
+
+**And the window gdb dumped in the same run is void.** Every line of it is attributed by gdb to a symbol
+*inside the wiiuport binary*:
+
+```
+0xe05800 <_ZN7glslang16TOutputTraverser10visitUnaryENS_6TVisitEPNS_12TIntermUnaryE+2144>:  c2 a6 00 48 ...
+```
+
+`memory_base` is cemu's global, and this session has seen it resolve to **three different values** --
+`0x0`, `0x7fff54000000`, `0x7ffed4000000` -- and on two of those the dump was a host read wearing a
+guest read's clothes. The byte-order fix corrected the *order* of the words and not the *base* they came
+from, and the glslang attribution on every line is the proof. **`arena.py` now refuses to print
+anything when the base is zero, unaligned, or inside the product's own image**, and says which read
+would answer the question instead: the product's own `/memory`, which goes through the fork's accessor
+and refuses unless every byte of the range is mapped guest memory.
+
+So the `0x14`-stride pattern this file has quoted from the arena **twice** was never read out of guest
+memory at all, and both quotations are withdrawn.
+
+**And the register file is identical in every run of this fault, whatever the counter:**
+
+```
+r0..r7 = 00e05888 0e275a38 10008000 00000000 0e275a24 0e275a28 0e275a30 44213980
+```
+
+`r4`, `r5`, `r6` and `r1` are `0x0e275a24`, `0x0e275a28`, `0x0e275a30`, `0x0e275a38` -- four arena
+words four bytes apart, a `0x14`-byte run, **the same stride as the pattern that was never in guest
+memory.** A register file holding a copy of a pattern is what a guest executing that pattern leaves
+behind, and a register file that is byte-identical across runs with *different* program counters is not
+a register file that computed anything.
+
+**So the guest is running a repeating `0x14`-stride pattern somewhere in the loader's arena, and where
+that pattern lives still has to be read through an accessor that can refuse.** That is the next
+measurement, and the product's `/memory` is the only reader here that can.
 
 ### And the probe mechanism was writing code without invalidating it
 
