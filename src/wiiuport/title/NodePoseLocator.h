@@ -140,6 +140,20 @@ class NodePoseLocator {
     // that is never called is still installed.
     void install();
 
+    // **The frame counter, without which the motion bar cannot fire at all.**
+    //
+    // An object is bound several times per frame, so sampling an object once per *binding*
+    // can take all its samples inside one frame -- microseconds apart, where no pose has had
+    // time to change by a thousandth of a unit. The first run with a real movement bar
+    // returned 0 moved and 18 still with a delta of exactly 0 for every candidate, which is
+    // what a same-frame schedule looks like and what a genuinely static field looks like, and
+    // the report could not tell the two apart. So the schedule is explicit: one sample per
+    // object per frame, and the report says which schedule ran.
+    //
+    // Null is allowed and reported as `perBind`, because a locator that cannot say how it
+    // sampled is a locator whose negatives cannot be believed.
+    void setFrameCounter(const std::atomic<uint64_t>* counter);
+
     // One object, at one of its draws, and which of the two things it is. The production
     // route is `Kind::SubObject` from the binder, with the node derived by subtraction; the
     // probed entry is the other one and never fires.
@@ -204,7 +218,9 @@ class NodePoseLocator {
     // Tracks, or refuses, one object; whether it is tracked and whether it has scans left is
     // a shared decision, so it is made under the lock. The read of the object's memory is
     // not, so a scan does not hold the display thread's lock while it reads.
-    bool claimLocked(uint32_t address, Kind kind);
+    // Claims one sample of one object, or refuses it. The frame is the counter's value at
+    // the call, and it is what makes the schedule per frame rather than per binding.
+    bool claimLocked(uint32_t address, Kind kind, uint64_t frame);
     static const char* nameOf(Kind kind);
 
     Register m_register;
@@ -212,12 +228,15 @@ class NodePoseLocator {
     Draw m_draw{*this};
     std::atomic<uint64_t> m_calls{0};
     mutable std::mutex m_mutex;
+    const std::atomic<uint64_t>* m_frames = nullptr;
 
-    // Per tracked object: what it is, and its candidates.
+    // Per tracked object: what it is, its candidates, and the frame its last sample came
+    // from -- which is what makes the sample schedule per frame rather than per binding.
     struct Tracked {
         uint32_t address = 0;
         Kind kind = Kind::Node;
         uint32_t scans = 0;
+        uint64_t lastFrame = 0;
         std::vector<Candidate> candidates;
     };
 

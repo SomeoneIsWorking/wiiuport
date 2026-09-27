@@ -12,6 +12,7 @@
 #include "wiiuport/title/NodePoseLocator.h"
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -452,6 +453,89 @@ void wiiuport::tests::runNodePoseLocatorTests() {
                 field(asSub, "scanBytes") == std::to_string(NodePoseLocator::kScanWords * 4),
             "and each table states its own window, so a reader can see the two are "
             "apart rather than being told it");
+    }
+
+    // **The sample schedule is per frame, and this is the test for it.** An object is bound
+    // several times per frame, so a locator that samples once per *binding* can take all
+    // four of an object's samples inside one frame -- microseconds apart, where no pose has
+    // moved by a thousandth of a unit. That is indistinguishable, in the report, from a
+    // genuinely static field, and the first run with a real movement bar returned `0 moved,
+    // 18 still, delta 0` for every candidate with no way to say which it was looking at.
+    {
+        std::map<uint32_t, std::vector<float>> memory;
+        for (uint32_t object = 1; object <= 3; object++) {
+            memory[object] = withPoseAt(20, 0.2f);
+        }
+        std::atomic<uint64_t> frame{1};
+        NodePoseLocator locator = makeLocator();
+        g_nodes = &memory;
+        locator.install();
+        g_locator = &locator;
+        locator.setFrameCounter(&frame);
+
+        // Four bindings of each object, all inside frame 1, all showing the same value. Only
+        // the first of each is sampled; the other three are the same frame and say nothing.
+        for (int bind = 0; bind < 4; bind++) {
+            for (uint32_t object = 1; object <= 3; object++) {
+                locator.observe(object);
+            }
+        }
+        const std::string sameFrame = locator.json();
+        g_nodes = nullptr;
+        check::isTrue(field(section(sameFrame, "node"), "scans") == "3",
+                      "twelve bindings inside one frame take three samples, one per object, so "
+                      "no pose is compared with itself: " +
+                          section(sameFrame, "node"));
+        check::isTrue(sameFrame.find("\"schedule\":\"perFrame\"") != std::string::npos &&
+                          sameFrame.find("\"frameCounter\":\"0x00000001\"") != std::string::npos,
+                      "and the report says the schedule was per frame and which frame it was "
+                      "on, rather than leaving a negative to be read as a fact: " +
+                          sameFrame);
+
+        // Three further frames, with each pose turning between them.
+        g_nodes = &memory;
+        for (int pass = 0; pass < 3; pass++) {
+            frame.store(static_cast<uint64_t>(pass) + 2);
+            for (uint32_t object = 1; object <= 3; object++) {
+                memory[object] = withPoseAt(20, 0.2f + 0.3f * static_cast<float>(pass + 1));
+                locator.observe(object);
+            }
+        }
+        const std::string across = locator.json();
+        g_nodes = nullptr;
+        const std::string mine = section(across, "node");
+        check::isTrue(field(mine, "scans") == "12" && field(mine, "moved") == "9",
+                      "four samples each of three objects, so nine comparisons and all nine "
+                      "moved, which is what the denominator says: " +
+                          mine);
+        check::isTrue(locator.bestOffset() == 80,
+                      "and the offset is named, because the schedule could see it move");
+    }
+
+    // Without a frame counter the schedule is per binding, and the report says so. A locator
+    // that cannot say how it sampled is a locator whose negatives cannot be believed.
+    {
+        std::map<uint32_t, std::vector<float>> memory;
+        for (uint32_t object = 1; object <= 3; object++) {
+            memory[object] = withPoseAt(20, 0.2f);
+        }
+        NodePoseLocator locator = makeLocator();
+        g_nodes = &memory;
+        locator.install();
+        g_locator = &locator;
+        for (uint32_t object = 1; object <= 3; object++) {
+            for (int bind = 0; bind < 3; bind++) {
+                locator.observe(object);
+            }
+        }
+        const std::string body = locator.json();
+        g_nodes = nullptr;
+        check::isTrue(body.find("\"schedule\":\"perBind\"") != std::string::npos &&
+                          body.find("\"frameCounter\":null") != std::string::npos,
+                      "with no counter wired the schedule is per bind and named as such: " + body);
+        check::isTrue(field(section(body, "node"), "scans") == "9",
+                      "and every binding is a sample, three objects three times each: " +
+                          section(body, "node"));
     }
 
     // The report is one object that ends, because a client parses it, and it names both

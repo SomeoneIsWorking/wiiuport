@@ -793,6 +793,28 @@ The node is now read over its own leading fields only, `kNodeScanWords = kSubObj
 holds that line. Each table reports its own `scanBytes`, so the two being apart is visible
 rather than asserted in prose.
 
+### The samples were taken per binding, which cannot see a pose move
+
+With the movement bar in place the next run returned, for every candidate, `0 moved`, `18
+still`, `biggest delta 0`. That is what a static field looks like. It is also what a locator
+that samples an object once per *binding* looks like, and an object is bound several times per
+frame -- so all four of its samples can land inside one frame, microseconds apart, where no
+pose has moved by a thousandth of a unit. The report could not tell the two apart, and a
+negative that cannot distinguish "nothing moved" from "I never looked twice" is not a
+negative.
+
+The sample schedule is now explicit: **one sample per object per frame**, taken from the
+title's own paint counter, which `WindWakerPaint::paintCounter()` exposes for the purpose --
+a count is no use to anything that has to schedule its own reads. The report carries
+`schedule` (`perFrame` or `perBind`) and `frameCounter`, so a run says which schedule ran. With
+no counter wired the locator samples per binding and says `perBind`, because that schedule's
+negatives are worth less than they look and a reader has to be able to see that.
+
+A third defect, small and of the same family: `frameCounter` was written as a raw value, so
+the report carried `0x00000001` unquoted, which is not JSON, and the whole body would have
+failed to parse in the one client that reads it. The test that caught it was asserting on the
+field, which is the only reason anything looked at the encoding.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It
