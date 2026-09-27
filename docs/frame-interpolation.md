@@ -271,6 +271,43 @@ and the fault is a segmentation fault inside recompiled code on the display thre
 (`OSSched[core=1]`). It does not happen every time, and it is not tied to a payload: mode 3
 faulted in one run and presented at sixty in the next.
 
+### The second paint has to be a call, and the second call is the fault
+
+Mode 8 is the discriminator for the fault that kills `Twice` and `TwiceAtSixty`: paint once by
+`bl` and the second paint by a **tail branch**, with the interval call, the vtable rewrite and the
+block all unchanged. One word differs between the two payloads -- the second frame branch with its
+link bit clear -- and a mutation that puts the link back fails a test asserting exactly that.
+
+Measured on the real title, and it answered:
+
+    at rest:      1683 paints, display 0x43e08af8 (interval 2, phase 2)
+    armed mode 8: installed True (tailTwiceAtSixty), block 0x00e05898, 1683 paints
+    92.1s:        gate: 0 calls, 0 ticks through it; 1683 calls at its probe
+
+**Mode 8 does not fault -- and it paints nothing: 1683 paints at 63.0s and 1683 at 92.1s, zero
+paints in twenty-nine seconds.** The reason is structural, and it is why this shape was tried. The
+frame returns through the **link register**, and a tail branch does not change it, so the second
+`b` re-enters a frame whose own return goes to the same link register -- the payload word that
+branched there. The payload is never left and the pass never returns to the title's loop. Mode 6
+works precisely because it branches *once*, leaving the title's own `bctrl`-set return address as
+the one the frame uses.
+
+So **the second paint must be a call**, and the second call is what faults. That is narrower than
+"painting twice breaks the product", and it is the exact shape conditions 3 and 4 need. Two
+mechanisms remain, and this did not separate them:
+
+- **The payload clobbers `r3`.** The frame is a method on the display object and takes that
+  pointer in `r3`, and mode 3's first two words are `li r3,1` and the game's own
+  `GX2SetSwapInterval` -- so the frame is entered with whatever the setter left, and a frame that
+  dereferences its own `r3` walks a tree of garbage. **Mode 2 calls the frame twice *without* the
+  setter and faults too**, which is the evidence against this being the whole cause.
+- **The frame is not re-entrant.** It may hold a per-pass cursor in a register it assumes it owns
+  for the whole pass, so the second entry continues from the first entry's end.
+
+The first is cheaper to test and the test is bounded: mode 8 is the skeleton already built, and it
+needs `mr r4, r3` before the setter and `mr r3, r4` after it -- **lifted from the title's image,
+not assembled**, because a derived word is a word nobody checked and one has already cost a run.
+
 ### The null case, and it fails
 
 Two paints of one pass must be the same picture; if they are not, a blend built on "the
