@@ -960,11 +960,43 @@ others -- or **something overwrote the payload** after it was written. What does
 is that the fault's program counter is consistently *just below* the block in both armings, `0x00e0586c`
 and `0x00e05884` against blocks at `0x00e05880` and `0x00e05898`.
 
-**This is the next thing to settle, and it is smaller than what came before it:** whether the words the
-mod wrote are still at the address it wrote them to when the guest runs. The product's own `/memory`
-accessor answers it, and the probe that asks it has to read the address *after* arming rather than
-before -- the first attempt at that read the channel after the product had already gone, so it recorded
-nothing, and a read that cannot be taken is not a reading of zero.
+**This is settled, and the answer is that the payload is right.** Read beside the arming, in the same
+pass, with a control read of the same block taken first (`scratch/frame-loop/block_words.py`):
+
+```
+  the block, before arming   guest 0x00e05880
+    00000000 00000000 00000000 00000000 00000000 00000000 00000000 497cea54 00000000 ...
+
+  armed paint mode 8
+  the block, immediately after arming   guest 0x00e05880
+    499469e5 499469e0 49946798 00000000 00000000 00000000 00000000 497cea54 00000000 ...
+```
+
+**The block did not move, and the three words written into it are exactly the payload:**
+
+```
+0x00e05880  0x499469e5  bl 0x0274c264   the display frame, called    <- paint 0
+0x00e05884  0x499469e0  b  0x0274c264   the display frame, tailed   <- paint 1
+0x00e05888  0x49946798  b  0x0274c020   the display thread's loop top
+```
+
+**So "the payload was not written there" and "something overwrote it" are both withdrawn**, and the
+`0x14`-stride pattern in the earlier dump is not what the block holds when the payload is written. The
+dump was taken at the fault, well after the arming the harness recorded, and it is not reproducible by a
+read taken beside the arming -- which is a statement about the dump's address being stale rather than
+about the block, and the block's address is exactly what the report names.
+
+**And the probe's own discriminator was wrong, which is how the false lead was produced.** It counted
+words whose top byte was `0x48` or `0x4b` and reported "**0 of 12 branches**" for a block holding three.
+The absolute and link bits live in bits 25 and 0, *inside* the top byte, so `bl` with `AA=0` is
+`0x49xxxxxx` and not `0x48xxxxxx`. The primary opcode is bits 31-26 and is the same for `bc`, `b` and
+`bcl`; that is what the test now uses, and it decodes each branch's target so a reader sees where the
+block says to go. **It has a self-check against the two words a payload is known to hold, so a run
+that reports "no branches" on a block full of them now says the counts are meaningless instead of
+becoming a finding about the block** -- which is what the top-byte version did.
+
+What is left is therefore not about where the payload is or what is in it. **It is that the guest
+reaches an address just below this block, with the payload correct above it.**
 
 ### The frame writes one word above its own allocation
 
