@@ -1280,6 +1280,49 @@ has not been made.
 
 That is where the search stands, and it is a smaller and more honest place than where it started.
 
+### The ring test, and what the title actually named
+
+The objective's second question -- whether tick N-1's uniform block contents are still present
+when tick N paints -- needs the block's *address*, and the answer so far is that the title has not
+named where it lives.
+
+`UniformBlockRing` is the measurement: at each binding the block's bytes are hashed, and when
+the next binding of the same object arrives the earlier address is read again and compared with
+the hash taken then. Three states, not two -- a first sample has nothing to compare, a comparison
+that failed is not a "no", and a comparison that ran is the only thing a count of overwrites may
+be built from.
+
+**And it cannot run, because the descriptor entry's two words are not both usable.** Measured on
+the real title: the word at `+0x0c` reads `0x40` for every object, and `0x40` is 64 bytes, which
+agrees with 233 whole-block scans of a 64-byte block finding no rigid transform in one. So `+0x0c`
+is the block's **size**. The word at `+0x04` is a **relative offset** -- the census's own
+`blockOf` says so, and says that taking it for a length once "asked the product for a gigabyte
+and the product died". The base the title set elsewhere has not been identified.
+
+So the ring reports `sizesKnown`, `addressesKnown`, the sizes it saw, and
+`addressState: relativeOffsetBaseNotIdentified` -- and claims no comparison. **That is the
+objective's second question answered as far as it can be**: the block is 64 bytes, and a
+relative offset is not a place to re-read.
+
+### The two words in this file were named backwards, and I followed the header twice
+
+`UniformBlockCensus.h` said "within an entry the block's size at +0x04 and offset at +0x0c", and
+`blockOf` in the same project said the opposite in a comment. The constants matched the header:
+`kEntrySizeOffset = 0x04`, `kEntryOffsetOffset = 0x0c`. Both stories were in one project and
+they contradicted each other, and **the measurement settles it in the other direction from the
+header**.
+
+I followed the header twice, and both times the run said so exactly: first 177,317 bindings and
+not one object tracked with nothing unreadable and nothing oversize, because the hand-off sat in
+the guard *above* `readEntry` and read an entry that had not been read; then 186,133 bindings and
+186,133 "past the bound of 4096", because the sizes being passed were the `0x1000`-and-up words
+and the addresses were `0x40`.
+
+The constants are now `kEntryBlockSize = 0x0c` and `kEntryBlockAddress = 0x04`, the
+contradictory sentence is replaced by the measurement, and `blockOf`'s locals follow. A name that
+disagrees with what it holds is not a naming problem; it is a trap with a comment on it, and this
+one had a second trap in the same file pointing the other way.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It
