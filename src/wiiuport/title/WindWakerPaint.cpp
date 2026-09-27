@@ -24,6 +24,24 @@ constexpr std::array<uint32_t, 5> kLoopBody = {
 };
 constexpr uint32_t kLoadOne = 0x38600001; // li r3,1          from 0x025f094c
 
+// `or r3, r30, r30` -- the display pointer back into `r3`, lifted from the display frame itself at
+// 0x0274c294, which uses this exact word five times in its own body, once immediately before each
+// of its own `bctrl` calls.
+//
+// **This word is the whole of the second-paint fix, and it is the title's own.** The frame's
+// second instruction is `or r30, r3, r3`: it moves the display pointer into `r30` on entry and then
+// dereferences *r30* for everything -- `display+0x74` is read as `lwz r0, 0x74(r30)` -- while
+// using `r3` as a scratch register throughout. So `r3` is not the display pointer after the first
+// paint returns, and a second `bl` at the frame enters it with whatever the frame last put there.
+// That is the fault, and it is the same fault in both modes: mode 3 puts `li r3,1` in front of the
+// frame and never restores `r3`, and mode 2 lets the frame clobber `r3` itself. Either way the
+// second call walks a scene tree through a `r30` that is not the display.
+//
+// A derived encoding would have been the obvious thing to write here and is why this is lifted: an
+// `or` encoding worked out by hand found *nothing* in nine megabytes of PowerPC, which is what an
+// encoding that is wrong looks like, and a payload word nobody checked has already cost a run.
+constexpr uint32_t kRestoreDisplay = 0x7fc3f378; // or r3,r30,r30   from 0x0274c294
+
 // The most words any stand-in is: the swap-interval call, two loop bodies, and
 // the branch back. The block is reserved once, at startup, for this many.
 // The most words any stand-in is: the seven of the one-vblank form, one more
@@ -150,6 +168,8 @@ std::string_view WindWakerPaint::modeName(Mode mode) {
         return "branchEntry";
     case Mode::TailTwiceAtSixty:
         return "tailTwiceAtSixty";
+    case Mode::RestoreDisplayTwice:
+        return "restoreDisplayTwice";
     }
     return "unknown";
 }
@@ -172,6 +192,8 @@ std::optional<WindWakerPaint::Mode> WindWakerPaint::modeFrom(long long number) {
         return Mode::BranchEntry;
     case 8:
         return Mode::TailTwiceAtSixty;
+    case 9:
+        return Mode::RestoreDisplayTwice;
     default:
         return std::nullopt;
     }
@@ -225,32 +247,56 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
     struct Step {
         bool call;
         uint32_t target;
+        // A literal word to write, lifted from the title's image, for the one instruction that is
+        // not a branch and not a call: `or r3, r30, r30`. Zero means the step is a branch.
+        uint32_t raw = 0;
     };
 
+    // Two of the modes call the frame and so can paint twice in an iteration. The rest stand in for
+    // it, tail-branching at it once, which is what the game's own `bctrl` was about to do anyway.
+    //
+    // `RestoreDisplayTwice` writes its two paints out in full and nothing below adds to them: the
+    // word between the two calls is the fix, and a step list that appended a third paint would
+    // undo the finding it exists to test.
     std::vector<Step> steps;
-    if (mode == Mode::TwiceAtSixty || mode == Mode::TailTwiceAtSixty) {
-        steps.push_back({false, 0});               // li r3,1
-        steps.push_back({true, kSetSwapInterval}); // the game's own setter
-    }
-    // Two of the modes call the frame and so can paint twice in an iteration.
-    // The rest stand in for it, tail-branching at it once, which is what the
-    // game's own `bctrl` was about to do anyway.
-    const bool calls = mode == Mode::Twice || mode == Mode::TwiceAtSixty;
-    const bool paintsTwice = calls || mode == Mode::TailTwiceAtSixty;
-    for (uint32_t paint = 0; paint < (paintsTwice ? 2u : 1u); paint++) {
-        // **The second paint of `TailTwiceAtSixty` is a branch, not a call.** That is the whole
-        // mode: the frame's return then goes to the title's loop, where the title's own `bctrl`
-        // would have sent it, and the payload owns exactly one link-register return rather than
-        // two. Everything else about it -- two paints in one pass, one vblank a flip, the game's
-        // own setter called first -- is mode 3 unchanged, so a run that survives where mode 3
-        // faults has separated "the frame is not re-entrant" from "the second `bl` is the
-        // problem", and a run that faults too has answered the other way.
-        // Only mode 8 distinguishes its two paints; every other mode uses one rule for both, and
-        // `calls` is that rule. Written as a per-mode choice rather than `calls || paint == 0`,
-        // which reads as though a single-paint mode should call -- and did, until the pass-through
-        // payload's one branch became a call and the test that checks its two words said so.
-        const bool call = (mode == Mode::TailTwiceAtSixty) ? (paint == 0) : calls;
-        steps.push_back({call, kDisplayFrame});
+    if (mode == Mode::RestoreDisplayTwice) {
+        // **No `li r3,1` and no setter call.** The frame's second instruction is `or r30, r3, r3`,
+        // so it takes the display pointer into `r30` and dereferences *`r30`* for everything while
+        // treating `r3` as a scratch register -- `display+0x74` is `lwz r0, 0x74(r30)`. Putting a
+        // one in `r3` in front of the frame is therefore putting a one in the display pointer,
+        // and the swap-interval call that follows leaves `r3` wherever the guest put it. The
+        // interval is the paint mod's own business; the frame's entry is not something to arrive at
+        // with a register the frame is about to overwrite.
+        steps.push_back({true, kDisplayFrame});
+        // The title's own repair word, lifted from 0x0274c294, which the frame uses five times in
+        // its own body -- once immediately before each of its own `bctrl` calls. After a paint,
+        // `r3` is whatever the frame last stored in it and `r30` is still the display, so this is
+        // the one instruction that makes a second paint reach the same frame the first one did.
+        steps.push_back({false, 0, kRestoreDisplay});
+        steps.push_back({true, kDisplayFrame});
+    } else {
+        if (mode == Mode::TwiceAtSixty || mode == Mode::TailTwiceAtSixty) {
+            steps.push_back({false, 0});               // li r3,1
+            steps.push_back({true, kSetSwapInterval}); // the game's own setter
+        }
+        const bool calls = mode == Mode::Twice || mode == Mode::TwiceAtSixty;
+        const bool paintsTwice = calls || mode == Mode::TailTwiceAtSixty;
+        for (uint32_t paint = 0; paint < (paintsTwice ? 2u : 1u); paint++) {
+            // **The second paint of `TailTwiceAtSixty` is a branch, not a call.** That is the whole
+            // mode: the frame's return then goes to the title's loop, where the title's own `bctrl`
+            // would have sent it, and the payload owns exactly one link-register return rather than
+            // two. Everything else about it is mode 3 unchanged, so a run that survives where mode
+            // 3 faults separates "the frame is not re-entrant" from "the second `bl` is the
+            // problem".
+            //
+            // Only mode 8 distinguishes its two paints; every other mode uses one rule for both,
+            // and `calls` is that rule. Written as a per-mode choice rather than `calls || paint ==
+            // 0`, which reads as though a single-paint mode should call -- and did, until the
+            // pass-through payload's one branch became a call and the test on its two words said
+            // so.
+            const bool call = (mode == Mode::TailTwiceAtSixty) ? (paint == 0) : calls;
+            steps.push_back({call, kDisplayFrame});
+        }
     }
 
     std::vector<uint32_t> words;
@@ -258,6 +304,10 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
     for (size_t index = 0; index < steps.size(); index++) {
         const Step& step = steps[index];
         const uint32_t at = blockAddress + 4 * static_cast<uint32_t>(index);
+        if (step.raw != 0) {
+            words.push_back(step.raw);
+            continue;
+        }
         if (step.target == 0) {
             words.push_back(kLoadOne);
             continue;

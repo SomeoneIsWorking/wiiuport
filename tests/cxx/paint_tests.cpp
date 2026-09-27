@@ -275,13 +275,43 @@ void wiiuport::tests::runPaintTests() {
         }
     }
     {
+        // **Mode 9's middle word is the title's own, and it is the fix.** Read out of the display
+        // frame: the frame is `mfspr r0,LR; stwu r1,-0x18(r1); stw r30,...; or r30,r3,r3`, so it
+        // takes the display pointer into `r30` and dereferences *`r30`* -- `display+0x74` is
+        // `lwz r0, 0x74(r30)` -- while `r3` is scratch. The word between the two paints puts the
+        // pointer back, and it is `0x7fc3f378`, which the frame itself uses five times in its own
+        // body, once before each of its own `bctrl` calls.
+        const auto nine =
+            WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::RestoreDisplayTwice);
+        check::isTrue(
+            nine.has_value(),
+            "the two-paints-with-the-pointer-restored payload is built where the frame is "
+            "in reach");
+        if (nine.has_value()) {
+            check::isTrue(nine->size() == 4,
+                          "and it is four words -- paint, restore, paint, back to the loop: " +
+                              std::to_string(nine->size()));
+            check::isTrue(
+                (*nine)[1] == 0x7fc3f378,
+                "with the display pointer put back between the two paints, by the title's "
+                "own word and not one worked out here");
+            check::isTrue((*nine)[0] == WindWakerPaint::branchTo(0x00e07000, 0x0274c264, true),
+                          "the first word calls the frame");
+            check::isTrue((*nine)[2] == WindWakerPaint::branchTo(0x00e07008, 0x0274c264, true),
+                          "and the third calls it again, measured from where that word stands");
+        }
+    }
+    {
         check::isTrue(!WindWakerPaint::modeFrom(0).has_value(), "mode 0 names no stand-in");
-        check::isTrue(!WindWakerPaint::modeFrom(9).has_value(), "mode 9 names no stand-in");
+        check::isTrue(!WindWakerPaint::modeFrom(10).has_value(), "mode 10 names no stand-in");
         // Mode 8 is the tail-branch twin, and the pair is the discriminator: 3 calls the frame
         // twice and faults, 8 paints twice with the second paint returning through the title's own
         // loop. Both exist, and the number reaches the payload builder.
         check::isTrue(WindWakerPaint::modeFrom(8) == WindWakerPaint::Mode::TailTwiceAtSixty,
                       "mode 8 is the tail-branch twin, and it is reachable by number");
+        check::isTrue(WindWakerPaint::modeFrom(9) == WindWakerPaint::Mode::RestoreDisplayTwice,
+                      "mode 9 is the one that restores the display pointer, and it is reachable by "
+                      "number");
         // Mode 7 is the branch-entry control: the same payload, reached by a
         // direct branch at the frame instead of through the vtable, so that the
         // one difference between it and mode 1 is the kind of branch.
