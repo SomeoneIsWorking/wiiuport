@@ -1280,6 +1280,120 @@ reads a window apart taken across a capture sequence, not the paired-window meas
 specifies, and the logic rate was not read with the gate in -- the harness's arming sequence leaves the
 gate out, so it reported 0 calls at its probe. Both are one measurement each away.
 
+### The reservation was seven words against an eleven-word payload: a fifth defect, found by a rate
+
+`kMaxWords = 7` was the size of the block this mod reserves from the loader's arena, and mode 12 and
+mode 13 both need eleven words. **The write path had no bound against the reservation**, and the arena
+is a bump allocator shared with every other module, so a payload that outgrows its reservation does
+not fail -- it writes over whatever module asked for memory next.
+
+Measured, in one run, from the harness's own report:
+
+```
+paint mod's block   0x00e05880      11 words, 0x5880 - 0x58ac
+logic gate's block  0x00e0589c      inside it, at the stand-in's seventh word
+```
+
+The gate's counter stub landed in the stand-in's **second** call, so the stand-in's second paint ran
+the gate's pass-through code and branched to the tick instead of painting. The run that produced this
+reported:
+
+```
+mode 13 with the gate halving: 480 paints in 8.00s = 59.99/s;  0 tick calls and 0 ticks run
+```
+
+**and the sixty was one paint and half a gate.** A rate measured with the second paint calling into
+someone else's stub is not a rate; the paint counter was counting the loop's own pass, not two
+paints. Two duplicated comment lines stood above the constant, and both claimed it was "the most
+words any stand-in is" -- neither was true, and neither is the rule now.
+
+The fix is at the cause, in two parts and one owner. `payload()` now refuses a payload that does not
+fit, beside the refusal it already gives a branch that cannot reach -- a stand-in that cannot be
+built correctly must not be built. And `paint_tests.cpp` enumerates every mode from 0 to 13 and
+asserts each one's payload fits, so a mode added later that outgrows the reservation fails the build
+rather than a display thread that may not survive the arming. The reservation is renamed
+`kReservedWords`, because a reservation and a description of the largest payload are different
+numbers and only the first is true.
+
+**The test has been shown the other answer.** With the reservation put back to seven, the same binary
+fails:
+
+```
+FAIL mode 12 (loopDispatchTwice) is built where the loop is in reach
+FAIL mode 13 (loopFrameLiteralTwice) is built where the loop is in reach
+1692 checks, 9 failures
+```
+
+and with it at eleven, 1704 checks and 0 failures. An instrument that has only ever agreed is not
+evidence.
+
+### The rate, measured with the collision gone: 59.99 and 59.73 a second
+
+With the reservation fixed, the gate's block moved to `0x00e058ac`, clear of the stand-in:
+
+```
+unmodded, 8.00s window:                     240 paints = 30.00/s     and 241 = 30.12/s
+mode 13, first 8.00s window:                480 paints = 59.99/s
+mode 13, second 8.00s window:               478 paints = 59.73/s
+```
+
+**The loop's pass is what sets the rate, and the stand-in adds a paint inside a pass rather than a
+pass.** Two paints per pass, and the pass rate is unchanged: 480 paints over 240 passes is 240 passes
+in 8.00 s, against 241 unmodded. That is the answer to the objective's "if the logic rate doubles, it
+was slaved to the flip": **it did not double, so there is nothing to gate.** The gate is for a shape
+that reaches the loop more often, and mode 13 does not.
+
+The second window's 29.87 passes a second is **below the 29.9 band** and is reported as such rather
+than dropped: another repository's build was running on the same machine at the time
+(`zelda3d_app -j2`, 2,327 s old, visible in `ps` during the run). The first window's 30.00 is in band.
+**One of the two windows is in band, one is below it, and the confound is named instead of the
+unfavourable sample being discarded.**
+
+### The tick at 0x025d42ec is not executed by the running title, and the earlier claim is withdrawn
+
+The gate counts zero in every state of both runs, and the harness's own host-side probe counts zero
+calls at the tick's entry:
+
+```
+unmodded, gate armed:   counters hold calls 0, ticks 0;  the host probe counted 0 calls
+```
+
+**over a window in which the title painted 240 times.** So `0x025d42ec` is not on the path this
+objective is about, and the ST-GUESTPAINT row's claim that "the tick's entry is reached 241 times in
+an 8.00s window unmodded... equal to the paints in every window" and that "the gate's own two guest
+counters read exactly half (calls 692, ticks 346)" **is withdrawn**: it cannot be true alongside a
+host probe that counts zero calls at that address over the same kind of window, and the probe is the
+stronger reading because it does not depend on the gate's block being where the mod thinks it is.
+
+The static answer is the same, and it says why the gate cannot work here. The display thread's loop
+`FUN_0274c00c` is eleven instructions whose last is `b 0x0274c020`, so it never returns; it is a
+thread body, and **it has no callers and no callees** -- the one call it makes is `bctrl` through the
+vtable, which is indirect and so is not a reference Ghidra can follow. The frame's six direct callees
+are:
+
+```
+FUN_0274b054   size   24  read-and-write operands 0
+thunk_FUN_0274a4e0  size  4  read-and-write operands 0
+FUN_0274c038   size  556  read-and-write operands 12    <- the render
+FUN_0274b06c   size   24  read-and-write operands 0
+FUN_02760e58   size   60  read-and-write operands 2
+OSGetSystemTime@028fdf04  size 1  read-and-write operands 0
+```
+
+**The frame reads the system time.** It is time-paced, and the simulation it draws is not on its
+path -- the logic is another thread, and nothing in the display path leads to `0x025d42ec`. So the
+gate has no site to stand on in this path, and its zero is the finding rather than a defect in the
+gate.
+
+**What is therefore measured for condition 1:** the paint rate reaches 59.99 and 59.73 a second
+against 30.00 and 30.12 unmodded, in adjacent windows in one driven run, with the pass rate derived
+from the same counters and one of the two windows inside the band and one below it. **What is not
+measured:** the logic tick rate from the title's own tick, because the address the project has been
+using for it is not executed; the loop's pass rate is the closest thing this path offers and it is
+labelled as the pass rate, not as the tick. **The `display+0x74` / `+0x28` toggle reading stands** --
+it was measured over roughly 300 paints with the pair sampled at every paint, and it is unaffected by
+the reservation fix, which moved no field the frame reads.
+
 ### Correctly paired at last: the fault is in the title's own code, and the gdb window was a host read
 
 One run reporting both the counter and the window, which is the only way the two may be paired:
