@@ -201,30 +201,46 @@ the title's display thread paints as often as it is asked to, and the simulation
 own rate underneath. A second run of the same shape gave 59.40 (297 over 5.0s) with the
 logic at 29.80, so 60.12 and 59.40 are two samples of the same rate, not one of them.
 
-### Which stand-in does it, and which ones kill the product
+### Which stand-in does it, and which ones fault
 
-Four modes were run identically, arming only the paint mod:
+The mode numbers are the product's own mapping, read from `modeFrom`: 1 `PassThrough`,
+2 `Twice`, 3 `TwiceAtSixty`, 4 `IndirectOnce`, 5 `IntervalField`, 6 `OneAtSixty`,
+7 `BranchEntry`. The stand-in that presents at sixty is **mode 3, `TwiceAtSixty`**: set the
+pacing, then call the frame twice, once a vblank a flip. Its payload is five words lifted
+from the title's image.
 
-| mode | what it does | result |
-|------|--------------|--------|
-| 1 | tail branch to the frame, one paint | survives, 30.00 paints/s |
-| 2 | `bl` the frame twice, back to back | **kills the product** |
-| 3 | set pacing, then `bl` the frame twice | **kills the product** |
-| 6 | set pacing, then `bl` the frame twice, one vblank a flip | survives, **60.12 paints/s** |
+Four modes run identically, arming only the paint mod:
 
-Modes 3 and 6 have the same payload and differ only in how many vblanks a flip waits.
-One kills the product and the other reaches sixty, so the trigger is not the payload and
-not the words in it: it is doing the work back to back rather than once a vblank. Mode 6 is
-the one that presents at sixty, and it is a payload of four words lifted from the title's
-own image.
+| mode | payload | result |
+|------|---------|--------|
+| 1 `PassThrough` | tail branch to the frame, one paint | survives, 30.00 paints/s |
+| 2 `Twice` | `bl` the frame twice, back to back | **faulted** |
+| 3 `TwiceAtSixty` | set pacing, `bl` the frame twice | **faulted once, then 60.12 paints/s** |
+| 6 `OneAtSixty` | single branch, one paint at one vblank | survives |
 
-### What is still open: two stand-ins kill the product on their own
+**The fault is intermittent, not a property of a payload.** Mode 3 killed the product in one
+run and presented at sixty in the next, with the same binary and the same request sequence.
+That is the honest reading of this table, and it retracts what the first version of it said:
+the earlier claim that the trigger was "doing the work back to back rather than once a
+vblank" does not survive mode 3 both faulting and working, because `TwiceAtSixty` is
+precisely the once-a-vblank payload. What is left is a race whose window the run reaches
+sometimes and not others, and its mechanism is not established.
+
+### What is still open: the fault is intermittent
 
 Correcting an earlier reading of this, which blamed the gate. **The paint stand-in alone
 faults, with the gate never armed.** Arming it at 71 seconds killed the product within three,
 and the fault is a segmentation fault inside recompiled code on the display thread's core
-(`OSSched[core=1]`). Modes 2 and 3 do this; modes 1 and 6, which have the same words or
-fewer, do not.
+(`OSSched[core=1]`). It does not happen every time, and it is not tied to a payload: mode 3
+faulted in one run and presented at sixty in the next.
+
+Two captures taken with the stand-in in, on a run that survived, differ in 3,515,979 of
+6,220,816 bytes, first at offset 2665. So two consecutive paints are **not** the same
+picture, which is expected here and is why the null case is not yet in hand: the title is
+animating between the two paints of a pass, so consecutive captures straddle a tick. Two
+paints from the *same* pass is the comparison condition 1 asks for, and the capture route
+takes whole frames rather than individual paints, so that comparison needs the capture to
+land inside one pass. Not yet built.
 
 So the two are independent: the gate runs, and the paint mod's second mode does not. That is
 also why the two are now armed separately (`probe_run.py --arm paint|gate|both`). They are two
