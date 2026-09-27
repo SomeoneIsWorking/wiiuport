@@ -43,6 +43,7 @@ int main(int argc, char** argv) {
     wiiuport::tests::runLogicGateTests();
     wiiuport::tests::runObjectPoseHistoryTests();
     wiiuport::tests::runObjectPoseLocatorTests();
+    wiiuport::tests::runNodePoseLocatorTests();
     wiiuport::tests::runReplayTests();
     wiiuport::tests::runSearchTests();
     wiiuport::tests::runInputTests();
