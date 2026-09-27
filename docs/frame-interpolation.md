@@ -1394,6 +1394,67 @@ labelled as the pass rate, not as the tick. **The `display+0x74` / `+0x28` toggl
 it was measured over roughly 300 paints with the pair sampled at every paint, and it is unaffected by
 the reservation fix, which moved no field the frame reads.
 
+### The gate was never a backstop: the tick is one-for-one with the paint, and the gate is what
+### holds the logic at thirty
+
+With the probe refusal gone (`c891998`), the gate at `0x025d42ec` installs and counts, and every
+number the objective asks for in condition 1 is now measured in one driven run.
+
+**The tick runs at thirty, and the gate halves it exactly:**
+
+```
+ 68.0s  unmodded, gate armed:  calls 61,  ticks 31;  host probe 1864 calls
+ 71.0s  unmodded, 3s later:    calls 151, ticks 76;  host probe 1954 calls
+```
+
+90 calls in 3.0 s on the host probe and 90 on the gate's own guest counter, and 45 ticks run: **30.0
+calls a second in, 15.0 ticks a second out.** Two instruments, one number, and the gate's counter is
+read straight out of guest memory rather than from its own report.
+
+**One tick per paint, one for one, in every window:**
+
+| window | paints | paint rate | tick calls | call rate | ticks run | tick rate |
+|---|---|---|---|---|---|---|
+| unmodded | 241 | 30.12/s | 241 | 30.12/s | 120 | 15.00/s |
+| mode 13, first | 474 | 59.24/s | 474 | 59.24/s | 237 | 29.62/s |
+| mode 13, second | 480 | 59.99/s | 480 | 59.99/s | 240 | **30.00/s** |
+
+**So the objective's conditional is answered in the affirmative and not by assumption: the logic rate
+does double** -- it follows the paint one for one, so at sixty paints a second the tick would run at
+sixty. **The gate in the logic path is what holds it at thirty**, and the second window's 30.00 is
+inside the 29.9-30.0 band. The first window's 29.62 is below it and is reported rather than dropped.
+
+**The harness's own control reads 15.00/s unmodded, and that is the gate doing its job, not the title
+running at fifteen** -- which is why the control exists: the same warning that fires at 15.00 unmodded
+fires at 30.00 with the picture at sixty, and the only difference between them is the paint rate.
+
+**This reverses two claims this project has made about the gate, and both were wrong the same way.**
+That "the gate is a backstop, not the mechanism" and that "the logic stays at thirty, so there is
+nothing to gate" were both read off runs in which the gate's probe had been refused and the gate
+therefore counted nothing while the title carried on. **A gate that was never installed looks exactly
+like a gate that was not needed**, which is the whole argument for reporting an instrument's own
+installation state next to its counts.
+
+### The null case, and it is a discriminator rather than a uniformity
+
+Two consecutive presents, two rounds, with the stand-in painting twice per pass and no blend:
+
+```
+round 0:  53,634 of 6,220,800 bytes differ (0.86%), largest delta 3, all 53,634 within 4
+round 1:  52,911 of 6,220,800 bytes differ (0.85%), largest delta 3, all 52,911 within 4
+```
+
+**Against a genuinely different frame of the same title, in the same run shape: 32.45% and 34.90% of
+bytes differ, with largest deltas of 164 and 221.** So the null case is not merely "the two images are
+the same" -- it is on the same side of a measured line as one paint, and two orders of magnitude
+away from a different frame. That is condition 4's null arm, with the denominator (6,220,800 bytes),
+the magnitude (largest delta 3 against 164), and the comparison stated.
+
+**Why it is this small now and was 32-39% before:** the logic is gated to thirty while the picture is
+presented at sixty, so consecutive presents alternate between the two paints of one tick, and with
+nothing blended those two paints are the same tree at the same pose. **The earlier 32-39% figures were
+a different frame, because the logic was not gated and the tick was not running at all.**
+
 ### The refusal that silenced two instruments, and what the title says once they speak
 
 The frame probe fault was diagnosed correctly: an entry whose first instruction reads the link
