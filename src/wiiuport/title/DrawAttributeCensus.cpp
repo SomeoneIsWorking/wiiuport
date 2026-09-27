@@ -26,6 +26,16 @@ namespace {
 // stride belongs in the identity of the thing being counted.
 using Key = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>;
 
+// The share of components read that were implausible as positions. A layout nobody has read
+// anything at has read nothing implausible, which is not the same as having been checked -- so
+// this is only ever consulted where componentsRead is non-zero.
+double shareOf(uint64_t read, uint64_t implausible) {
+    if (read == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(implausible) / static_cast<double>(read);
+}
+
 Key keyOf(const DrawAttributeCensus::Signature& signature) {
     return {signature.semanticId, signature.format, signature.sizeInBytes, signature.perInstance,
             signature.buffer,     signature.offset, signature.stride};
@@ -214,6 +224,7 @@ DrawAttributeCensus::Position DrawAttributeCensus::positionForLocked(uint32_t st
     const uint64_t needed = nodes / 2 + 1;
     std::map<Key, std::set<uint32_t>> across;
     std::map<Key, uint64_t> implausible;
+    std::map<Key, uint64_t> read;
     for (const Node& node : m_nodes) {
         if (node.address == 0) {
             continue;
@@ -228,18 +239,20 @@ DrawAttributeCensus::Position DrawAttributeCensus::positionForLocked(uint32_t st
             }
             across[keyOf(signature)].insert(node.address);
             implausible[keyOf(signature)] += signature.componentsImplausible;
+            read[keyOf(signature)] += signature.componentsRead;
         }
     }
     Position out;
     uint64_t bestObjects = 0;
     for (const auto& [key, objects] : across) {
-        // **The count bar AND the magnitude bar.** Seven objects agreeing that the stride-20
-        // position is at offset 0 is not enough, because those twelve bytes are partly position
-        // and partly the eight other bytes in the stride. An offset whose values have ever read
-        // as something a position is not, is not named -- and the report says how many, so a
-        // layout that fails this is a layout the census has not solved rather than a layout with
-        // no position.
-        if (implausible[key] > 0) {
+        // **The count bar AND the magnitude bar, and the magnitude bar is a share.** Seven
+        // objects agreeing that the stride-20 position is at offset 0 is not enough, because
+        // those twelve bytes are partly position and partly the eight other bytes in the stride.
+        // But refusing a layout because ONE component in ONE draw was implausible refuses four
+        // of the title's seven layouts, which is a threshold in the wrong place rather than a
+        // bar. The share is the bar: at or below kImplausibleShareCeiling the layout survives a
+        // bad draw, and a layout that is mostly arithmetic does not.
+        if (shareOf(read[key], implausible[key]) > kImplausibleShareCeiling) {
             continue;
         }
         if (objects.size() >= needed && objects.size() > bestObjects) {
@@ -320,9 +333,11 @@ std::string DrawAttributeCensus::json() const {
     // every object, because the magnitude bar is a property of the layout rather than of one
     // draw.
     std::map<Key, uint64_t> implausibleCounts;
+    std::map<Key, uint64_t> readCounts;
     for (const Node& node : m_nodes) {
         for (const Signature& signature : node.signatures) {
             implausibleCounts[keyOf(signature)] += signature.componentsImplausible;
+            readCounts[keyOf(signature)] += signature.componentsRead;
         }
     }
     std::vector<std::pair<Key, std::pair<uint64_t, uint64_t>>> ordered(across.begin(),
@@ -353,11 +368,17 @@ std::string DrawAttributeCensus::json() const {
         one.number("stride", std::get<6>(key));
         one.number("nodes", counts.first);
         one.number("draws", counts.second);
+        one.number("componentsRead", readCounts.at(key));
         one.number("componentsImplausible", implausibleCounts.at(key));
-        // A quoted string, because `pass` and `fail` are words and not JSON literals. Written
-        // raw it came out as `"magnitudeBar":pass`, which is the fifth unquoted-value report
-        // this project has produced and the reason there is one formatter and a rule.
-        one.string("magnitudeBar", implausibleCounts.at(key) == 0 ? "pass" : "fail");
+        // The share and the bar's own value, so a reader can see how close a layout is to being
+        // refused rather than only whether it was.
+        one.raw("implausibleShare",
+                JsonBody::real(shareOf(readCounts.at(key), implausibleCounts.at(key))));
+        one.raw("implausibleShareCeiling", JsonBody::real(kImplausibleShareCeiling));
+        one.string("magnitudeBar", shareOf(readCounts.at(key), implausibleCounts.at(key)) <=
+                                           kImplausibleShareCeiling
+                                       ? "pass"
+                                       : "fail");
         one.raw("positionSized",
                 (std::get<2>(key) == kPositionBytes || std::get<2>(key) == kPositionBytesPadded)
                     ? "true"

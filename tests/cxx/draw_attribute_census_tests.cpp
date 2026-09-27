@@ -280,6 +280,68 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
                           body);
     }
 
+    // **One bad draw must not refuse a layout, and a mostly-arithmetic one still must.** The
+    // magnitude bar started all-or-nothing -- any component ever implausible and the layout was
+    // gone -- and that refused four of the title's seven layouts, because one odd draw in one
+    // frame of one object is enough. That is a threshold in the wrong place rather than a bar,
+    // and it is the same mistake as the loose class being too loose. So the bar is a stated
+    // SHARE of the components read, and both directions are tested here.
+    {
+        wiiuport::title::ObjectIdentityScope scope;
+        DrawAttributeCensus census(&scope);
+        // 200 draws of good positions, then ONE with a component at 1e38.
+        for (uint32_t object = 1; object <= 5; object++) {
+            scope.bind(0x43e70000u + object * 0x300u);
+            for (uint32_t draw = 0; draw < 40; draw++) {
+                Prepared good = aDrawWithPositions(20, 8, 1.0f);
+                addAttribute(good, 0, 0x30, 12, 0);
+                census.onDrawRecorded(good);
+            }
+        }
+        // One bad read across the whole title's sample.
+        scope.bind(0x43e70000u);
+        Prepared bad = aDrawWithPositions(20, 8, 1.0f);
+        addAttribute(bad, 0, 0x30, 12, 0);
+        const float wild = 3.0e38f;
+        std::memcpy(g_buffer.data() + sizeof(float), &wild, sizeof(wild));
+        census.onDrawRecorded(bad);
+
+        const std::string body = census.json();
+        check::isTrue(census.positionFor(20).known,
+                      "a layout that is 199 draws of positions and one of rubbish still names its "
+                      "position, because one bad sample is not a layout being arithmetic: " +
+                          body);
+        check::isTrue(body.find("\"implausibleShare\":") != std::string::npos &&
+                          body.find("\"implausibleShareCeiling\":0.01") != std::string::npos,
+                      "and the share and the bar's own value are both in the report, so a reader "
+                      "can see how close a layout is to being refused");
+    }
+
+    // The other direction: a layout that is mostly arithmetic is refused, and the share says by
+    // how much -- so "unresolved" carries a number rather than only a verdict.
+    {
+        wiiuport::title::ObjectIdentityScope scope;
+        DrawAttributeCensus census(&scope);
+        for (uint32_t object = 1; object <= 5; object++) {
+            scope.bind(0x43e80000u + object * 0x300u);
+            for (uint32_t draw = 0; draw < 4; draw++) {
+                Prepared bad = aDrawWithPositions(20, 8, 1.0f);
+                addAttribute(bad, 0, 0x30, 12, 0);
+                // Two of the three components are rubbish: a share of two thirds.
+                const float wild = 3.0e38f;
+                std::memcpy(g_buffer.data() + sizeof(float), &wild, sizeof(wild));
+                std::memcpy(g_buffer.data() + 2 * sizeof(float), &wild, sizeof(wild));
+                census.onDrawRecorded(bad);
+            }
+        }
+        const std::string body = census.json();
+        check::isTrue(!census.positionFor(20).known,
+                      "a layout whose components are two thirds rubbish is refused: " + body);
+        check::isTrue(body.find("\"magnitudeBar\":\"fail\"") != std::string::npos,
+                      "and the report says the magnitude bar failed, with the share beside it, "
+                      "so an unresolved layout reads as unresolved rather than as empty");
+    }
+
     // One object cannot agree with another, so nothing is named however many times it is drawn.
     {
         wiiuport::title::ObjectIdentityScope scope;
