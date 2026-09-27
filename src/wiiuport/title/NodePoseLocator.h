@@ -89,6 +89,10 @@ class NodePoseLocator {
     // unit is not one. The bar is stated rather than tuned: it is the first number here that
     // a reader could reasonably want to argue with, so it is the one that says what it is.
     static constexpr float kMotionEpsilon = 1e-3f;
+    // How non-singular a 3x3 has to be to count as a transform at all. Without a floor, a
+    // plane of near-zero numbers reads as a matrix and the loose bar finds one at every
+    // offset, which is a bar that cannot fail.
+    static constexpr double kDeterminantFloor = 1e-6;
     // **How much of each is read, and why the two windows are disjoint.** The sub-object is
     // a field *of* the node, at `+0xa1c`, so a 4 KiB window from the node's base covers the
     // sub-object's first 1508 bytes as well -- and a pose in the sub-object then shows up in
@@ -124,7 +128,15 @@ class NodePoseLocator {
         uint32_t compared = 0;
         uint32_t moved = 0;
         uint32_t still = 0;
+        // Scans on which the 3x3 was non-singular (`affine`, the superset) and rigid
+        // (`rigid`, the strict class). An offset can be affine always and rigid never -- a
+        // scaled transform -- and that difference is the whole point of counting both.
+        uint32_t affineScans = 0;
+        uint32_t rigidScans = 0;
         float biggestDelta = 0.0f;
+        // How far the rows are from unit length, not a length: zero is rigid. It starts at
+        // zero because that is what a candidate no scan has seen scaled at yet means.
+        float biggestScale = 0.0f;
         std::array<float, kPoseWords> last{};
         bool held = false;
     };
@@ -180,11 +192,22 @@ class NodePoseLocator {
     // holds that never changes is the same shape as a pose and is not one.
     uint32_t bestOffset(Kind kind = Kind::Node) const;
 
+    // The same, over the looser class: held by a majority, non-singular, and seen to move.
+    // This is the one that answers "is the node's own transform here at all, and does it
+    // carry scale", which the strict bar cannot -- it will not count a scaled field at all,
+    // so "nothing found" would not distinguish an absent transform from a present one.
+    uint32_t bestAffineOffset(Kind kind = Kind::Node) const;
+
   private:
     // The same, with the lock already held. `json()` holds it and needs the number, and a
     // non-recursive mutex taken twice on one thread is a deadlock rather than an answer --
     // which is what the first version of this did, and it hung the test run.
     uint32_t bestOffsetLocked(Kind kind) const;
+    uint32_t bestAffineOffsetLocked(Kind kind) const;
+    // The cross-object table for one class, as a JSON object. `rigid` is the strict one and
+    // `affine` the superset; both are emitted, because "only the loose one fired" is the
+    // answer to the question the loose one was added for.
+    std::string tableFor(Kind kind, bool affine) const;
     // How many distinct objects of one kind are tracked: the denominator every bar for that
     // kind is taken against.
     uint32_t trackedOfKindLocked(Kind kind) const;
@@ -207,8 +230,21 @@ class NodePoseLocator {
         NodePoseLocator& m_owner;
     };
 
-    // A rigid transform, tested.
+    // A rigid transform: three unit rows, pairwise perpendicular. This is the strict class,
+    // and it is what the objective's "rigid 3x4" asks for.
     static bool isPose(const float* words);
+    // **The looser class, and why it is needed to choose between two answers.** A rigid test
+    // cannot tell "the node has no transform here" from "the node's transform carries scale",
+    // and those point at different places: an absent local transform means the transform a
+    // renderer multiplies is the *world* matrix, the product of the node's place in the graph
+    // with its parents', and it has to be looked for on the parent. A scaled one means the
+    // field is here and the parent chain is needed only to compose with it. So an offset is
+    // also counted when its 3x3 is merely non-singular, and the scale actually measured is
+    // reported -- a transform with unit rows and one with rows of length 2.5 are different
+    // answers wearing the same shape.
+    static bool isAffine(const float* words);
+    // The largest deviation of a row's length from 1, as a scale to report.
+    static float scaleOf(const float* words);
     // Scans one object's memory and folds what it finds into that object's candidates.
     // The window is the kind's own, so a node and its sub-object are read over disjoint
     // ranges and one field cannot be reported as two.
