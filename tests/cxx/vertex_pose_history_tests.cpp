@@ -359,19 +359,52 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
                           body);
     }
 
-    // The tracked set is bounded, and the refusals counted.
+    // **The sample is strided, and the first eight are not an answer.** A negative about the
+    // first objects a wind game draws is a negative about a sea, a sky and a particle system.
+    // So an object is tracked only when it is the first of its own kObjectStride-th, and the
+    // eight tracked are spread across the whole run. The stride is a sampling rule rather than a
+    // property of the title, so it is a stated number and the refusals are reported beside the
+    // belief rather than beside a claim.
     {
         ObjectIdentityScope scope;
         std::atomic<uint64_t> frame{1};
         VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
-        for (uint32_t object = 1; object <= VertexPoseHistory::kNodes + 3; object++) {
-            scope.bind(0x43e00000u + object * 0x100u);
+        const uint64_t offered = VertexPoseHistory::kNodes * VertexPoseHistory::kObjectStride + 3;
+        for (uint64_t object = 1; object <= offered; object++) {
+            scope.bind(0x43e00000u + static_cast<uint32_t>(object) * 0x100u);
             history.onDrawRecorded(aMeshDraw(aMeshAt(0.0f)));
         }
         const std::string body = history.json();
         check::isTrue(field(body, "nodesTracked") == std::to_string(VertexPoseHistory::kNodes),
-                      "the tracked set stops at its stated size");
-        check::isTrue(field(body, "nodesRefused") == "3",
-                      "and the objects beyond it are refused and counted");
+                      "eight objects tracked out of " + std::to_string(offered) +
+                          " offered: " + body);
+        check::isTrue(field(body, "objectsOffered") == std::to_string(offered),
+                      "with every offer counted, so the stride's denominator is visible");
+        check::isTrue(field(body, "objectStride") ==
+                          std::to_string(VertexPoseHistory::kObjectStride),
+                      "and the stride itself, so a reader can see the sample is spread rather "
+                      "than first-come");
+        check::isTrue(field(body, "objectsRefusedByStride") != "0",
+                      "while the objects the stride skipped are refused and counted separately "
+                      "from the ones that filled the set");
+    }
+
+    // The stride is per ARRIVAL, not per address: a reused address must not be sampled once and
+    // then never again, which is what a pointer-based stride would do.
+    {
+        ObjectIdentityScope scope;
+        std::atomic<uint64_t> frame{1};
+        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        for (uint64_t round = 0; round < VertexPoseHistory::kObjectStride * 2; round++) {
+            scope.bind(0x43e00000u);
+            history.onDrawRecorded(aMeshDraw(aMeshAt(0.0f)));
+            scope.bind(0x43e00100u);
+            history.onDrawRecorded(aMeshDraw(aMeshAt(0.0f)));
+        }
+        const std::string body = history.json();
+        check::isTrue(field(body, "nodesTracked") == "2",
+                      "two addresses offered thousands of times track as two objects, because "
+                      "the first of each stride landed on the first arrival of each: " +
+                          body);
     }
 }

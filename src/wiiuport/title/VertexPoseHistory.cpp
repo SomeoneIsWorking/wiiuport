@@ -97,6 +97,16 @@ void VertexPoseHistory::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw
         return one.address == node;
     });
     if (known == m_nodes.end()) {
+        // The strided sample. A new object's ordinal among the ones offered decides whether it
+        // is tracked, so the tracked set is spread across the whole run rather than being the
+        // first few objects the title drew -- which for a wind game's opening frame is a sea, a
+        // sky and a particle system, and a negative about those is not a negative about the
+        // title.
+        m_objectsOffered++;
+        if (m_objectsOffered % kObjectStride != 1) {
+            m_refusedByStride++;
+            return;
+        }
         if (m_nodes.size() >= kNodes) {
             m_refused++;
             return;
@@ -317,6 +327,11 @@ std::string VertexPoseHistory::json() const {
     body.string("schedule", m_frames == nullptr ? "perBind" : "perFrame");
     body.number("nodesTracked", m_nodes.size());
     body.number("nodesRefused", m_refused);
+    // The sampling rule, with its denominator, because "6 of 8 identical" is a statement about
+    // eight objects and a reader is entitled to know which eight.
+    body.number("objectsOffered", m_objectsOffered);
+    body.number("objectsRefusedByStride", m_refusedByStride);
+    body.number("objectStride", kObjectStride);
     body.number("maxPositionBytes", kMaxPositionBytes);
 
     // The headline, with its denominator, because "can this work at all" is one number and it

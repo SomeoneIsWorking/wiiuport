@@ -101,6 +101,14 @@ class VertexPoseHistory final : public frame::DrawRecordedListener {
     // depth pass, a colour pass -- and a bound on shapes is what stops one node's whole
     // pipeline from filling the history.
     static constexpr size_t kNodes = 8;
+    // **A strided sample, and why the first eight are not an answer.** The bounded set was
+    // filled by the first eight objects the binder published, and a negative about those is a
+    // negative about a sea, a sky and a particle system -- whatever a wind game's opening frame
+    // happens to contain. An object is therefore tracked only when it is the first of its own
+    // `kObjectStride`-th, so the eight tracked are spread across the whole run instead of being
+    // the eight the title drew first. The stride is a sampling rule and not a property of the
+    // title, so it is stated here and the refusals are reported beside the belief.
+    static constexpr uint64_t kObjectStride = 4096;
     static constexpr size_t kShapesPerNode = 4;
     static constexpr size_t kSamplesPerShape = 2;
 
@@ -180,7 +188,13 @@ class VertexPoseHistory final : public frame::DrawRecordedListener {
     std::atomic<uint64_t> m_drawsWithoutNode{0};
     mutable std::mutex m_mutex;
     std::vector<Node> m_nodes;
+    // How many distinct objects have been offered, so the stride can decide whether this one is
+    // the first of its own kObjectStride-th. Counted rather than inferred from a pointer: the
+    // binder's object addresses are reused across frames, so a pointer stride would sample by
+    // address rather than by arrival and would pick one object forever.
+    uint64_t m_objectsOffered = 0;
     uint64_t m_refused = 0;
+    uint64_t m_refusedByStride = 0;
 };
 
 } // namespace wiiuport::title
