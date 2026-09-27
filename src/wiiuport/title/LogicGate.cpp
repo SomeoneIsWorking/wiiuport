@@ -29,7 +29,26 @@ constexpr uint32_t kLoadWord = 0x80000000;       // lwz rD, disp(rA)
 constexpr uint32_t kAddImmediate = 0x38000000;   // addi rD, rA, simm
 constexpr uint32_t kStoreWord = 0x90000000;      // stw rS, disp(rA)
 constexpr uint32_t kAndImmediate = 0x70000000;   // andi. rS, rA, K
-constexpr uint32_t kBranchNotEqual = 0x40800000; // bne, relative
+// `bne` is 0x40820000, and it was 0x40800000 here while the comment above named
+// 0x40820014 as the instruction it came from. A conditional branch is one opcode
+// with its condition in BO (bits 6-10) and BI (bits 11-15): BO=4 branches when the
+// bit BI names is *false*, and `andi.` sets bit 2 (which is BI=2) when its result
+// is not zero. So `bne` is BO=4 with BI=2, and BO=4 with BI=0 is a different
+// branch over the same displacement. Four `bne` in this title's own image agree,
+// and were read out of it rather than argued:
+//
+//   0x025d4398  bne 0x025d43ac  0x40820014
+//   0x025d4678  bne 0x025d4740  0x408200c8
+//   0x025d46a4  bne 0x025d4708  0x40820064
+//   0x0274c964  bne 0x0274c938  0x4082ffd4
+//
+// and no instruction in the image carries 0x40800000 as a `bne`.
+//
+// What the wrong constant did is not subtle and not visible in any counter: with
+// BO=4 BI=0 the branch is taken on an *even* count, so the gate let through the
+// even calls and returned on the odd ones without running the tick -- and the
+// title hung, reading exactly like a title that has stopped.
+constexpr uint32_t kBranchNotEqual = 0x40820000; // bne, relative
 constexpr uint32_t kReturn = 0x4e800020;         // blr
 constexpr uint32_t kMoveToCounter = 0x7c0903a6;  // mtctr rS
 constexpr uint32_t kBranchCount = 0x4e800420;    // bctr
@@ -264,7 +283,12 @@ std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t counter
     const uint32_t ticks = countersAddress + 4 * kTicksWord;
     const uint32_t testAt = blockAddress + 4 * 6;
     const uint32_t through = blockAddress + 4 * kThroughWord;
-    if (!withinReach(testAt, through) || !withinReach(through, kTickBody)) {
+    // Where the branch to the tick *stands*, which is not where the through path
+    // starts. A displacement is measured from the word it is in; measured from the
+    // start of the path instead, it lands 20 bytes past the tick's second
+    // instruction and hangs the title with the gate armed.
+    const uint32_t branchAt = blockAddress + 4 * kBranchWord;
+    if (!withinReach(testAt, through) || !withinReach(branchAt, kTickBody)) {
         return {};
     }
     // The ticks counter is incremented on the path that *runs* the tick, not on
@@ -288,7 +312,7 @@ std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t counter
         kLoadWord | (6 << 21) | (5 << 16),                       // lwz  r6, 0(r5)
         kAddImmediate | (6 << 21) | (6 << 16) | 1,               // addi r6, r6, 1
         kStoreWord | (6 << 21) | (5 << 16),                      // stw  r6, 0(r5)
-        branchTo(through, kTickBody, false),                     // b    the tick's own body
+        branchTo(branchAt, kTickBody, false),                     // b    the tick's own body
     };
 }
 

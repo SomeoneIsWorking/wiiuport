@@ -187,6 +187,14 @@ window.
 
 ## Sixty paints a second, through the title's own paint path
 
+**The conclusion this section reached — that the picture reaches sixty without the logic
+following it — is withdrawn.** It was measured with a stand-in that paints the tree twice per
+pass, which faults on the display thread's core, and with a logic rate read from a counter
+that was counting the calls the gate *skipped*. Both are described below with what replaced
+them: mode 6 paints once per pass and reaches the same sixty, and the tick is called once per
+present, so the logic rate follows the flip one for one. This section is left in place because
+the numbers in it are real and the reading of them was not.
+
 The gate is not what doubles the picture. The stand-in does that, and the measurement is on
 the real title through the control channel, in one driven run, in the same scene, with the
 mod off and on in adjacent windows:
@@ -322,6 +330,169 @@ itself the probe's, so each pass re-enters the probe. Separating those needs a r
 each run is minutes, so this is recorded as open rather than guessed at. What is *not*
 available as an answer is arming the two in an order that happens to survive: a measurement
 that needs its order chosen is not a measurement.
+
+### The fault, twice: one cause found, and the trigger is painting twice
+
+Three runs under gdb, with the paint mod armed and the gate never armed, and one control with
+the mod never armed. The control is the part that makes the rest mean anything:
+
+    mod never armed, 210s, gdb attached:      no fault
+    mode 3 armed:                              fault, PPCRecompiler.cpp:148
+    mode 3 armed:                              fault, PPCInterpreterImpl.cpp:72
+
+**The fault needs the patch.** A core that never runs the stand-in does not reach it in three
+and a half minutes with a debugger attached, so this is not a free-standing defect in the
+emulator that the patch merely runs into.
+
+**The proximate cause, in the fork, is a missing check.** The direct jump table is sparse: it
+covers the whole code area, but only 4 MiB at a time is mapped, and only for a range the
+loader registered with `PPCRecompiler_allocateRange`. Three functions indexed it with an
+address the guest supplied and asked nothing — `attemptEnterWithoutRecompile`,
+`attemptEnter` and `visitAddressNoBlock`. At the fault:
+
+    enterAddress 0x02c12ffc          a legitimate-looking address in the title's code area
+    ppcRecompiler_reservedBlockMask 0x749   blocks 0, 3, 6, 8, 9, 10
+    block of 0x02c12ffc            11      the one the mask has no bit for
+
+So the read was 92 MB into a 512 MB host reservation, in a block that was never mapped, on
+the scheduler's own resume path — which runs for every core at every timeslice, so any guest
+address can arrive there. Fixed in the fork (`23eb318`): the block is asked about before the
+table is read, an address with no block answers "not translated", and the mask is published
+after the mapping it promises rather than before. The sites inside the recompiler worker are
+left alone; their addresses come from a registered range, so their blocks are mapped by
+construction.
+
+**With that fixed, the same run gets one step further and trips on the program counter
+itself**, in `PPCInterpreter_LWZ` at an instruction word of 0x800006e2 read from guest address
+0x00e000b28 — the base of the loader's trampoline arena. So the second cause is upstream of
+the crash: **the display thread's program counter leaves the title's code while its link
+register points into the stand-in.** The link register is 0x00e05888, which is the stand-in's
+second word, the first `bl` of the display frame, so the thread was between the two paints of
+a pass when it happened. Two runs gave two different addresses — 0x02c12ffc and 0x00e000b28 —
+which is what "the program counter is wrong" looks like rather than "the program counter
+reached somewhere particular".
+
+**The trigger is painting twice, and mode 6 does not do it.** Modes 1 and 6 survive; modes 2
+and 3 fault. Both faults have the link register inside the stand-in, and mode 6's payload
+never enters the stand-in's second paint at all because it never has one. So the honest
+statement is: *painting the tree twice in one pass leaves the display thread's state
+inconsistent, and the mechanism is not established.* What the run now rules out is the
+specific candidate this document previously led with — the recompiler's own table read — which
+was real and is fixed, and was not the whole of it.
+
+That matters for the shape of the mechanism rather than only for the fault: **mode 6 reaches
+the same sixty without painting twice**, so the sixty does not depend on the double paint at
+all, and the double paint is not load-bearing for anything.
+
+## Sixty paints a second with one paint per pass, and the tick slaved to the flip
+
+`OneAtSixty` — mode 6 — is a payload of one word, a direct branch to the display frame, with
+the swap interval at one vblank a flip. The display thread paints the title's own tree once
+per pass, through the title's own vtable slot, and the pass runs twice as often. The logic
+gate holds the tick, and the gate's own two guest counters — incremented by its own
+instructions, read straight out of guest memory, so nothing in the report can flatter them —
+say how many calls it saw and how many it let run.
+
+    unmodded, no mods:              241 paints in 8.00s = 30.12/s
+    unmodded, gate armed:           241 paints in 8.00s = 30.12/s
+                                    241 tick calls, 121 ticks run = 30.12/s and 15.12/s
+    mode 6 + gate, window 0:        480 paints in 8.00s = 59.98/s
+                                    480 tick calls, 240 ticks run = 59.98/s and 29.99/s
+    mode 6 + gate, window 1:        480 paints in 8.00s = 59.98/s
+                                    480 tick calls, 240 ticks run = 59.98/s and 29.99/s
+
+**That is the condition: sixty paints a second with the logic tick inside 29.9-30.0**, in two
+independent eight-second windows, each read as two counts a window apart rather than as a
+running average, with the unmodded rate measured in the same run for the modded one to be a
+change from.
+
+The counters corroborate it independently, and they are half exactly:
+
+    unmodded:  calls 60   ticks 30  |  three seconds later:  calls 150  ticks 75
+    mode 6:    calls 692  ticks 346
+
+**And the tick was slaved to the flip, which is the case the condition anticipates.** With the
+gate out, the tick's entry at `0x025d42ec` is reached 480 times in the same 8.00 seconds as
+480 paints — one for one, at both rates. The gate is therefore not a backstop here: presenting
+at sixty calls the simulation sixty times a second, and holding the logic at thirty is what
+the gate in the logic path is *for*. The earlier reading of this, that the logic rate held at
+30.12 while the picture reached sixty, came from a counter counting the calls the gate skipped
+and from a stand-in that faulted before the flip was at sixty; it is withdrawn above.
+
+### The gate could not answer the question it exists for, and now can
+
+Two defects in the gate, both found by reading its counters out of guest memory rather than
+trusting the report, and both of which made the gate unable to answer:
+
+- **The ticks counter counted the calls that did not run.** It was incremented on the skipped
+  path while the report calls it "ticks through it", so a gate letting every call through
+  reported 0 — which is exactly what it did, in every run, at both rates. It is now incremented
+  on the path that runs the tick, and the count of skipped calls is calls minus ticks.
+- **The pass-through control branched to itself.** Flavour 2 loaded the *block's* own address
+  into the count register and branched to it. Measured: the display painted 0 times in an
+  8-second window with the control channel still answering, which reads exactly like a title
+  that has stopped and is not one. It now loads the address the direct form branches to.
+
+And two more that only the block's own words showed, both of which hung the title in the same
+way — 0 paints in an 8-second window, every counter frozen — and neither of which any count
+would have distinguished from a title that had stopped:
+
+- **A displacement measured from the wrong word.** Growing the through path from one word to
+  six left the branch at its end no longer at its start, and the displacement was still
+  measured from the start. Read back from guest memory, the branch landed at `0x025d4304`,
+  twenty bytes past the tick's second instruction at `0x025d42f0`. Fixed by a separate
+  constant for where the branch *stands* (`kBranchWord`, 13) against where the through path
+  *starts* (`kThroughWord`, 8).
+- **`bne` was the wrong branch.** `kBranchNotEqual` held `0x40800000`, which is BO=4 **BI=0**.
+  BO=4 branches when the bit BI names is *false*, and `andi.` records a non-zero result in
+  CR0's bit 2, which is BI=2 — so `bne` is `0x40820000`, and BO=4 BI=0 is a different branch
+  over the same displacement. Four `bne` in the title's own image agree (`0x025d4398`,
+  `0x025d4678`, `0x025d46a4`, `0x0274c964`, all `0x4082....`) and none carries `0x40800000`
+  as a `bne`; the file's own comment three lines above the constant already named
+  `bne 0x0200004c` = `0x40820014` as the instruction it came from. The constant contradicted
+  the comment.
+
+**Both of the last two were invisible to the tests because the tests reused the code's own
+expression** — the displacement from the same variable, and the branch word from the same
+constant. An expectation built from the thing under test cannot catch the thing under test
+being wrong. The expectations are now built from the branch's own address and from its **BO
+and BI fields**, read back the way the guest reads them, and both mutations are checked:
+restoring `0x40800000` fails two checks and restoring `through` fails one.
+
+### A capture run was returning the previous run's images
+
+Two rounds of a byte-for-byte comparison came back with *identical* checksums and a paint
+count that had not moved, which is what a stale pair looks like and what a re-capture does
+not. A slot keeps whatever last landed in it, so polling one and taking the first non-empty
+body returns the previous run's image whenever the new one has not arrived. That is not a slow
+read, it is a different answer.
+
+`capture_run` now waits on the product's own `imagesReceived` watermark — the count of images
+it has handed over, which the answer to the arm reports — before it reads a single slot, and a
+run that does not get its images is a refusal rather than a short tuple. The watermark is read
+out of `/counters`, which is where the capture counts are; `/setup` is the first-run setup
+status with four fields in it, and reading it returns a `None` that looks like a report. Four
+tests cover it, including that a missing watermark is refused rather than read as zero.
+
+**With the images fresh, two consecutive presents are not the same picture** — and the shape of
+the difference is the useful part:
+
+    round 0: 1,443,965 of 6,220,800 bytes differ (23.21%), largest delta 23, 1,429,852 within 4
+    round 1: 1,972,143 of 6,220,800 bytes differ (31.70%), largest delta 30, 1,944,333 within 4
+
+A quarter to a third of the bytes, and almost all of them by at most 23 to 30 levels. That is a
+different frame of the same picture, not a broken one: a widespread, low-amplitude change is
+what a title's own animation and lighting do between frames, where a fault would be large
+deltas over a small region. And it is expected, because with the tick once per present the
+consecutive presents are a tick apart.
+
+**So the null case is a different question from this one, and both have to be in the report.**
+The objective asks whether **two paints of one pass, no blend, are identical**. Two
+*consecutive presents* are two different ticks' pictures, and with the logic at thirty a second
+they must differ. Mode 6 paints once per pass, so it cannot produce a same-pass pair at all;
+mode 3 can, and faults. The same-pass comparison is therefore still owed, and the shape
+analysis — the same pair against the pair a tick apart, with the paint count over the same
+window — is the read that settles it.
 
 ## The gate that comes before any blending
 
