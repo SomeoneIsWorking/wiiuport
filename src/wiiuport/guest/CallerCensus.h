@@ -25,8 +25,12 @@ class CallerCensus {
   public:
     static constexpr size_t kMaxEntries = 8;
     // The fork's registration, injected so the census is testable without it.
+    // The flag says whether the probe keeps the entry. Every registration here is
+    // a standing one -- each exists to count calls for the whole run -- so each
+    // passes true. The parameter is here so that one `GuestCallProbes::Register`
+    // address fits every seam the product hands it to.
     using Register = void (*)(uint32_t entry, uint32_t firstInstruction,
-                              GuestCallProbes::Probe& probe);
+                              GuestCallProbes::Probe& probe, bool holdsEntry);
 
     explicit CallerCensus(Register registerProbe) : m_register(registerProbe) {
     }

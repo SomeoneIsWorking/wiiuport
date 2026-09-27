@@ -89,8 +89,12 @@ class WindWakerPaint {
     static constexpr uint32_t kCounterOffset = 0x78;
 
     // The fork's seams, injected so this is testable without a guest.
+    // The flag says whether the probe keeps the entry. Every registration here is
+    // a standing one -- each exists to count calls for the whole run -- so each
+    // passes true. The parameter is here so that one `GuestCallProbes::Register`
+    // address fits every seam the product hands it to.
     using Register = void (*)(uint32_t entry, uint32_t firstInstruction,
-                              GuestCallProbes::Probe& probe);
+                              GuestCallProbes::Probe& probe, bool holdsEntry);
     using AllocateCode = uint32_t (*)(uint32_t sizeInBytes);
     // A word in the guest's own order, which is not the host's: a byte copy
     // across this boundary yields an address with its halves exchanged.
