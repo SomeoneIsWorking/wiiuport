@@ -167,6 +167,11 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
         if (m_address != nullptr) {
             m_address->publish(object, std::span<const uint32_t>(binding.entry));
             m_recordsPublished.fetch_add(1, std::memory_order_relaxed);
+            // The block's size, from the record's own size word, so the address measurement can
+            // tell a register slot the guest wrote from one it did not: the register holds
+            // `size - 1`. Read from the record rather than from `binding.blockSize`, which is
+            // filled in by `blockOf` further down and is still zero here.
+            m_address->setExpectedSize(binding.entry[UniformBlockCensus::kEntryBlockSize / 4]);
         }
         mapWords(binding.otherEntry, binding.otherMapped);
         binding.block = blockOf(binding.entry, binding.blockSize);

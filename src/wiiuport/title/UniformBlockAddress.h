@@ -48,9 +48,20 @@ class UniformBlockAddress {
     // wrong 91% of the time and said nothing.
     void publish(uint32_t object, std::span<const uint32_t> record);
 
+    // The size, in bytes, the record says the block is -- so the size word a slot must hold for the
+    // guest to have written it can be computed rather than guessed. Zero until a record says.
+    void setExpectedSize(uint32_t sizeInBytes);
+
+    // The size the records have said, or 0 when none has. A seam for a caller that has to show the
+    // route is getting what it needs, because a route fed nothing reports nothing and looks idle.
+    uint32_t expectedSize() const;
+
     // The draw's real block addresses, as `(bufferId, physicalAddress)` pairs, with the object the
     // draw is in the middle of. Called on the assembly, so the pair is the record of *that* object.
-    void observe(uint32_t object, const std::vector<uint32_t>& blockSources);
+    // `blockSizes` is word 1 of the same slots -- `size - 1` as the guest wrote it -- and is what
+    // says the guest wrote the slot at all.
+    void observe(uint32_t object, const std::vector<uint32_t>& blockSources,
+                 const std::vector<uint32_t>& blockSizes);
 
     std::string json() const;
 
@@ -62,6 +73,8 @@ class UniformBlockAddress {
         uint64_t assembliesWithARecord = 0;
         uint64_t addresses = 0;
         uint64_t wordComparisons = 0;
+        uint64_t sizeWords = 0;
+        uint64_t writtenSlots = 0;
     };
 
     Tally tally() const;
@@ -73,8 +86,11 @@ class UniformBlockAddress {
     // word is compared against the same address list, so the seven compete on one corpus and the
     // bar is a majority rather than a lead: a lead is a guess with a number on it.
     static constexpr double kWordShare = 0.5;
-    // How many distinct addresses the address histogram keeps. Bounded, and the overflow counted.
-    static constexpr size_t kMaxAddresses = 4096;
+    // How many distinct addresses the two address histograms keep. Bounded, and the overflow
+    // counted. Raised from 4,096 after a run refused 574,837 of 3,990,665: a *pool* of blocks has
+    // more distinct addresses than that, and a truncated pool is a pool with its middle missing,
+    // which is exactly where its structure would show.
+    static constexpr size_t kMaxAddresses = 65536;
     // How many objects' records are held at once, and what happens when it is full: the
     // **least-recently-bound** record is dropped, because a pair only needs the record of the
     // object whose draw is about to happen and a title's binding order is a traversal. Refusing
@@ -139,6 +155,14 @@ class UniformBlockAddress {
     uint64_t m_addressesRefused = 0;
     // Word index -> how many paired draws that word named one of the draw's addresses.
     std::array<uint64_t, kMaxWords> m_wordHits{};
+    // The slots whose size word says the guest wrote them, and what they then hold. A slot whose
+    // size word is the record's own size minus one is a block the title put there, and its word 0
+    // is the address the title meant -- the one thing word 0 alone cannot say.
+    std::map<uint32_t, uint64_t> m_writtenAddresses;
+    uint64_t m_writtenAddressesRefused = 0;
+    uint32_t m_expectedSize = 0;
+    std::atomic<uint64_t> m_sizeWords{0};
+    std::atomic<uint64_t> m_writtenSlots{0};
 
     std::atomic<uint64_t> m_bindings{0};
     std::atomic<uint64_t> m_recordsRefused{0};

@@ -7,6 +7,16 @@
 
 namespace wiiuport::title {
 
+void UniformBlockAddress::setExpectedSize(uint32_t sizeInBytes) {
+    std::scoped_lock lock(m_mutex);
+    m_expectedSize = sizeInBytes;
+}
+
+uint32_t UniformBlockAddress::expectedSize() const {
+    std::scoped_lock lock(m_mutex);
+    return m_expectedSize;
+}
+
 void UniformBlockAddress::publish(uint32_t object, std::span<const uint32_t> record) {
     m_bindings.fetch_add(1, std::memory_order_relaxed);
     if (record.size() > kMaxWords) {
@@ -81,7 +91,8 @@ void UniformBlockAddress::countKey(Candidate key) {
     m_deltasEvicted++;
 }
 
-void UniformBlockAddress::observe(uint32_t object, const std::vector<uint32_t>& blockSources) {
+void UniformBlockAddress::observe(uint32_t object, const std::vector<uint32_t>& blockSources,
+                                  const std::vector<uint32_t>& blockSizes) {
     m_assemblies.fetch_add(1, std::memory_order_relaxed);
     std::array<uint32_t, kMaxWords> record{};
     size_t words = 0;
@@ -100,6 +111,7 @@ void UniformBlockAddress::observe(uint32_t object, const std::vector<uint32_t>& 
     m_assembliesWithARecord.fetch_add(1, std::memory_order_relaxed);
     m_addressCount.fetch_add(blockSources.size() / 2, std::memory_order_relaxed);
     m_wordComparisons.fetch_add(words, std::memory_order_relaxed);
+    m_sizeWords.fetch_add(blockSizes.size(), std::memory_order_relaxed);
 
     std::scoped_lock lock(m_mutex);
     for (size_t index = 1; index < blockSources.size(); index += 2) {
@@ -126,6 +138,33 @@ void UniformBlockAddress::observe(uint32_t object, const std::vector<uint32_t>& 
             countKey({word, address - record[word]});
         }
     }
+    // The slots the guest wrote. Word 1 of a uniform block register is `size - 1` as the guest
+    // wrote it, and the record says the block is `m_expectedSize` bytes, so a slot holding
+    // `m_expectedSize - 1` is one the title put there -- and its word 0 is then the address the
+    // title meant, which word 0 alone cannot say because the guest and the shader index these
+    // registers differently.
+    if (m_expectedSize != 0) {
+        const uint32_t wanted = m_expectedSize - 1;
+        for (size_t index = 0; index < blockSizes.size() && 2 * index + 1 < blockSources.size();
+             index++) {
+            if (blockSizes[index] != wanted) {
+                continue;
+            }
+            m_writtenSlots++;
+            const uint32_t address = blockSources[2 * index + 1];
+            auto found = m_writtenAddresses.find(address);
+            if (found == m_writtenAddresses.end()) {
+                if (m_writtenAddresses.size() >= kMaxAddresses) {
+                    m_writtenAddressesRefused++;
+                    continue;
+                }
+                m_writtenAddresses.emplace(address, 1);
+            } else {
+                found->second++;
+            }
+        }
+    }
+
     // Which word, if any, *is* the address. All seven compete on the same corpus, so a word that
     // hits in a majority of the paired draws is the one carrying it and a word that hits
     // occasionally is a coincidence with a name on it.
@@ -145,6 +184,8 @@ UniformBlockAddress::Tally UniformBlockAddress::tally() const {
     out.assembliesWithARecord = m_assembliesWithARecord.load();
     out.addresses = m_addressCount.load();
     out.wordComparisons = m_wordComparisons.load();
+    out.sizeWords = m_sizeWords.load();
+    out.writtenSlots = m_writtenSlots.load();
     return out;
 }
 
@@ -195,6 +236,51 @@ std::string UniformBlockAddress::json() const {
     body.number("distinctAddresses", m_addresses.size());
     body.number("addressesRefused", m_addressesRefused);
     body.raw("wordShare", JsonBody::real(kWordShare));
+
+    // The slots the guest wrote, and what they hold. This is the route the record cannot serve:
+    // the record has no address in it, and word 0 of a register slot cannot be told from state the
+    // guest never set -- but word 1 can, because it is a size the guest chose.
+    body.number("expectedSize", m_expectedSize);
+    body.number("sizeWords", t.sizeWords);
+    body.number("writtenSlots", t.writtenSlots);
+    body.number("distinctWrittenAddresses", m_writtenAddresses.size());
+    body.number("writtenAddressesRefused", m_writtenAddressesRefused);
+    {
+        std::vector<std::pair<uint32_t, uint64_t>> written(m_writtenAddresses.begin(),
+                                                           m_writtenAddresses.end());
+        std::sort(written.begin(), written.end(), [](const auto& left, const auto& right) {
+            if (left.second != right.second) {
+                return left.second > right.second;
+            }
+            return left.first < right.first;
+        });
+        uint64_t total = 0;
+        for (const auto& [address, seen] : m_writtenAddresses) {
+            total += seen;
+        }
+        JsonBody listed;
+        size_t shown = 0;
+        for (const auto& [address, seen] : written) {
+            if (shown >= kExamples) {
+                break;
+            }
+            JsonBody one;
+            one.number("address", address);
+            one.number("seen", seen);
+            one.raw("share",
+                    JsonBody::real(
+                        total == 0 ? 0.0 : static_cast<double>(seen) / static_cast<double>(total)));
+            listed.object(std::to_string(shown), one.text());
+            shown++;
+        }
+        body.object("writtenAddressesByValue", listed.text());
+        if (written.empty()) {
+            body.raw("leadingWrittenAddress", "null");
+        } else {
+            body.number("leadingWrittenAddress", written.front().first);
+            body.number("leadingWrittenAddressSeen", written.front().second);
+        }
+    }
 
     // The words, with their hit counts, so the reader sees the contrast rather than a verdict.
     JsonBody words;

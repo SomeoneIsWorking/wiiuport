@@ -93,7 +93,7 @@ void wiiuport::tests::runUniformBlockAddressTests() {
         for (int round = 0; round < 20; round++) {
             const auto record = recordWith(0x01800000u + static_cast<uint32_t>(round) * 0x100u);
             address.publish(kOne, record);
-            address.observe(kOne, sourcedAt(record[3]));
+            address.observe(kOne, sourcedAt(record[3]), {});
         }
         check::isTrue(address.addressWord() == 3,
                       "word 3 is named as the address word, because the draw's real addresses "
@@ -121,7 +121,7 @@ void wiiuport::tests::runUniformBlockAddressTests() {
             address.publish(kOne, record);
             // Object two is bound in between, with a record naming somewhere else entirely.
             address.publish(kTwo, recordWith(0x02ff0000u));
-            address.observe(kOne, sourcedAt(record[3]));
+            address.observe(kOne, sourcedAt(record[3]), {});
         }
         check::isTrue(address.addressWord() == 3,
                       "the pair is found despite another object being bound in between, because "
@@ -139,8 +139,8 @@ void wiiuport::tests::runUniformBlockAddressTests() {
     {
         UniformBlockAddress address;
         address.publish(kOne, recordWith(0x01800000u));
-        address.observe(0x0badf00du, sourcedAt(0x01800000u));
-        address.observe(kOne, sourcedAt(0x01800000u));
+        address.observe(0x0badf00du, sourcedAt(0x01800000u), {});
+        address.observe(kOne, sourcedAt(0x01800000u), {});
         const std::string body = address.json();
         check::isTrue(field(body, "assembliesWithARecord") == "1" &&
                           field(body, "assemblies") == "2",
@@ -162,7 +162,7 @@ void wiiuport::tests::runUniformBlockAddressTests() {
             // would not do and a coincidence readily does.
             record[1] = (round % 4 == 0) ? 0x01800000u : 0x40u;
             address.publish(kOne, record);
-            address.observe(kOne, sourcedAt(0x01800000u));
+            address.observe(kOne, sourcedAt(0x01800000u), {});
         }
         check::isTrue(address.addressWord() == -1,
                       "no word is named the address word, because nothing held a majority: " +
@@ -181,7 +181,7 @@ void wiiuport::tests::runUniformBlockAddressTests() {
             auto record = recordNamingNothing();
             record[1] = (round % 2 == 0) ? 0x01800000u : 0x40u;
             address.publish(kOne, record);
-            address.observe(kOne, sourcedAt(0x01800000u));
+            address.observe(kOne, sourcedAt(0x01800000u), {});
         }
         check::isTrue(address.addressWord() == 1,
                       "a word holding exactly half the paired draws is named, because the bar is "
@@ -200,7 +200,7 @@ void wiiuport::tests::runUniformBlockAddressTests() {
             auto record = recordNamingNothing();
             record[1] = static_cast<uint32_t>(round) * 0x40u;
             address.publish(kOne, record);
-            address.observe(kOne, sourcedAt(0x01800000u + record[1]));
+            address.observe(kOne, sourcedAt(0x01800000u + record[1]), {});
         }
         const std::string body = address.json();
         check::isTrue(address.addressWord() == -1,
@@ -230,7 +230,8 @@ void wiiuport::tests::runUniformBlockAddressTests() {
         UniformBlockAddress address;
         for (int round = 0; round < 20; round++) {
             address.publish(kOne, recordNamingNothing());
-            address.observe(kOne, sourcedAt(0x30000000u + static_cast<uint32_t>(round) * 0x10u));
+            address.observe(kOne, sourcedAt(0x30000000u + static_cast<uint32_t>(round) * 0x10u),
+                            {});
         }
         const std::string body = address.json();
         check::isTrue(field(body, "base") == "null" && field(body, "baseSeenShare") != "null",
@@ -249,7 +250,7 @@ void wiiuport::tests::runUniformBlockAddressTests() {
         UniformBlockAddress address;
         for (int round = 0; round < 10; round++) {
             address.publish(kOne, recordWith(0x40u));
-            address.observe(kOne, sourcedAt(0x40u));
+            address.observe(kOne, sourcedAt(0x40u), {});
         }
         const std::string body = address.json();
         check::isTrue(
@@ -265,7 +266,7 @@ void wiiuport::tests::runUniformBlockAddressTests() {
     {
         UniformBlockAddress address;
         address.publish(kOne, recordWith(0x01801000u));
-        address.observe(kOne, sourcedAt(0x01801000u));
+        address.observe(kOne, sourcedAt(0x01801000u), {});
         const std::string body = address.json();
         check::isTrue(body.find("\"sampleRecords\":{") != std::string::npos,
                       "the sample records are in the report: " + body);
@@ -291,14 +292,14 @@ void wiiuport::tests::runUniformBlockAddressTests() {
             auto record = recordNamingNothing();
             record[1] = 0x40u;
             address.publish(kOne, record);
-            address.observe(kOne, sourcedAt(0x50000000u + static_cast<uint32_t>(round) * 4u));
+            address.observe(kOne, sourcedAt(0x50000000u + static_cast<uint32_t>(round) * 4u), {});
         }
         // Ten draws that source the base, into a sketch that is already full of noise.
         for (int round = 0; round < 10; round++) {
             auto record = recordNamingNothing();
             record[1] = static_cast<uint32_t>(round + 1) * 0x40u;
             address.publish(kOne, record);
-            address.observe(kOne, sourcedAt(kBase + record[1]));
+            address.observe(kOne, sourcedAt(kBase + record[1]), {});
         }
         const std::string body = address.json();
         check::isTrue(field(body, "candidatesEvicted") != "0",
@@ -329,11 +330,12 @@ void wiiuport::tests::runUniformBlockAddressTests() {
             if (round % 5 < 2) {
                 record[1] = static_cast<uint32_t>(round) * 0x40u;
                 address.publish(kOne, record);
-                address.observe(kOne, sourcedAt(kBase + record[1]));
+                address.observe(kOne, sourcedAt(kBase + record[1]), {});
             } else {
                 record[1] = 0x40u;
                 address.publish(kOne, record);
-                address.observe(kOne, sourcedAt(0x50000000u + static_cast<uint32_t>(round) * 4u));
+                address.observe(kOne, sourcedAt(0x50000000u + static_cast<uint32_t>(round) * 4u),
+                                {});
             }
         }
         const std::string body = address.json();
@@ -358,7 +360,7 @@ void wiiuport::tests::runUniformBlockAddressTests() {
             address.publish(0x1000u + static_cast<uint32_t>(index), record);
         }
         // The object bound first is long gone; the one bound last is still here, and pairs.
-        address.observe(0x1000u, sourcedAt(0x01800000u));
+        address.observe(0x1000u, sourcedAt(0x01800000u), {});
         const std::string body = address.json();
         check::isTrue(field(body, "recordsEvicted") == "8" && field(body, "recordsRefused") == "0",
                       "the eight oldest records were dropped and none refused, so a full map costs "
@@ -369,15 +371,77 @@ void wiiuport::tests::runUniformBlockAddressTests() {
                       "honest consequence of having dropped its record");
         // The object bound last is still held, so its draw pairs -- which is the point of dropping
         // the oldest rather than refusing the newest.
-        address.observe(
-            0x1000u + static_cast<uint32_t>(UniformBlockAddress::kMaxObjects + 7),
-            sourcedAt(0x01800000u +
-                      static_cast<uint32_t>(UniformBlockAddress::kMaxObjects + 7) * 4u));
+        address.observe(0x1000u + static_cast<uint32_t>(UniformBlockAddress::kMaxObjects + 7),
+                        sourcedAt(0x01800000u +
+                                  static_cast<uint32_t>(UniformBlockAddress::kMaxObjects + 7) * 4u),
+                        {});
         const std::string after = address.json();
         check::isTrue(field(after, "assembliesWithARecord") == "1" &&
                           field(after, "recordsHeld") == "4096",
                       "the draw of the object bound last pairs, while the map stays bounded at its "
                       "stated size -- a map that grows with the objects is a map of the scene");
+    }
+
+    // **A register slot the guest wrote is told from one it did not, by its size word.** Word 0 of
+    // a uniform block register is whatever last held the slot -- the guest and the shader index
+    // those registers differently -- so word 0 alone cannot say the title put a block there. Word 1
+    // is `size - 1` as the guest wrote it, and the record says the block is 64 bytes, so a slot
+    // holding 0x3f is one the title filled. Two slots: one the guest wrote, one it did not.
+    {
+        UniformBlockAddress address;
+        address.setExpectedSize(0x40);
+        address.publish(kOne, recordWith(0x40u));
+        for (int round = 0; round < 10; round++) {
+            // Slot 0: 0x01800000 with size word 0x3f -- the guest wrote this one. Slot 1:
+            // 0x7ffff000 with size word 0 -- left over, never written by the title.
+            address.observe(kOne, {0, 0x01800000u, 1, 0x7ffff000u}, {0x3f, 0});
+        }
+        const std::string body = address.json();
+        check::isTrue(field(body, "expectedSize") == "64" && field(body, "sizeWords") == "20",
+                      "the expected size and the number of size words read are both reported, so "
+                      "the filter has a denominator: " +
+                          body);
+        check::isTrue(field(body, "writtenSlots") == "10" &&
+                          field(body, "distinctWrittenAddresses") == "1",
+                      "only the slot whose size word is 0x3f counts, so the one the guest never "
+                      "wrote is not mistaken for a block it did");
+        check::isTrue(field(body, "leadingWrittenAddress") == "25165824" &&
+                          field(body, "leadingWrittenAddressSeen") == "10",
+                      "and the address it then holds is the one the title meant -- which is the "
+                      "thing word 0 alone could not say");
+    }
+
+    // **A slot whose size word is not the record's size is not the title's block**, and the
+    // negative half matters as much as the positive: without it, a filter that matched everything
+    // would pass the case above.
+    {
+        UniformBlockAddress address;
+        address.setExpectedSize(0x40);
+        address.publish(kOne, recordWith(0x40u));
+        for (int round = 0; round < 10; round++) {
+            address.observe(kOne, {0, 0x01800000u}, {0x40});
+        }
+        const std::string body = address.json();
+        check::isTrue(field(body, "writtenSlots") == "0" &&
+                          field(body, "leadingWrittenAddress") == "null",
+                      "a size word of 0x40 is not `size - 1` for a 64-byte block, so nothing is "
+                      "claimed -- the register holds 63, not 64: " +
+                          body);
+    }
+
+    // **No expected size means no slots claimed.** A filter with nothing to filter against is not a
+    // filter, and guessing 0x3f would be the assumption this route exists to avoid.
+    {
+        UniformBlockAddress address;
+        address.publish(kOne, recordWith(0x40u));
+        for (int round = 0; round < 10; round++) {
+            address.observe(kOne, {0, 0x01800000u}, {0x3f});
+        }
+        const std::string body = address.json();
+        check::isTrue(field(body, "writtenSlots") == "0" && field(body, "expectedSize") == "0",
+                      "with no size from the record, no slot is claimed however inviting its size "
+                      "word looks: " +
+                          body);
     }
 
     // A record longer than the words compared is refused rather than truncated into an answer that
@@ -386,7 +450,7 @@ void wiiuport::tests::runUniformBlockAddressTests() {
         UniformBlockAddress address;
         const std::vector<uint32_t> tooLong(UniformBlockAddress::kSampleRecords + 40u, 0x40u);
         address.publish(kOne, tooLong);
-        address.observe(kOne, sourcedAt(0x40u));
+        address.observe(kOne, sourcedAt(0x40u), {});
         const std::string body = address.json();
         check::isTrue(field(body, "recordsRefused") == "1" &&
                           field(body, "assembliesWithARecord") == "0",

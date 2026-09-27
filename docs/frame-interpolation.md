@@ -1464,21 +1464,45 @@ been among what was thrown away. The sketch displaces the *least frequent* entry
 evictions are counted — its counts are upper bounds, which the report says and the tests assert as
 bounds rather than as equalities.
 
-**What this leaves, stated rather than assumed.** The uniform block's address is **not in the
-descriptor record** — that is now measured over 142,682 exact pairs with the records quoted raw,
-not inferred. It is not reachable by a base, by reading a record word as an address, or by
-matching a record word against the address the draw sourced. The block is somewhere the draw can
-read it from; the record does not say where, and the fork's reported address is a register slot
-this binder never wrote.
+### The size word tells the guest's writes from register leftovers, and the pool is 0x100-strided
 
-**The next read is bounded and it does not need a new guess.** The title's own write is visible in
-the register the binder fills: word 0 `0x40` and word 1 `0x3f` at
-`mmSQ_VTX_UNIFORM_BLOCK_START + index * 7`. Reading the whole uniform-block register bank and
-keeping the slots whose **size word is `0x3f`** — the ones a 64-byte block was written into —
-names the banks the title actually filled, and their word 0 is the address the title meant. The
-size word is the discriminator because it is a small constant the title wrote, where word 0 is
-whatever the register held before. That needs one seam: the register bank beside `UniformAssembly`,
-which today carries the address the *shader* names and not the one the *binder* wrote.
+Word 0 of a uniform block register is whatever last held the slot — the guest indexes these
+registers by the index it passes to `GX2Set*UniformBlock` and the shader names them by its own
+group, so the two do not agree. **Word 1 is `size - 1` as the guest wrote it**, and a size the
+guest chose is a small constant that register state does not invent. The fork now hands both
+words over (`LatteFrameHooks::UniformAssembly::blockSizes`), and a slot whose word 1 equals the
+record's size minus one is a block the title put there.
+
+Measured on the real title, with the record's size word as the filter and never a guessed one:
+
+```
+expected size 64 bytes, 3,990,665 size words read,
+1,000,430 slots holding size-1, from 4,096 distinct addresses (574,837 refused)
+  0x4581c200: seen 17,806, share 0.0225
+  0x4581c300: seen 17,045, share 0.0215
+  0x45436700: seen 14,939, share 0.0189
+  0x45436300: seen 10,930, share 0.0138
+  0x45978b00: seen 10,496, share 0.0133
+  0x3e634300: seen  4,145, share 0.0052
+```
+
+**The pool is real and it is 0x100-strided**: `0x4581c200` → `0x4581c300` is 0x100,
+`0x45436300` → `0x45436700` is 0x400, and so on. And `0x3e634300` is in the list — the very
+value an earlier comment in this file dismissed as "a pointer, not a length". It was a block
+address all along; what it was not was *reachable by the route being tried then*.
+
+The histograms were truncated at 4,096 distinct values with 574,837 refused, which is a pool with
+its middle missing — so the bound is 65,536 now, and the refusals stay in the report.
+
+**And the join is nameable, from the binder's own arguments.** The decompilation says the block
+*index* is not in the record either — it comes from `param_2`, read as
+`*(short *)(iVar3 + 0xc)` where `iVar3 = *(int *)(param_2 + 0x10) + 0x28` — and **`param_2` is
+`r4` at the probe**. So the title names its block by a *register index*, from a structure the
+census is not currently reading, while the block's bytes live in the register slot that index
+addresses. That is the exact join, and it is the title's own: r3 gives the object, r4 gives the
+structure holding the vertex/pixel/geometry uniform block indices, and
+`contextRegister[mmSQ_VTX_UNIFORM_BLOCK_START + index * 7]` gives the address for the one the
+binder passed. No base, no offset, and no host-side matching.
 
 
 It runs on the display thread inside the title's own draw. For each tracked object it reads the pose

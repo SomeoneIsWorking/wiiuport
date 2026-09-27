@@ -18,6 +18,8 @@ namespace wiiuport::frame {
 // the interface's own limit: a count the interface says cannot happen must not
 // be read past the caller's buffer.
 std::span<const uint32_t> sourceWordsOf(const LatteFrameHooks::UniformAssembly& assembly);
+// Word 1 of the same slots: `size - 1` per pair, or empty when the assembly carried none.
+std::span<const uint32_t> sourceSizeWordsOf(const LatteFrameHooks::UniformAssembly& assembly);
 
 // Notified once a frame is complete and published, which is the only moment
 // anything may act on a whole frame. That is when the guest has finished
