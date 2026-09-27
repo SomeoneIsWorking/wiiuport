@@ -540,8 +540,73 @@ code does not say: whether the title writes the pose **before** the binder runs 
   found by asking who fills the descriptor. The title's own document names that as the open
   read, and this decides whether it is still open.
 
-`title::ObjectPoseHistory` measures it, from the binder probe that is already installed, on
-the display thread inside the title's own draw. For each tracked object it reads the pose
+**And measured, the answer is the second one, and more firmly than the offset was wrong.**
+`title::ObjectPoseHistory` reads the block the binder names, on the display thread inside the
+title's own draw, and over **236,694 bindings it found no rigid transform at `+0xc4` in any of
+them** — 0 pose-shaped, 236,694 not. So the whole block was then checked: **233 whole-block
+scans of 4 distinct blocks, every 4-aligned offset, and zero rigid transforms anywhere in any
+of them.** No offset, no transform, at the moment the block is bound.
+
+That is not a wrong offset. It says the block the binder names **holds its pose after the
+frame's draw has filled it and not when it is bound** — which is the "written after" answer,
+and it means the binder is the wrong place for a blend to read the pose from. The title's own
+document found the twelve floats at `+0xc4` by dumping a block at a moment when the title was
+held at a frame's end, which is after the fill; the memory is real and the moment was not the
+one a blend runs at. **The claim that `+0xc4` is where the pose is, as a statement about the
+block at bind time, is withdrawn.** The block's address is still located and still 0x100
+between a ring's two slots; what is withdrawn is that the transform is in it then.
+
+So the next read is the one this document's own earlier section named and that the measurement
+has now made unavoidable: **who fills the block.** The binder reads the descriptor; something
+writes the block, and that something is where both ends of the lerp have to be read from.
+
+### The filler is not on the binder's own object, and that is measurable
+
+The binder is a *method on a sub-object* — the object it is handed **is** the sub-object, and
+the descriptor's entries are at `object + 0x10`. So the sub-object's other methods are the
+candidates that fill what the binder binds, and the method table is **in the image**:
+
+    0x1016ef90: 0x027ff96c   84 addresses
+    0x1016ef98: 0x027fba24  112 addresses
+    0x1016efa0: 0x027fba94   56 addresses
+    0x1016efa8: 0x027fbacc  140 addresses
+    0x1016efb0: 0x027ff88c  224 addresses   the binder
+    0x1016efb8: end of the table
+
+Five methods, eight bytes an entry, and the binder is the fifth. **The binder is the only one
+of the five that walks the descriptor**: four of them have no line mentioning the cursor at
+`+0x4c` or the `0x1c` entry stride, and the binder's has exactly one:
+
+```
+iVar2 = param_1 + 0x10 + *(int *)(param_1 + 0x4c) * 0x1c;
+```
+
+This also settles an earlier note in this document, that the sub-object's methods "are
+dispatched through a vtable that has no references to follow". There are no *references* to
+follow because the table is reached through a pointer the sub-object carries; the *pointers*
+are in the image, and the one that names the binder is at `0x1016efb0`. Following the call
+graph was never the way in.
+
+So the filler is not among the binder's siblings, and the ring's two entries exist for the
+**bind** — so the GPU is not reading a block that is being written — rather than to carry the
+previous tick. That is consistent with everything measured: the cursor turns, the block is
+256 bytes, the two slots are `0x100` apart, and at bind time the block holds no transform
+anywhere.
+
+**What this leaves, stated rather than assumed.** The block the descriptor's `+0x04` names is
+a 256-byte block in a pool of fixed-size blocks, and it holds no rigid transform at any offset
+at the moment it is bound. The title's own document found a twelve-float 3x4 at `+0xc4` by
+dumping a block while the title was **held at a frame's end** — after the draw, so at a
+different moment from the bind, and the moment is the whole of the difference. So either the
+filler writes this block later in the frame than the bind that names it, or this is a
+different block from the one the dump was of. **The next read separates those two**, and it is
+bounded: hold the title at a frame's end with `POST /gate?pause=1`, then read every candidate
+block — the `+0x04` word of each object's descriptor, a pool already known and already
+0x100-strided — and test each for a rigid 3x4 at every 4-aligned offset. A hit names the
+block and the offset; no hit over the whole pool says the pose is not in that pool at all,
+which is a different answer and a shorter search for the next one.
+
+It runs on the display thread inside the title's own draw. For each tracked object it reads the pose
 at both blocks the descriptor names, keeps the last three readings with the address each
 came from, and counts: bindings seen, comparisons against a previous reading of the *same*
 block, how many of those found a changed float, the largest single-float change, and
