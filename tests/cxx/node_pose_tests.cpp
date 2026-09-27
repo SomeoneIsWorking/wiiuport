@@ -616,7 +616,7 @@ void wiiuport::tests::runNodePoseLocatorTests() {
                       "a near-degenerate triple is not a transform, so the loose bar finds "
                       "nothing where a floorless one would find something at every offset: " +
                           affine);
-        check::isTrue(NodePoseLocator::kDeterminantFloor > 0.0,
+        check::isTrue(NodePoseLocator::Shape::kDeterminantFloor > 0.0,
                       "and the floor is a positive number in the report, so a reader can see "
                       "what the loose bar is willing to call a matrix");
     }
