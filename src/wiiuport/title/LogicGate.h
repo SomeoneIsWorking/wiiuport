@@ -96,7 +96,19 @@ class LogicGate {
     void install();
 
     // Puts the gate in. Empty on success, otherwise the refusal by cause.
-    std::string enable();
+    // `through` installs a payload that only branches back to the tick and keeps
+    // no state at all: the control for whether a direct branch out of recompiled
+    // code into the loader's arena runs. Everything else about the install is
+    // identical, and the observer is the caller census, which keeps counting the
+    // tick either way -- so a tick rate that holds says the branch executed and a
+    // tick rate that stops says it did not, with no counter of the gate's own
+    // involved and so nothing resting on the gate's payload.
+    std::string enable(bool through = false, int throughFlavour = 2);
+
+    // The pass-through control: a payload of one word (direct branch) or four
+    // (through the count register) that does nothing but let the tick run. Which
+    // one is the experiment, and the census is the observer.
+    static std::vector<uint32_t> throughPayload(uint32_t blockAddress, int flavour);
 
     // Puts the tick's own entry back.
     std::string disable();
@@ -126,6 +138,7 @@ class LogicGate {
     std::atomic<uint32_t> m_block{0};
     std::atomic<uint32_t> m_counters{0};
     uint32_t m_original = 0;
+    int m_throughFlavour = 2;
     bool m_enabled = false;
     mutable std::mutex m_mutex;
     std::string m_refusal;

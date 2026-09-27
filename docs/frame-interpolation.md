@@ -267,16 +267,42 @@ executes it. Three things were wrong with it in turn, and each is fixed:
    system area, zeroed, and deliberately not registered with the recompiler. The
    gate's instructions stay in code and its counters go to data.
 
-**What is left, stated as the open question it is.** The gate still reports zero
-calls and zero ticks after all three, and its payload reads back from guest memory
-word for word as the code builds it. The one difference left between the gate and
-the paint mod, which shares that arena and demonstrably runs, is *how they are
-reached*: the paint mod's stand-in is reached through a vtable, an indirect call
-the CPU resolves at the call, and the gate through a relative branch out of
-recompiled code about 30 MiB backwards. So the next experiment is not about this
-title at all -- it is to reach the paint mod's own stand-in by a direct branch and
-see whether the picture still reaches sixty. That has a known-good control in the
-same mechanism and answers the question in one run.
+**What is left, and the control that found it.** The gate still reported zero calls
+and zero ticks, so the next thing was a control that could not be argued with: the
+gate's own install, with a payload of **one word** that does nothing but branch
+back to the instruction after the branch site. No state, no counters, nothing to
+get right, and the observer is the caller census, which counts the tick whether or
+not that word runs. Paint rate unchanged at 30.00/s. Tick count **180 in the
+control window, 0 with the control installed.**
+
+So the word did not run. And the finding that falls out of it is bigger than this
+title:
+
+- **A branch written into the title's own code, at an *interior* address of a
+  function, does not reach the loader's arena.** Not with `b`, and not with
+  `mtctr`/`bctr`, and not after forcing the recompiler to translate the range.
+- **A branch at a function's *entry* does.** The caller census's stub is in that
+  same arena, reached by exactly that: a word written at `0x025d42ec`, the tick's
+  entry. It has counted every call in every run -- 2020 for 2020 paints.
+- **So is an indirect call through a vtable**, which is how the paint mod's
+  stand-in is reached, and which is the only way anything has reached that arena.
+
+Three ways in, one that works. The distinction is not the kind of branch: it is
+that the two that work are the two the *probe and call* machinery resolve, and the
+one that does not is a branch the recompiler has to turn into a jump to a host
+address for an address it never translated.
+
+**What that means for this mechanism, stated as the shape of the fix rather than as
+a guess.** The gate cannot be reached by patching the title's code, so it has to be
+reached the way the census is: as the resume of a probe. A probe on the tick's
+entry already branches into the arena and comes back; what it lacks is any way to
+send execution somewhere *else* first. So the capability the fork is missing is a
+probe whose resume address is the probe's to choose -- `GuestCallProbes` writes the
+stub's final branch as `entry + 4` and nothing can move it. A gate is then one word
+at an address the probe machinery already reaches, and the same capability serves
+any title whose logic needs pacing.
+
+That is the next piece of work, and it is in the fork rather than in this title.
 
 **What the title's own code says about it.** `FUN_025f172c` is the per-frame
 entry, and it calls the tick unconditionally:

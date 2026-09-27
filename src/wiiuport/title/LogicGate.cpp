@@ -31,6 +31,8 @@ constexpr uint32_t kStoreWord = 0x90000000;      // stw rS, disp(rA)
 constexpr uint32_t kAndImmediate = 0x70000000;   // andi. rS, rA, K
 constexpr uint32_t kBranchNotEqual = 0x40800000; // bne, relative
 constexpr uint32_t kReturn = 0x4e800020;         // blr
+constexpr uint32_t kMoveToCounter = 0x7c0903a6;  // mtctr rS
+constexpr uint32_t kBranchCount = 0x4e800420;    // bctr
 constexpr uint32_t kPrimaryBranch = 18;
 constexpr int64_t kRelativeBranchReach = 0x02000000;
 
@@ -226,8 +228,28 @@ std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t counter
     };
 }
 
-std::string LogicGate::enable() {
+std::vector<uint32_t> LogicGate::throughPayload(uint32_t blockAddress, int flavour) {
+    // One word that branches back to the instruction after the branch site: no
+    // state, nothing to keep right, and the tick either runs or does not. The
+    // census says which, and it counts the tick whether or not this payload runs.
+    if (flavour == 1) {
+        return {branchTo(blockAddress, kTickBody + 4, false)};
+    }
+    // Through the count register, which is the way the recompiler resolves a
+    // target it has a jump-table entry for -- the way a stand-in reached through a
+    // vtable runs. `mtctr` does not touch the link register, so the tick's return
+    // still reaches the title's caller.
+    return {
+        kLoadUpper | (12 << 21) | ((blockAddress >> 16) & 0xffff),        // lis  r12,hi
+        kOrImmediate | (12 << 21) | (12 << 16) | (blockAddress & 0xffff), // ori  r12,r12,lo
+        kMoveToCounter | (12 << 21),                                      // mtctr r12
+        kBranchCount,                                                     // bctr
+    };
+}
+
+std::string LogicGate::enable(bool through, int throughFlavour) {
     std::scoped_lock lock(m_mutex);
+    m_throughFlavour = throughFlavour;
     if (m_enabled) {
         return {};
     }
@@ -253,9 +275,15 @@ std::string LogicGate::enable() {
         return m_refusal;
     }
     m_original = first;
-    const std::vector<uint32_t> words = payload(m_block, m_counters);
-    if (words.size() != kGateWords) {
-        m_refusal = "the gate at " + hex(m_block) + " cannot reach the tick's body or its skip";
+    // `through` is the control, and which way it branches *is* the experiment:
+    // 1 is a direct branch and 2 an indirect one through the count register, which
+    // is the mechanism the recompiler's jump table serves. Everything else about
+    // the install is identical, and the observer is the caller census.
+    const std::vector<uint32_t> control =
+        through ? throughPayload(m_block, m_throughFlavour) : std::vector<uint32_t>{};
+    const std::vector<uint32_t> words = through ? control : payload(m_block, m_counters);
+    if (through ? (m_throughFlavour < 1 || words.empty()) : (words.size() != kGateWords)) {
+        m_refusal = "the gate at " + hex(m_block) + " cannot reach the tick's body";
         return m_refusal;
     }
     for (size_t word = 0; word < words.size(); word++) {
@@ -277,8 +305,12 @@ std::string LogicGate::enable() {
     }
     m_enabled = true;
     m_refusal.clear();
-    lucent::info("gate", "logic gate at {}: the tick at {} now runs every other call", hex(m_block),
-                 hex(kTick));
+    lucent::info("gate", "logic gate at {}: the tick at {} now runs every other call{}",
+                 hex(m_block), hex(kTick),
+                 through ? (m_throughFlavour == 1
+                                ? ", as a bare pass-through reached by a direct branch"
+                                : ", as a bare pass-through reached through the count register")
+                         : "");
     return {};
 }
 
