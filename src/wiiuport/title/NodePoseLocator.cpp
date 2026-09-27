@@ -130,6 +130,34 @@ uint32_t NodePoseLocator::windowWords(Kind kind) {
     return kind == Kind::Node ? kNodeScanWords : kScanWords;
 }
 
+bool NodePoseLocator::isAffine(const float* words) {
+    // Non-singular, and not a plane dressed up as one: a determinant of a millionth is a
+    // degenerate triple that would otherwise read as a transform.
+    const double a = words[0];
+    const double b = words[1];
+    const double c = words[2];
+    const double d = words[3];
+    const double e = words[4];
+    const double f = words[5];
+    const double g = words[6];
+    const double h = words[7];
+    const double i = words[8];
+    const double determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    return std::fabs(determinant) > kDeterminantFloor;
+}
+
+float NodePoseLocator::scaleOf(const float* words) {
+    float worst = 0.0f;
+    for (size_t row = 0; row < 3; row++) {
+        const float x = words[row * 3 + 0];
+        const float y = words[row * 3 + 1];
+        const float z = words[row * 3 + 2];
+        const float length = std::sqrt(x * x + y * y + z * z);
+        worst = std::max(worst, std::fabs(length - 1.0f));
+    }
+    return worst;
+}
+
 void NodePoseLocator::scan(uint32_t address, Kind kind) {
     if (address == 0) {
         return;
@@ -150,11 +178,11 @@ void NodePoseLocator::scan(uint32_t address, Kind kind) {
         return;
     }
 
-    // Every 4-aligned offset, tested. A float array, so the scan walks in floats and the
-    // report names bytes.
+    // Every 4-aligned offset, classified into the two classes. A float array, so the scan
+    // walks in floats and the report names bytes.
     std::vector<std::pair<uint32_t, size_t>> found;
     for (size_t offset = 0; offset + kPoseWords <= words.size(); offset++) {
-        if (isPose(words.data() + offset)) {
+        if (isAffine(words.data() + offset)) {
             found.emplace_back(static_cast<uint32_t>(offset * sizeof(float)), offset);
         }
     }
@@ -192,6 +220,14 @@ void NodePoseLocator::scan(uint32_t address, Kind kind) {
         }
         known->held = true;
         known->scans++;
+        known->affineScans++;
+        if (isPose(words.data() + at)) {
+            known->rigidScans++;
+        } else {
+            // The row lengths, reported, because "affine" and "rigid" differ only by scale
+            // and a reader deciding where to look next needs to know whether it is there.
+            known->biggestScale = std::max(known->biggestScale, scaleOf(words.data() + at));
+        }
         for (size_t word = 0; word < kPoseWords; word++) {
             known->last[word] = words[at + word];
         }
@@ -221,19 +257,65 @@ uint32_t NodePoseLocator::bestOffset(Kind kind) const {
     return bestOffsetLocked(kind);
 }
 
-uint32_t NodePoseLocator::bestOffsetLocked(Kind kind) const {
+uint32_t NodePoseLocator::bestAffineOffsetLocked(Kind kind) const {
     const uint32_t needed = neededLocked(kind);
     if (needed == 0) {
         return 0;
     }
-    // Offset -> how many distinct objects of this kind held a transform there.
     std::map<uint32_t, uint32_t> across;
     for (const Tracked& one : m_tracked) {
         if (one.kind != kind) {
             continue;
         }
         for (const Candidate& candidate : one.candidates) {
-            if (candidate.scans > 0) {
+            if (candidate.affineScans > 0) {
+                across[candidate.offset]++;
+            }
+        }
+    }
+    std::map<uint32_t, uint32_t> moving;
+    for (const Tracked& one : m_tracked) {
+        if (one.kind != kind) {
+            continue;
+        }
+        for (const Candidate& candidate : one.candidates) {
+            if (candidate.moved > 0) {
+                moving[candidate.offset]++;
+            }
+        }
+    }
+    uint32_t best = 0;
+    uint32_t bestObjects = 0;
+    for (const auto& [offset, count] : across) {
+        if (count < needed || moving[offset] == 0) {
+            continue;
+        }
+        if (count > bestObjects) {
+            bestObjects = count;
+            best = offset;
+        }
+    }
+    return best;
+}
+
+uint32_t NodePoseLocator::bestAffineOffset(Kind kind) const {
+    std::scoped_lock lock(m_mutex);
+    return bestAffineOffsetLocked(kind);
+}
+
+uint32_t NodePoseLocator::bestOffsetLocked(Kind kind) const {
+    const uint32_t needed = neededLocked(kind);
+    if (needed == 0) {
+        return 0;
+    }
+    // Offset -> how many distinct objects of this kind held a *rigid* transform there.
+    std::map<uint32_t, uint32_t> across;
+    for (const Tracked& one : m_tracked) {
+        if (one.kind != kind) {
+            continue;
+        }
+        for (const Candidate& candidate : one.candidates) {
+            if (candidate.rigidScans > 0) {
                 across[candidate.offset]++;
             }
         }
@@ -270,32 +352,24 @@ uint32_t NodePoseLocator::bestOffsetLocked(Kind kind) const {
     return best;
 }
 
-std::string NodePoseLocator::reportFor(Kind kind) const {
-    const uint32_t tracked = trackedOfKindLocked(kind);
+std::string NodePoseLocator::tableFor(Kind kind, bool affine) const {
     const uint32_t needed = neededLocked(kind);
-    JsonBody body;
-    body.string("what", nameOf(kind));
-    body.number("objectsTracked", tracked);
-    body.number("objectsRefused", m_refusedOfKind[static_cast<size_t>(kind)]);
-    body.number("scanWords", windowWords(kind));
-    body.number("scanBytes", windowWords(kind) * 4);
-    body.number("objectsNeeded", needed);
-    const uint32_t best = bestOffsetLocked(kind);
-    body.raw("bestOffset", best == 0 ? "null" : std::to_string(best));
-
-    // The cross-object count, which is the locator's whole answer: an offset in every object
-    // is a field, an offset in one is a coincidence.
+    JsonBody table;
     std::map<uint32_t, uint32_t> across;
     for (const Tracked& one : m_tracked) {
         if (one.kind != kind) {
             continue;
         }
         for (const Candidate& candidate : one.candidates) {
-            if (candidate.scans > 0) {
+            const uint32_t inClass = affine ? candidate.affineScans : candidate.rigidScans;
+            if (inClass > 0) {
                 across[candidate.offset]++;
             }
         }
     }
+    // The candidates under their own key, so the table's own numbers -- the denominator and
+    // the believed offset -- are not mixed in with the entries. They were, once, and a
+    // reader could not tell an offset named "0" from a count of zero.
     JsonBody offsets;
     size_t shown = 0;
     for (const auto& [offset, count] : across) {
@@ -306,7 +380,9 @@ std::string NodePoseLocator::reportFor(Kind kind) const {
         uint32_t compared = 0;
         uint32_t moved = 0;
         uint32_t still = 0;
+        uint32_t inClass = 0;
         float biggest = 0.0f;
+        float scale = 0.0f;
         for (const Tracked& one : m_tracked) {
             if (one.kind != kind) {
                 continue;
@@ -319,22 +395,51 @@ std::string NodePoseLocator::reportFor(Kind kind) const {
                 compared += candidate.compared;
                 moved += candidate.moved;
                 still += candidate.still;
+                inClass += affine ? candidate.affineScans : candidate.rigidScans;
                 biggest = std::max(biggest, candidate.biggestDelta);
+                // Already a deviation from unit length; subtracting again is how a scale of
+                // 2.5 came out reported as 0.5.
+                scale = std::max(scale, candidate.biggestScale);
             }
         }
         JsonBody one;
         one.number("offset", offset);
         one.number("objects", count);
+        one.number("inClass", inClass);
         one.number("scans", scans);
         one.number("compared", compared);
         one.number("moved", moved);
         one.number("still", still);
         one.raw("biggestDelta", number(biggest));
         one.raw("moving", moved > 0 ? "true" : "false");
+        // How far the rows are from unit length. Zero is a rigid transform, and a non-zero
+        // one is the answer to "does this field carry scale", which the strict bar cannot
+        // give because it will not count the field at all.
+        one.raw("scale", number(scale));
         offsets.object(std::to_string(shown), one.text());
         shown++;
     }
-    body.object("offsets", offsets.text());
+    table.object("offsets", offsets.text());
+    table.number("objectsNeeded", needed);
+    const uint32_t best = affine ? bestAffineOffsetLocked(kind) : bestOffsetLocked(kind);
+    table.raw("bestOffset", best == 0 ? "null" : std::to_string(best));
+    return table.finish();
+}
+
+std::string NodePoseLocator::reportFor(Kind kind) const {
+    const uint32_t tracked = trackedOfKindLocked(kind);
+    JsonBody body;
+    body.string("what", nameOf(kind));
+    body.number("objectsTracked", tracked);
+    body.number("objectsRefused", m_refusedOfKind[static_cast<size_t>(kind)]);
+    body.number("scanWords", windowWords(kind));
+    body.number("scanBytes", windowWords(kind) * 4);
+    // Two bars over two classes, and which one fired is the answer to where to look next:
+    // `rigid` alone means the field is a pose and the parent chain is not needed; `affine`
+    // alone means the field is here and carries scale; neither means the node's own leading
+    // fields hold no transform and the world matrix has to come from the parent.
+    body.object("rigid", tableFor(kind, false));
+    body.object("affine", tableFor(kind, true));
     return body.finish();
 }
 
@@ -368,6 +473,7 @@ std::string NodePoseLocator::json() const {
     body.number("subObjectOffset", kSubObjectOffset);
     body.number("calls", m_calls.load());
     body.raw("motionEpsilon", number(kMotionEpsilon));
+    body.raw("determinantFloor", number(kDeterminantFloor));
     body.number("subObjectScanWords", kScanWords);
     body.number("nodeScanWords", kNodeScanWords);
     body.number("nodeScanBytes", kNodeScanWords * 4);

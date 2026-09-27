@@ -815,6 +815,44 @@ the report carried `0x00000001` unquoted, which is not JSON, and the whole body 
 failed to parse in the one client that reads it. The test that caught it was asserting on the
 field, which is the only reason anything looked at the encoding.
 
+### With the schedule per frame, the node's transforms are static -- and that is now a fact
+
+Rerun with the schedule fixed: `schedule perFrame at frame counter 0x00000631`, four samples
+per object, each a frame apart, 8 objects of each kind, 124,360 refused.
+
+    node:       offset 320  in 5 of 8, 20 scans, 15 comparisons, 0 moved, 15 still, delta 0
+                offset 1340 in 6 of 8, 24 scans, 18 comparisons, 0 moved, 18 still, delta 0
+                offset 2360 in 6 of 8, 24 scans, 18 comparisons, 0 moved, 18 still, delta 0
+    subObject:  offset 792  in 6 of 8, 24 scans, 18 comparisons, 0 moved, 18 still, delta 0
+
+**Not one of them moves, and the samples are a frame apart.** Those are bind poses, rest
+poses, basis or normal tables: rigid, at the same offset in most objects, and the same value
+for ever. That is a different thing from a pose, and the report now says so in words rather
+than leaving `0 moved` to be read as a failure to look.
+
+### The loose class, which is the one that chooses between two answers
+
+A rigid test cannot tell "this node has no transform here" from "this node's transform
+carries scale", and those point at different places. If the field is here and scaled, the
+parent chain is needed only to *compose* with it. If the field is absent, the transform a
+renderer multiplies -- the world matrix, the product of the node's place in the graph with
+its parents' -- has to be read off the parent. A rigid-only bar reports nothing for both, so
+"nothing found" would not have chosen.
+
+So a second class counts any **non-singular** 3x3, with a floor: `kDeterminantFloor = 1e-6`,
+because without one a plane of near-zero numbers has a determinant near zero and reads as a
+matrix, and the loose bar finds one at every offset -- a bar that cannot fail. The row
+lengths are reported as a deviation from unit, so a transform with rows 2.5 long is visible
+as `scale 1.5` rather than being silently excluded.
+
+The report carries both tables per kind, `rigid` and `affine`, and which of them fired *is*
+the answer to where to look next. One defect caught on the way: the scale was a deviation
+already and the report subtracted one from it again, so a scale of 2.5 came out as 0.5.
+
+A property worth knowing before reading the tables: consecutive offsets overlap. A 12-word
+transform at byte 80 is also the tail of a window at 84 and 92, so a real field shows up as a
+cluster of nearby offsets, and the bar takes the one held by the most objects.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It

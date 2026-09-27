@@ -61,12 +61,15 @@ NodePoseLocator makeLocator() {
     return NodePoseLocator(&keepRegistration, &readWords);
 }
 
-// An object whose memory holds a rigid transform at a float offset, and zeros elsewhere.
-std::vector<float> withPoseAt(size_t floatOffset, float spin) {
+// An object whose memory holds a transform at a float offset, and zeros elsewhere. The
+// scale is a multiplier on the rotation's rows, so the value stays a transform at any scale
+// -- a scaled one is still a transform, which is the whole of the loose class.
+std::vector<float> withPoseAt(size_t floatOffset, float spin, float scale = 1.0f) {
     std::vector<float> words(NodePoseLocator::kScanWords, 0.0f);
     const float s = std::sin(spin);
     const float c = std::cos(spin);
-    const float pose[12] = {c, s, 0.0f, -s, c, 0.0f, 0.0f, 0.0f, 1.0f, 10.0f * c, 10.0f * s, -5.0f};
+    const float pose[12] = {scale * c, scale * s, 0.0f,  -scale * s, scale * c, 0.0f,
+                            0.0f,      0.0f,      scale, 10.0f * c,  10.0f * s, -5.0f};
     for (size_t word = 0; word < 12; word++) {
         words[floatOffset + word] = pose[word];
     }
@@ -536,6 +539,86 @@ void wiiuport::tests::runNodePoseLocatorTests() {
         check::isTrue(field(section(body, "node"), "scans") == "9",
                       "and every binding is a sample, three objects three times each: " +
                           section(body, "node"));
+    }
+
+    // **A scaled transform is a transform, and the strict bar will not count it.** This is
+    // the measurement that decides between two different answers, so it is the one that
+    // matters: a node whose own transform carries scale has its field *here*, and the parent
+    // chain is needed only to compose with it; a node with no transform here has none, and
+    // the transform a renderer multiplies -- the world matrix -- has to be read off the
+    // parent instead. A rigid-only bar cannot tell those apart, because it reports nothing
+    // for both. So the loose class counts any non-singular 3x3, the scale is reported, and
+    // the two tables are both in the report.
+    {
+        std::map<uint32_t, std::vector<float>> memory;
+        for (uint32_t object = 1; object <= 5; object++) {
+            // Rows 2.5 long: a scale, and a pose that turns between draws.
+            memory[object] = withPoseAt(20, 0.1f * object, 2.5f);
+        }
+        NodePoseLocator locator = makeLocator();
+        g_nodes = &memory;
+        locator.install();
+        g_locator = &locator;
+        for (uint32_t object = 1; object <= 5; object++) {
+            for (int scan = 0; scan < 3; scan++) {
+                memory[object] = withPoseAt(20, 0.1f * object + 0.2f * scan, 2.5f);
+                locator.observe(object);
+            }
+        }
+        const std::string body = locator.json();
+        g_nodes = nullptr;
+        const std::string mine = section(body, "node");
+        const std::string rigid = section(mine, "rigid");
+        const std::string affine = section(mine, "affine");
+        check::isTrue(rigid.find("\"bestOffset\":null") != std::string::npos,
+                      "the strict bar names nothing, because a scaled transform is not a "
+                      "rigid one: " +
+                          rigid);
+        check::isTrue(affine.find("\"bestOffset\":80") != std::string::npos &&
+                          locator.bestAffineOffset() == 80,
+                      "and the loose bar names the same offset, so the field is here and "
+                      "carries scale: " +
+                          affine);
+        check::isTrue(affine.find("\"scale\":1.5") != std::string::npos,
+                      "with the scale reported -- 1.5 is how far the row lengths are from "
+                      "unit -- so a scaled transform is not mistaken for a rigid one: " +
+                          affine);
+        check::isTrue(affine.find("\"moving\":true") != std::string::npos,
+                      "and it moves, which is what the loose bar also requires");
+    }
+
+    // The loose class has a floor, or it is a bar that cannot fail: a plane of near-zero
+    // numbers has a determinant near zero and must not read as a matrix.
+    {
+        std::map<uint32_t, std::vector<float>> memory;
+        for (uint32_t object = 1; object <= 4; object++) {
+            std::vector<float> words = withNothing();
+            // Rows of 1e-5: non-zero, non-parallel in the loosest sense, and a
+            // determinant of 1e-15, far below the floor.
+            for (size_t word = 0; word < 12; word++) {
+                words[20 + word] = 1e-5f * static_cast<float>(1 + (word % 4));
+            }
+            memory[object] = words;
+        }
+        NodePoseLocator locator = makeLocator();
+        g_nodes = &memory;
+        locator.install();
+        g_locator = &locator;
+        for (uint32_t object = 1; object <= 4; object++) {
+            for (int scan = 0; scan < 3; scan++) {
+                locator.observe(object);
+            }
+        }
+        const std::string body = locator.json();
+        g_nodes = nullptr;
+        const std::string affine = section(section(body, "node"), "affine");
+        check::isTrue(affine.find("\"offsets\":{}") != std::string::npos,
+                      "a near-degenerate triple is not a transform, so the loose bar finds "
+                      "nothing where a floorless one would find something at every offset: " +
+                          affine);
+        check::isTrue(NodePoseLocator::kDeterminantFloor > 0.0,
+                      "and the floor is a positive number in the report, so a reader can see "
+                      "what the loose bar is willing to call a matrix");
     }
 
     // The report is one object that ends, because a client parses it, and it names both
