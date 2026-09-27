@@ -17,6 +17,8 @@ from wiiuport.headless import (
 )
 from wiiuport.paths import Layout
 
+from wiiuport import headless
+
 
 @pytest.fixture
 def session(tmp_path: Path) -> HeadlessSession:
@@ -222,3 +224,51 @@ def test_the_device_is_read_from_the_runtimes_own_log(session: HeadlessSession) 
 def test_an_unknown_device_is_refused(session: HeadlessSession) -> None:
     with pytest.raises(HeadlessError, match="names no Vulkan device"):
         session.rendered_on()
+
+
+def test_a_port_nobody_holds_is_not_a_refusal(tmp_path: Path) -> None:
+    """The check reads the kernel's socket table, so a free port is silent and a
+    session prepares normally -- otherwise every run would be refused by a
+    diagnostic that cannot tell a free port from a held one."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "project-goals.md").write_text("x")
+    (tmp_path / "external").mkdir()
+    made = HeadlessSession(
+        layout=Layout(root=tmp_path),
+        display=96,
+        activity="free-port",
+        runtime_env={"WIIUPORT_CONTROL_PORT": "1"},
+    )
+    made.prepare()
+
+
+def test_a_previous_runs_product_still_alive_is_refused_by_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two products at once measure the wrong title, and nothing else says so.
+
+    The second cannot bind the control port, logs that and carries on, and the
+    tool then drives the first while watching the second for its exit -- so every
+    number is about whichever title happened to still be up. The refusal names
+    the holder, because "something is listening" is not enough to act on and the
+    pid is the only thing that can be killed safely.
+    """
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "project-goals.md").write_text("x")
+    (tmp_path / "external").mkdir()
+    monkeypatch.setattr(headless, "_port_holder", lambda port: "wiiuport pid 4242")
+    made = HeadlessSession(
+        layout=Layout(root=tmp_path),
+        display=96,
+        activity="held-port",
+        runtime_env={"WIIUPORT_CONTROL_PORT": "21337"},
+    )
+    with pytest.raises(RuntimeError) as refusal:
+        made.prepare()
+    said = str(refusal.value)
+    assert "21337" in said, said
+    assert "wiiuport pid 4242" in said, said
+    assert "not by name" in said, said
+    # And nothing was written: a refused run leaves the session directory as it
+    # found it, so the refusal cannot half-prepare a run that then goes on.
+    assert not made.config_home.exists() or not any(made.config_home.iterdir())

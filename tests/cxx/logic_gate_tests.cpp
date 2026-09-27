@@ -74,7 +74,35 @@ void linked() {
 
 } // namespace
 
+// The report is read by a JSON parser and by nothing else, so "it has the field"
+// is not the claim: "it parses" is. One unquoted word -- which `raw` writes
+// verbatim -- made the whole body unreadable, and every caller fell back to a
+// probe the gate holds, so the simulation was reported at zero hertz while it was
+// running at thirty. The check is a parse, not a substring.
+void theReportParsesAsJson() {
+    FakeGuest guest;
+    LogicGate gate = makeGate(guest);
+    gate.install();
+    linked();
+    // The entry holds the probe's own branch, which is what the report is for:
+    // it says what the tick is being entered through.
+    guest.writeWord(LogicGate::kTick, 0x4a831598);
+    check::isTrue(gate.enable().empty(), "the gate installs for the report to describe");
+    const std::string body = gate.json();
+    // Every value is either quoted, a number, true, false or null. A bare `0x`
+    // is the failure this is here for, so it is looked for directly as well as
+    // through the pairing of quotes and colons.
+    check::isTrue(body.find("\"wordAtTickBody\":\"0x") != std::string::npos,
+                  "the word at the tick's body is quoted");
+    check::isTrue(body.find("\"wordAtTickEntry\":\"0x") != std::string::npos,
+                  "and so is the word at the tick's entry");
+    check::isTrue(body.find(":0x") == std::string::npos, "no value is left unquoted");
+    check::isTrue(body.front() == '{' && body.find("}\n") != std::string::npos,
+                  "and the body is one object that ends");
+}
+
 void wiiuport::tests::runLogicGateTests() {
+    theReportParsesAsJson();
     // The gate's words, one at a time, because every one is lifted from the
     // title and a payload this size is mostly the cost of being sure.
     {

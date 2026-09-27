@@ -32,6 +32,7 @@ from wiiuport.drive import press, release
 from wiiuport.headless import Display, HeadlessSession, LogType, log_flags
 from wiiuport.paths import Layout, find_layout
 
+from wiiuport import control
 from wiiuport.control import (
     DEFAULT_PORT,
     ControlUnavailable,
@@ -53,6 +54,13 @@ from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 # The title's own tick, watched so the simulation's rate is measured at the
 # function that runs it rather than at a frame counter the flip also moves:
 # fapGm_Execute, and the instruction it starts on.
+# How much of a uniform block to read when the question is which bytes move. The
+# title's descriptor entry has a word at +0x04 that reads 0x3e634300, which is a
+# pointer and not a length: a tool that took it for one asked the product for a
+# gigabyte and the product died. So the window is ours, it is small, and it is
+# named here rather than taken from the title.
+DUMP_BYTES = 0x400
+
 LOGIC_TARGET = "025d42ec:7c0802a6"
 
 # What the logic rate must stay inside, in hertz. The title runs at 30 and this
@@ -247,7 +255,20 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="save folder; without one the run stops at the name-entry keyboard",
     )
+    parser.add_argument(
+        "--trace",
+        type=Path,
+        default=None,
+        help="write every channel request and its answer here; two runs that differ "
+        "only in the product's fate differ in this file first",
+    )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument(
+        "--no-boot-poll",
+        action="store_true",
+        help="do not wait for the channel with GET /counters first, so the settle's own "
+        "first request is GET /paint",
+    )
     parser.add_argument("--boot", type=int, default=90, help="seconds to let the title boot")
     parser.add_argument("--presses", type=int, default=12, help="presses through the front end")
     parser.add_argument("--press-interval", type=int, default=8)
@@ -296,6 +317,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.trace is not None:
+        control.TRACE_PATH = args.trace
+        args.trace.write_text("")
+
     try:
         game = resolve_game(args.game)
         keys = resolve_keys(args.keys)
@@ -324,7 +349,11 @@ def main(argv: list[str] | None = None) -> int:
     with session:
         session.prepare(keys_source=keys, save_source=args.save)
         with session.launch(layout.shell_command(game)) as running:
-            if not wait_for_channel(args.port, args.boot):
+            # A boot poll asks GET /counters, which is a different route from the
+            # ones a settle asks. Kept switchable so the two can be told apart:
+            # a run that dies with the poll and lives without it has been killed
+            # by a route it only reads.
+            if not args.no_boot_poll and not wait_for_channel(args.port, args.boot):
                 print(
                     "refused: the channel never answered while booting, so nothing was driven "
                     "and nothing was measured.",
@@ -357,6 +386,11 @@ def main(argv: list[str] | None = None) -> int:
             # the title's own binder counted over the whole run, and the two slots
             # of its ring are what say whether the previous tick's values are still
             # in memory when this tick paints.
+        print(
+            f"  after the settle: the product is "
+            f"{'alive' if running.poll() is None else f'gone (exit {running.returncode})'}",
+            flush=True,
+        )
         try:
             census = read_blocks(args.port)
             print(census.render())
@@ -364,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
             for binding in census.examples[:2]:
                 print(
                     f"  a binding read cursor {binding.cursor}, offset {binding.offset}, "
-                    f"size {binding.size}, entry "
+                    f"size word {binding.size:#x}, entry "
                     + ", ".join(
                         f"{word}:{value:#010x}" for word, value in sorted(binding.entry.items())
                     )
@@ -380,11 +414,11 @@ def main(argv: list[str] | None = None) -> int:
                 # question a blend has to answer before it can be built on this ring.
                 # Their difference is the per-tick pose, and it is a range, not a
                 # guess: the bytes that move are the bytes a blend would write.
-                before_bytes = dump_guest(args.port, block, binding.size)
-                before_other = dump_guest(args.port, other, binding.other_size) if other else None
+                before_bytes = dump_guest(args.port, block, DUMP_BYTES)
+                before_other = dump_guest(args.port, other, DUMP_BYTES) if other else None
                 time.sleep(0.3)
-                after_bytes = dump_guest(args.port, block, binding.size)
-                after_other = dump_guest(args.port, other, binding.other_size) if other else None
+                after_bytes = dump_guest(args.port, block, DUMP_BYTES)
+                after_other = dump_guest(args.port, other, DUMP_BYTES) if other else None
                 print(
                     f"    slot {binding.cursor} at {block:#010x}: {compare_bytes(before_bytes, after_bytes)}"
                 )

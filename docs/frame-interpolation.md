@@ -191,6 +191,34 @@ the tick on the title's own period. That is a change to the title's logic, in gu
 memory, like everything else here -- and it is the first change in this mechanism
 that is not about the picture.
 
+**What the run says about it, which is the finding.** The gate was built to test one
+named risk: that the logic doubles because it was slaved to the flip. It does not,
+and the measurement says so rather than the risk being assumed away. In one driven
+run with the stand-in and the gate, alternating windows in the same scene:
+
+```
+off   30.00 paints/s  (180 over 6.0s)   logic: 0 ticks, from the caller census
+on    60.17 paints/s  (361 over 6.0s)   logic: 0 ticks, from the gate's own counter
+off   30.00 paints/s  (180 over 6.0s)   logic: 0 ticks, from the caller census
+on    60.00 paints/s  (360 over 6.0s)   logic: 0 ticks, from the gate's own counter
+```
+
+The picture reaches sixty and the controls hold at thirty, which is the whole of
+what the mechanism claims. The logic reads **zero, not a slow count**, in every
+window -- and the gate's counters are *not* the reason, because with the gate out
+the caller census on `0x025d42ec` counts nothing either. The call the gate was
+written to halve is not the call this title runs its per-frame work through on this
+path. The gate's probe reports `installed`, and it reports the words sitting at the
+tick's entry and at the one after it, so a zero can be told apart from a gate that
+is not connected; that distinction is the reason those three fields exist.
+
+**So the gate is a falsifier that has fired.** The risk it was built for is not
+this title's, and the gate is not needed for the presentation rate. It stays,
+because a falsifier that has answered is worth more than a guess that has not, and
+because the open question is the mirror image: *which* call runs the simulation
+here. That is reverse engineering, not a measurement, and it is not answered by any
+of the above.
+
 **What the title's own code says about it.** `FUN_025f172c` is the per-frame
 entry, and it calls the tick unconditionally:
 
