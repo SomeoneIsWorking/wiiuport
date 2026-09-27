@@ -549,6 +549,35 @@ That is the same instrument at five more addresses, and it is the last place the
 that the disassembly points at: after them the frame returns, and the payload's only remaining act
 is the branch back to the title's loop.
 
+### What the objective's own payload shape implies about `0x198`
+
+The objective's payload is `819f0024 800c00cc 7c0903a6 7fe3fb78 4e800421` twice then `4e800020`,
+and read as instructions that is `lwz` of the vtable slot, `mtctr`, `bctrl` -- twice -- then a
+branch. **The payload loads the frame's address out of the vtable rather than carrying a literal**,
+and the mode numbers in this file all reach the frame by a literal `bl`.
+
+That matters because the faulting instruction is *itself a guest load*, and a load off a register
+that holds a small value lands at a small address. `0x198` is `0xcc + 0xcc`: the payload's own
+`lwz r, 0xcc(rX)` with `rX` holding `0xcc`, or any `lwz` at offset `0xcc` off a register holding a
+small number. So the shape of the fault is consistent with **a vtable pointer that is not the
+vtable** -- the register the load is based on being a small value rather than `0x10004e88`, which is
+what the mod's own report shows (`vtable` and `liveVTable` both `0x10004e88`).
+
+That is a reading, not a measurement, and it is recorded as such: nothing here has shown the register
+that held `0xcc`. What would test it is the same probe at the *payload's* first word rather than at
+the frame's, reporting the guest register the `lwz` is based on. The paint mod writes the payload and
+knows its address (`block`, in the report), so a probe there is the same instrument one word earlier
+in the same instruction stream -- and it is the one measurement that would say whether the
+vtable-derived path the objective specifies and the literal-address path this file's modes use fail
+for the same reason or for two different ones.
+
+**This is where the double-paint fault stands, stated as what is known rather than as a theory.** The
+guest is healthy at the fault; the fault is a guest load at address `0x198` in recompiled code; the
+display object is cleared (its flag, its phase, and all five of its call targets are identical across
+the two paints); and three payload shapes built on three different readings of the cause have each
+been measured and each faults. The remaining candidates are the five callees' own state and the
+vtable-derived load, and both are one probe each in an instrument that already exists.
+
 ### A real bug found on the way, which is not this fault
 
 `PPCRecompilerX86_allocateExecutableMemory` (`BackendX64.cpp:1313`) bounds-checked with
