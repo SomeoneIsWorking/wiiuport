@@ -91,6 +91,8 @@ add_library(wiiuport STATIC
   title/ObjectIdentityScope.h
   title/ObjectPoseLocator.cpp
   title/ObjectPoseLocator.h
+  title/GlobalPoseCensus.cpp
+  title/GlobalPoseCensus.h
   title/UniformBlockCensus.cpp
   title/UniformBlockCensus.h
   title/WindWakerPaint.cpp

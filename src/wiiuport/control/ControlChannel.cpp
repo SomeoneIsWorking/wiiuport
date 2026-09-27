@@ -25,6 +25,7 @@ const char* const kRoutes =
     "GET /counters, GET /transforms, GET /capture, "
     "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
     "GET /recordings, GET /objects, GET /draws, GET /vertices, GET /memory, GET /callers, "
+    "POST /global-pose, "
     "GET /paint, GET /blocks, GET /logic, POST "
     "/replay, POST /capture, "
     "POST /present, "
@@ -171,8 +172,9 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_neighbourCheck(sources.neighbourCheck), m_objects(sources.objects),
       m_vertices(sources.vertices), m_writers(sources.writers), m_callers(sources.callers),
       m_paint(sources.paint), m_blocks(sources.blocks), m_logic(sources.logic),
-      m_guestBytes(sources.guestBytes), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
-      m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate),
+      m_globalPose(sources.globalPose), m_guestBytes(sources.guestBytes),
+      m_snapshot(sources.snapshot), m_pacing(sources.pacing), m_scanOut(sources.scanOut),
+      m_vertexChanges(sources.vertexChanges), m_gate(sources.gate),
       m_shadowCheck(sources.shadowCheck) {
 }
 
@@ -1071,6 +1073,22 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
         auto body = requestHostStop(accepted);
         return lucent::http::Response::json(accepted ? 202 : 409,
                                             accepted ? "Accepted" : "Conflict", body);
+    }
+    // **Above the `method != "GET"` barrier below, which is the whole placement rule for a POST
+    // route in this dispatcher and the one thing about it that is not obvious.** A POST route
+    // written into the GET section is unreachable and answers "unknown route" for ever, and the
+    // route table lists it, so the table and the dispatcher disagree while both look right. The
+    // route table test caught exactly that when this route was first added.
+    if (request.method == "POST" && request.path() == "/global-pose") {
+        // On request rather than per frame, because it holds two snapshots of 3 MB and waits for a
+        // frame between them. A route that ran on the display thread would spend milliseconds of a
+        // sixty-hertz budget to answer a question asked once.
+        std::string refusal;
+        m_globalPose.scan(refusal);
+        if (!refusal.empty()) {
+            return lucent::http::Response::text(409, "Conflict", refusal + "\n");
+        }
+        return lucent::http::Response::json(200, "OK", m_globalPose.json());
     }
     if (request.method == "POST" && request.path() == "/input") {
         auto accepted = false;

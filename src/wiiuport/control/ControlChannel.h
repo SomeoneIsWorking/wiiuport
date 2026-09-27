@@ -26,6 +26,7 @@
 #include "wiiuport/interp/TransformSearch.h"
 #include "wiiuport/interp/VertexBlend.h"
 #include "wiiuport/interp/ViewTracker.h"
+#include "wiiuport/title/GlobalPoseCensus.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
@@ -92,6 +93,9 @@ class ControlChannel {
         const guest::CallerCensus& callers;
         title::WindWakerPaint& paint;
         const title::UniformBlockCensus& blocks;
+        // Mutable because scanning is work the channel does on request, not work the display
+        // thread does per frame; the census itself is const everywhere else.
+        title::GlobalPoseCensus& globalPose;
         title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
@@ -232,6 +236,7 @@ class ControlChannel {
     const guest::CallerCensus& m_callers;
     title::WindWakerPaint& m_paint;
     const title::UniformBlockCensus& m_blocks;
+    title::GlobalPoseCensus& m_globalPose;
     title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;

@@ -50,6 +50,12 @@ bool noReadWord(uint32_t /*address*/, uint32_t& /*value*/) {
     return false;
 }
 
+// A frame counter that never moves, so a scan asked through this fixture reports the refusal it
+// gives when the two readings would be the same instant -- the refusal a test needs, not a zero.
+uint64_t noFrame() {
+    return 0;
+}
+
 bool noReadWords(uint32_t /*address*/, uint32_t* /*values*/, uint32_t /*count*/) {
     return false;
 }
@@ -96,6 +102,10 @@ struct Fixture {
     wiiuport::guest::BufferWriters writers;
     wiiuport::guest::CallerCensus callers{&noRegistration};
     wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord, &noReadWords};
+    // The data-area scan, with readers that refuse: a channel built with readers that say no is how
+    // every refusal in this file is exercised, and a scan wired with a reader that answers would
+    // never reach the refusal it exists to report.
+    wiiuport::title::GlobalPoseCensus globalPose{&noReadWords, &noFrame};
     wiiuport::title::LogicGate logic{&noRegistration, &noCodeSpace, &noCodeSpace, &noWriteWord,
                                      &noReadWord};
     wiiuport::title::WindWakerPaint paint{&noRegistration, &noCodeSpace,    &noWriteWord,
@@ -144,6 +154,7 @@ struct Fixture {
         .callers = callers,
         .paint = paint,
         .blocks = blocks,
+        .globalPose = globalPose,
         .logic = logic,
         .guestBytes = &noGuestBytes,
         .snapshot = snapshot,
@@ -386,7 +397,11 @@ void everyAdvertisedRouteIsReachableByItsOwnMethod() {
         request.target = entry.substr(space + 1);
         auto answer = fixture.channel.dispatch(request);
         if (answer.body.rfind("unknown route. This channel serves", 0) == 0) {
-            missing.push_back(request.method + " " + request.target);
+            // The status and the route's own name as the test built it, because "missing" with no
+            // detail is a report that has to be re-run with a debugger in it. A route table test
+            // that names the request it built and the answer it got can be read.
+            missing.push_back(request.method + " " + request.target + " -> " +
+                              std::to_string(answer.status) + ", " + answer.body.substr(0, 40));
         }
     }
     check::isTrue(advertised > 20, "the list this checked is the whole list");
