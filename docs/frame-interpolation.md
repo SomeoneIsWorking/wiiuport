@@ -877,6 +877,81 @@ Both were predicted by this file's own measurements before they were run, and th
 payload with eleven words has one call target and one call site; this one has two of each and they
 disagree.**
 
+### A payload was branching into a zero-filled hole, and that was a real fault
+
+Read live, at the fault, in one pass from one register (`faultgpc.py`) so that nothing had to be
+paired up afterwards:
+
+```
+cpu state        0x7ffe8538d7a0
+program counter  0x0e001128
+link register    0x00e058a0        <- the stand-in's own block (0x00e05898) plus 8
+the opcode in ESI 0x800006e2       rA = 0, displacement 0x6e2
+the effective address, in RCX: 0x000006e2
+r0 = 0x00e05898   r11 = r12 = 0x10004e88   r31 = 0x43e08af8
+```
+
+**The effective address is in `RCX` and nowhere else**, which is found by reading the binary rather than
+by guessing: `objdump -d bin/wiiuport` at the reported program counter gives the whole handler, and
+
+```
+558fd4  movswl %si,%ecx              ecx = sign-extended displacement
+558fd7  add    %eax,%ecx             ecx = gpr[rA] + displacement   <- the effective address
+558fd9  mov    <memory_base>(%rip),%rax
+558fe0  mov    (%rax,%rcx,1),%eax    <- rip: *(memory_base + ecx)
+```
+
+gdb's backtrace said `address=1763` because it read the second argument *after* `movswl %si,%ecx` had
+already consumed it. That is why three runs reported three addresses for one fixed instruction, and it
+is why the `x/4i $pc-8` that printed nonsense was not a mystery either: it started a disassembly at
+`0x558fd8`, which is the **middle** of the seven-byte `mov <memory_base>(%rip),%rax` beginning at
+`0x558fd9`. The function is ordinary code; the read was misaligned.
+
+**The link register is the stand-in's own, and the only branch the stand-in makes before the frame is
+the swap-interval call. So that call is the one in progress -- and its target is not code:**
+
+```
+0x028fad2c  0x00000000   add r0,r0,r0
+0x028fad30  0x00000000   add r0,r0,r0
+0x028fad34  0x00000000   add r0,r0,r0
+0x028fad38  0x00000000   add r0,r0,r0
+```
+
+Ghidra holds a function symbol at `0x028fad2c` and **no instruction at all**, which is the signature of
+a zero-filled hole rather than of a body it failed to disassemble. A `bl` into it runs four no-ops and
+then whatever follows at `0x028fad3c`, which is how a guest that was painting twice ended up executing
+host pointer bytes in the loader arena: `0x0e001124` held `7f 00 00 00 80 00 06 e2 e2 fe 7f 00 00 00
+00 7f`, and `0x0e001128` read little-endian as the host pointer `0x7ffee2e2060080`.
+
+**Fixed, and the fix is deletion rather than repair.** Nothing branches there any more: the interval is
+set by writing the display's own `+0x50` field, which is what the shape that measures 59.99 and 60.12
+paints a second has always done. The call was redundant before it was fatal. `install()` now also
+refuses if that address stops being a zero word, so the change back into a call would be a decision
+rather than an accident, and the payload test pins both the word count and the absence of any `bl` to
+that address.
+
+**The fault persists, and its signature changed** -- which is the evidence that the hole was a
+contributor and not the whole cause. Before: a host segfault inside the **interpreter's** guest load,
+program counter in the arena at `0x0e001128`. After:
+
+```
+rip  0x7ffe79a19f30   movbe 0x48(%r13,%rax,1),%ecx   with r13 = memory_base, rax = 0
+OSSched[core=1]  via recompiled  guest pc=0x00e05884  lr=0x0274c280
+  r0..r7 = 00e058a0 0e275a38 10008000 00000000 0e275a24 0e275a28 0e275a30 44213980
+```
+
+**The fault is now in recompiled code, and the guest is inside a probe's stub.** The program counter
+`0x00e05884` is in the arena, twenty bytes below the stand-in's own block; the arena is where
+`GuestCallProbes::WriteStub` puts its stubs, and one was read at `0x00e058b4` in an earlier run holding
+the HLE `bl`, the displaced word and the resume. **The link register is `0x0274c280`, the display
+frame's own seventh word** -- so the frame ran, it called a probe, and the guest is in that probe's
+stub. `r0` is `0x00e058a0`, the stand-in's block plus eight, and the faulting access is a load at
+`0x48` off it.
+
+**So the fault has moved three times and each move was a narrowing**: from the title's draw path, to
+the loader arena, to a probe's dispatch stub. None of the three is the title's paint path, and the last
+is not the mod's payload either -- it is the probe machinery the paint mod installs on the frame.
+
 ### Where the second paint actually goes: into the loader arena's data
 
 The fault's program counter is in the loader arena every run -- `0x00e0006a8`, `0x00e000768`,
