@@ -338,8 +338,39 @@ void wiiuport::tests::runPaintTests() {
         }
     }
     {
+        // **Mode 11 is the objective's eleven words, in its order, with one computed branch.** The
+        // test asserts the ten verbatim words exactly -- not "the payload differs from mode 9",
+        // which a payload that invented its own encoding would also satisfy -- and the eleventh is
+        // checked as the branch back to the title's loop.
+        const auto eleven =
+            WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::ObjectivePayload);
+        check::isTrue(eleven.has_value(),
+                      "the objective's payload is built where the loop is in reach");
+        if (eleven.has_value()) {
+            check::isTrue(eleven->size() == 11,
+                          "and it is eleven words, as the objective specifies: " +
+                              std::to_string(eleven->size()));
+            const std::array<uint32_t, 5> group{0x819f0024, 0x800c00cc, 0x7c0903a6, 0x7fe3fb78,
+                                                0x4e800421};
+            bool verbatim = true;
+            for (size_t index = 0; index < group.size(); index++) {
+                verbatim = verbatim && (*eleven)[index] == group[index] &&
+                           (*eleven)[group.size() + index] == group[index];
+            }
+            check::isTrue(verbatim,
+                          "the two groups are the objective's five words each, verbatim and in its "
+                          "order -- the only mode that reaches the frame by loading it out of the "
+                          "vtable rather than by a literal branch");
+            check::isTrue((*eleven)[10] ==
+                              WindWakerPaint::branchTo(0x00e07000 + 40, 0x0274c020, false),
+                          "and the eleventh is the branch back to the display thread's loop, its "
+                          "displacement measured from its own word: " +
+                              std::to_string((*eleven)[10]));
+        }
+    }
+    {
         check::isTrue(!WindWakerPaint::modeFrom(0).has_value(), "mode 0 names no stand-in");
-        check::isTrue(!WindWakerPaint::modeFrom(11).has_value(), "mode 11 names no stand-in");
+        check::isTrue(!WindWakerPaint::modeFrom(12).has_value(), "mode 12 names no stand-in");
         // Mode 8 is the tail-branch twin, and the pair is the discriminator: 3 calls the frame
         // twice and faults, 8 paints twice with the second paint returning through the title's own
         // loop. Both exist, and the number reaches the payload builder.
@@ -351,6 +382,8 @@ void wiiuport::tests::runPaintTests() {
         check::isTrue(WindWakerPaint::modeFrom(10) == WindWakerPaint::Mode::SamePhaseTwice,
                       "mode 10 is the one that holds the display's per-pass flag, and it is "
                       "reachable by number");
+        check::isTrue(WindWakerPaint::modeFrom(11) == WindWakerPaint::Mode::ObjectivePayload,
+                      "mode 11 is the objective's own payload, and it is reachable by number");
         // Mode 7 is the branch-entry control: the same payload, reached by a
         // direct branch at the frame instead of through the vtable, so that the
         // one difference between it and mode 1 is the kind of branch.

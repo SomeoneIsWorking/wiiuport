@@ -75,6 +75,35 @@ constexpr uint32_t kRestoreDisplay = 0x7fc3f378; // or r3,r30,r30   from 0x0274c
 // then. So a paint that leaves those bits set sends the *next* paint down a different path from the
 // one it took -- which is the second paint's near-null dereference, and why no amount of restoring
 // the display pointer helped.
+// **The objective's own payload, word for word.** Eleven words: this group of five twice, then a
+// branch back to the title's loop.
+//
+//     819f0024  lwzu   r3,0x24(r30)     the display's sub-object, updating r30
+//     800c00cc  lwz    r12,0xcc(r0)     the vtable's slot 0xcc -- the frame
+//     7c0903a6  mtspr  CTR,r12
+//     7fe3fb78  or     r31,r3,r3        the title's own non-volatile for the display
+//     4e800421  bctrl                  the frame, reached through the vtable
+//
+// **Every one of these is different from what the modes above do**, and the difference is the
+// point. All of them reach the frame by a literal `bl` and never touch the vtable from inside the
+// payload; this one *loads the frame out of the vtable* and calls it indirectly, which is the shape
+// the objective specifies and the one the measured fault is consistent with -- the faulting
+// instruction is a guest load at `0x198`, and `0x198` is `0xcc + 0xcc`: a `lwz` at offset `0xcc`
+// off a register holding a small number. That is this payload's second word with the wrong base
+// register.
+//
+// The eleventh word is a branch to the title's loop, and the objective gives it as `4e800020`,
+// which as a branch is `b +0x20` **from its own address** -- a displacement that can only reach the
+// loop from one place in memory. So the form is lifted and the displacement is computed, which is
+// the same treatment every other branch in this file gets, and the one word here that is not
+// verbatim. It is the only way a stand-in in the loader's arena can return to a loop it does not
+// share an address with.
+constexpr uint32_t kObjectiveLoadSubObject = 0x819f0024;     // lwzu  r3,0x24(r30)
+constexpr uint32_t kObjectiveLoadVtableSlot = 0x800c00cc;    // lwz   r12,0xcc(r0)
+constexpr uint32_t kObjectiveMoveCtr = 0x7c0903a6;           // mtspr CTR,r12
+constexpr uint32_t kObjectiveSaveDisplay = 0x7fe3fb78;       // or    r31,r3,r3
+constexpr uint32_t kObjectiveCallThroughVtable = 0x4e800421; // bctrl
+
 constexpr uint32_t kReadDisplayPhase = 0x801e0074;  // lwz  r0,0x74(r30)  from 0x0274c2c4
 constexpr uint32_t kWriteDisplayPhase = 0x901e0074; // stw  r0,0x74(r30)  from 0x0274c38c
 
@@ -208,6 +237,8 @@ std::string_view WindWakerPaint::modeName(Mode mode) {
         return "restoreDisplayTwice";
     case Mode::SamePhaseTwice:
         return "samePhaseTwice";
+    case Mode::ObjectivePayload:
+        return "objectivePayload";
     }
     return "unknown";
 }
@@ -234,6 +265,8 @@ std::optional<WindWakerPaint::Mode> WindWakerPaint::modeFrom(long long number) {
         return Mode::RestoreDisplayTwice;
     case 10:
         return Mode::SamePhaseTwice;
+    case 11:
+        return Mode::ObjectivePayload;
     default:
         return std::nullopt;
     }
@@ -299,7 +332,22 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
     // word between the two calls is the fix, and a step list that appended a third paint would
     // undo the finding it exists to test.
     std::vector<Step> steps;
-    if (mode == Mode::SamePhaseTwice) {
+    if (mode == Mode::ObjectivePayload) {
+        // **Ten verbatim words and one computed branch.** The two groups are the objective's, in
+        // its order, and the branch after them is the objective's `b` with its displacement worked
+        // out -- the one word that cannot be verbatim, because the stand-in's block is handed out
+        // at run time and a fixed displacement reaches one address.
+        //
+        // No `li r3,1` and no swap-interval call in front: this payload sets its own registers, and
+        // a word in front of it that overwrote `r3` would defeat the `lwzu` that loads the display.
+        for (int pass = 0; pass < 2; pass++) {
+            steps.push_back({false, 0, kObjectiveLoadSubObject});
+            steps.push_back({false, 0, kObjectiveLoadVtableSlot});
+            steps.push_back({false, 0, kObjectiveMoveCtr});
+            steps.push_back({false, 0, kObjectiveSaveDisplay});
+            steps.push_back({false, 0, kObjectiveCallThroughVtable});
+        }
+    } else if (mode == Mode::SamePhaseTwice) {
         // Save the display's per-pass flag, paint, put it back, paint again.
         //
         // **Every word here is the frame's own, verbatim.** The load is 0x0274c2c4 and the store is
@@ -339,6 +387,8 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
         }
         const bool calls = mode == Mode::Twice || mode == Mode::TwiceAtSixty;
         const bool paintsTwice = calls || mode == Mode::TailTwiceAtSixty;
+        // `ObjectivePayload` carries its own two calls and its own words; the loop below would add
+        // a third, and a payload that paints three times is not the one the objective specifies.
         for (uint32_t paint = 0; paint < (paintsTwice ? 2u : 1u); paint++) {
             // **The second paint of `TailTwiceAtSixty` is a branch, not a call.** That is the whole
             // mode: the frame's return then goes to the title's loop, where the title's own `bctrl`
