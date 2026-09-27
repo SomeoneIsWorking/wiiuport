@@ -79,6 +79,8 @@ add_library(wiiuport STATIC
   title/DrawAttributeCensus.h
   title/NodePoseLocator.cpp
   title/NodePoseLocator.h
+  title/UniformBlockRing.cpp
+  title/UniformBlockRing.h
   title/VertexPoseHistory.cpp
   title/VertexPoseHistory.h
   title/TransformShape.cpp

@@ -6,6 +6,7 @@
 #include "wiiuport/title/ObjectIdentityScope.h"
 #include "wiiuport/title/ObjectPoseHistory.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
+#include "wiiuport/title/UniformBlockRing.h"
 #include "wiiuport/title/VertexPoseHistory.h"
 
 #include <array>
@@ -111,6 +112,11 @@ class UniformBlockCensus {
     // The two-tick vertex history, reported beside the attribute census it reads. Null is
     // allowed and reported as null.
     void setVertexPoseHistory(const VertexPoseHistory* history);
+
+    // Whether the previous tick's uniform block contents survive to the next tick's paint. The
+    // objective's own second question, and it is measured here because the census is the one
+    // place that knows which block a binding names. Null is allowed and reported as null.
+    void setBlockRing(UniformBlockRing* ring);
 
     UniformBlockCensus(Register registerProbe, ReadWord readWord,
                        ObjectPoseHistory::ReadWords readWords,
@@ -223,6 +229,7 @@ class UniformBlockCensus {
     ObjectIdentityScope* m_scope = nullptr;
     const DrawAttributeCensus* m_drawAttributes = nullptr;
     const VertexPoseHistory* m_vertexHistory = nullptr;
+    UniformBlockRing* m_ring = nullptr;
     Binder m_first{*this, false};
     Binder m_second{*this, true};
     std::atomic<uint64_t> m_bindings{0};

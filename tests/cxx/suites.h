@@ -20,6 +20,7 @@ void runJsonBodyTests();
 void runObjectIdentityScopeTests();
 void runDrawAttributeCensusTests();
 void runVertexPoseHistoryTests();
+void runUniformBlockRingTests();
 void runReplayTests();
 void runSearchTests();
 void runInputTests();
