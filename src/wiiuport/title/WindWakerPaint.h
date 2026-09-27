@@ -187,6 +187,21 @@ class WindWakerPaint {
         // somewhere else; if it does not, a direct branch out of recompiled code
         // into the loader's arena is the fault, and it is the emulator's.
         BranchEntry = 7,
+        // Two paints where only the *first* is a call: the second is a tail branch, so the
+        // frame's return goes to the title's loop exactly as it would have, and the payload
+        // owns a single return path instead of two.
+        //
+        // **This is the discriminator for the fault that kills `Twice` and `TwiceAtSixty`.** Both
+        // of those `bl` the frame twice; `OneAtSixty`, which survives, branches at it once and
+        // never sets the link register. So the candidates are "the frame is not re-entrant" and
+        // "the second `bl`'s link register is the problem", and this mode separates them: it
+        // paints the tree twice in one pass either way, and the only difference is whether the
+        // second paint returns through the payload or through the title's own loop.
+        //
+        // A second paint reached by a tail branch is also the more faithful shape -- the title's
+        // own `bctrl` returned to its loop once per pass, and this is the stand-in doing the
+        // same thing twice.
+        TailTwiceAtSixty = 8,
     };
     // The name a refusal or a report uses for a mode.
     static std::string_view modeName(Mode mode);

@@ -2,6 +2,7 @@
 #include "suites.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <map>
@@ -227,8 +228,60 @@ void wiiuport::tests::runPaintTests() {
         }
     }
     {
+        // **Mode 8 differs from mode 3 in the link bit of its second frame branch, and nothing
+        // else.** Not "the payloads are different words" -- that would pass if the whole thing were
+        // different, which is not what is being claimed. The claim is narrow: same number of words,
+        // same targets, and the last frame branch has its link bit clear where mode 3's has it set.
+        //
+        // The expected words are built by the same `branchTo` the payload uses, which is weak on
+        // its own; what makes it a test is the word-for-word comparison *and* the link-bit check
+        // read out of the words themselves, so a builder that returned the same two payloads twice
+        // would fail the bit check and not the arithmetic one.
+        const auto three = WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::TwiceAtSixty);
+        const auto eight =
+            WindWakerPaint::payload(0x00e07000, WindWakerPaint::Mode::TailTwiceAtSixty);
+        check::isTrue(three.has_value() && eight.has_value(),
+                      "both two-paint payloads are built where the frame is in reach");
+        if (three.has_value() && eight.has_value()) {
+            check::isTrue(three->size() == eight->size(),
+                          "and they are the same length, so the difference is not a word count: " +
+                              std::to_string(three->size()) + " against " +
+                              std::to_string(eight->size()));
+            size_t differing = 0;
+            size_t where = three->size();
+            for (size_t index = 0; index < three->size() && index < eight->size(); index++) {
+                if ((*three)[index] != (*eight)[index]) {
+                    differing++;
+                    where = index;
+                }
+            }
+            check::isTrue(differing == 1,
+                          "exactly one word differs, so mode 8 changes the kind of one branch and "
+                          "nothing else: " +
+                              std::to_string(differing) + " differing");
+            // The link bit, read out of the words rather than out of the builder: a `bl` has AA=1
+            // in the opcode's LI field, so the two words differ by exactly one.
+            // The differing word is the *second* frame branch, not the last word: the last word of
+            // both payloads is the branch back to the display thread's loop, which is the same in
+            // both. An earlier version of this compared the last words and found them equal, which
+            // says nothing about the branch the mode exists to change.
+            if (where < three->size() && where < eight->size()) {
+                const uint32_t called = (*three)[where];
+                const uint32_t branched = (*eight)[where];
+                check::isTrue(called == branched + 1,
+                              "and the second frame branch is the same branch with the link bit "
+                              "clear, which is the whole difference between the two modes");
+            }
+        }
+    }
+    {
         check::isTrue(!WindWakerPaint::modeFrom(0).has_value(), "mode 0 names no stand-in");
-        check::isTrue(!WindWakerPaint::modeFrom(8).has_value(), "mode 8 names no stand-in");
+        check::isTrue(!WindWakerPaint::modeFrom(9).has_value(), "mode 9 names no stand-in");
+        // Mode 8 is the tail-branch twin, and the pair is the discriminator: 3 calls the frame
+        // twice and faults, 8 paints twice with the second paint returning through the title's own
+        // loop. Both exist, and the number reaches the payload builder.
+        check::isTrue(WindWakerPaint::modeFrom(8) == WindWakerPaint::Mode::TailTwiceAtSixty,
+                      "mode 8 is the tail-branch twin, and it is reachable by number");
         // Mode 7 is the branch-entry control: the same payload, reached by a
         // direct branch at the frame instead of through the vtable, so that the
         // one difference between it and mode 1 is the kind of branch.

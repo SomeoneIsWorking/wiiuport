@@ -148,6 +148,8 @@ std::string_view WindWakerPaint::modeName(Mode mode) {
         return "oneAtSixty";
     case Mode::BranchEntry:
         return "branchEntry";
+    case Mode::TailTwiceAtSixty:
+        return "tailTwiceAtSixty";
     }
     return "unknown";
 }
@@ -168,6 +170,8 @@ std::optional<WindWakerPaint::Mode> WindWakerPaint::modeFrom(long long number) {
         return Mode::OneAtSixty;
     case 7:
         return Mode::BranchEntry;
+    case 8:
+        return Mode::TailTwiceAtSixty;
     default:
         return std::nullopt;
     }
@@ -224,7 +228,7 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
     };
 
     std::vector<Step> steps;
-    if (mode == Mode::TwiceAtSixty) {
+    if (mode == Mode::TwiceAtSixty || mode == Mode::TailTwiceAtSixty) {
         steps.push_back({false, 0});               // li r3,1
         steps.push_back({true, kSetSwapInterval}); // the game's own setter
     }
@@ -232,8 +236,21 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
     // The rest stand in for it, tail-branching at it once, which is what the
     // game's own `bctrl` was about to do anyway.
     const bool calls = mode == Mode::Twice || mode == Mode::TwiceAtSixty;
-    for (uint32_t paint = 0; paint < (calls ? 2u : 1u); paint++) {
-        steps.push_back({calls, kDisplayFrame});
+    const bool paintsTwice = calls || mode == Mode::TailTwiceAtSixty;
+    for (uint32_t paint = 0; paint < (paintsTwice ? 2u : 1u); paint++) {
+        // **The second paint of `TailTwiceAtSixty` is a branch, not a call.** That is the whole
+        // mode: the frame's return then goes to the title's loop, where the title's own `bctrl`
+        // would have sent it, and the payload owns exactly one link-register return rather than
+        // two. Everything else about it -- two paints in one pass, one vblank a flip, the game's
+        // own setter called first -- is mode 3 unchanged, so a run that survives where mode 3
+        // faults has separated "the frame is not re-entrant" from "the second `bl` is the
+        // problem", and a run that faults too has answered the other way.
+        // Only mode 8 distinguishes its two paints; every other mode uses one rule for both, and
+        // `calls` is that rule. Written as a per-mode choice rather than `calls || paint == 0`,
+        // which reads as though a single-paint mode should call -- and did, until the pass-through
+        // payload's one branch became a call and the test that checks its two words said so.
+        const bool call = (mode == Mode::TailTwiceAtSixty) ? (paint == 0) : calls;
+        steps.push_back({call, kDisplayFrame});
     }
 
     std::vector<uint32_t> words;
