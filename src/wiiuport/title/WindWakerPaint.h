@@ -256,7 +256,7 @@ class WindWakerPaint {
 
         void OnCall(std::span<const uint32_t, 32> gpr, uint32_t returnAddress) override;
 
-        // `display+0x74` and `display+0x78`, sampled at the last two paints. The
+        // `display+0x74` and `display+0x28`, sampled at every paint. The
         // frame's `if (flags & 1) flags ^= 2` toggle is a per-paint event, and a
         // report that reads the field on request sees one value rather than the
         // sequence, which is the difference between "the toggle is not happening"

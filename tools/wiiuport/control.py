@@ -599,6 +599,13 @@ class PaintState:
     display: int
     fields: dict[str, int]
     refusal: str
+    # The two fields the flip decision is read from, as the probe sampled them at
+    # the last paint. Sampled per paint rather than read on request because the
+    # frame's toggle is a per-paint event: a field read once reads whichever value
+    # the last paint left, and the same value means both "the toggle never fires"
+    # and "the toggle fired between the two reads".
+    flags_at_paint: int = 0
+    phase_at_paint: int = 0
 
     def render(self) -> str:
         fields = ", ".join(f"{name} {value}" for name, value in sorted(self.fields.items()))
@@ -989,4 +996,6 @@ def _paint_state(payload: dict, url: str) -> PaintState:
         display=int(payload["display"], 16),
         fields={str(name): int(value) for name, value in payload["fields"].items()},
         refusal=str(payload.get("refusal", "")),
+        flags_at_paint=int(payload.get("flagsAtLastPaint", 0)),
+        phase_at_paint=int(payload.get("phaseAtLastPaint", 0)),
     )

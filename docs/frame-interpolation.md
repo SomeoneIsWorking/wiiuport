@@ -201,6 +201,30 @@ the title's display thread paints as often as it is asked to, and the simulation
 own rate underneath. A second run of the same shape gave 59.40 (297 over 5.0s) with the
 logic at 29.80, so 60.12 and 59.40 are two samples of the same rate, not one of them.
 
+### The flip-skip risk, resolved by reading the field per paint
+
+The frame is documented to do `if (display+0x74 & 1) display+0x74 ^= 2`. If that fires
+between the two paints of a pass, one paint of the pair presents and the other does not, and
+the rate would read sixty while the display presented thirty.
+
+A rate cannot answer this — both cases present at the same rate — and neither can a field
+read once on request, which reads whichever value the last paint left. So the probe samples
+`display+0x74` and `display+0x28` at **every** paint, under the same lock as the display
+pointer, and the report carries the pair. Measured, 24 samples a quarter of a second apart
+in each state, on a real title:
+
+    stand-in out:  paints 1575, flags 0x0, phase 0x2, interval 2
+    stand-in in:   paints 1877, flags 0x0, phase 0x2, interval 1
+
+**One distinct value per window, held across roughly 300 paints: `display+0x74` is 0
+throughout, so `flags & 1` is false at every paint the probe saw and the toggle never
+executes. No paint is left without a flip, and the risk does not apply to this title's
+frame.**
+
+The same readings also say the probe is reading live values rather than a constant: the
+interval field at `display+0x50` moved from 2 to 1 across the arming, which is exactly the
+pacing change the stand-in asks for, in the same two readings where the flag did not move.
+
 ### Which stand-in does it, and which ones fault
 
 The mode numbers are the product's own mapping, read from `modeFrom`: 1 `PassThrough`,

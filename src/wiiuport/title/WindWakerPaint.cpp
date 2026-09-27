@@ -314,22 +314,28 @@ void WindWakerPaint::Frame::OnCall(std::span<const uint32_t, 32> gpr, uint32_t /
     }
     std::scoped_lock lock(mutex);
     display = gpr[3];
-    // The two fields the flip decision is made from, sampled at every paint.
+    // `display+0x74` and `display+0x28`, sampled at every paint: the flags the
+    // frame toggles, and the phase it keeps. Those are the two fields the flip
+    // decision is read from.
     //
     // The frame is documented to do `if (display+0x74 & 1) display+0x74 ^= 2`,
     // which would leave every second paint of a twice-per-pass stand-in without a
     // flip. A report that reads the fields once, on request, cannot see that: it
     // reads whichever value the last paint left, not the sequence. A pair per
     // paint is the only shape in which the toggle is visible, so the report gets
-    // the last two pairs and the toggle shows up as a bit changing between them
-    // while the paint count climbs.
+    // the pair and the toggle shows up as a bit changing between samples while
+    // the paint count climbs.
     //
     // Sampled under the same lock as the display pointer, so a pair is never half
     // from one paint and half from another.
-    for (int sample = 0; sample < 2; sample++) {
-        uint32_t value = 0;
-        if (m_readWord(display + kFlagsOffset + 4 * static_cast<uint32_t>(sample), value)) {
-            recent[static_cast<size_t>(sample)] = value;
+    {
+        uint32_t flags = 0;
+        uint32_t phase = 0;
+        if (m_readWord(display + kFlagsOffset, flags)) {
+            recent[0] = flags;
+        }
+        if (m_readWord(display + kPhaseOffset, phase)) {
+            recent[1] = phase;
         }
     }
 }
@@ -656,7 +662,7 @@ std::string WindWakerPaint::json() const {
     {
         std::scoped_lock lock(m_frame.mutex);
         body.number("flagsAtLastPaint", m_frame.recent[0]);
-        body.number("nextFieldAtLastPaint", m_frame.recent[1]);
+        body.number("phaseAtLastPaint", m_frame.recent[1]);
     }
     // The display pointer, the vtable it holds and its fields are one reading
     // of the probe's state under its lock, not three unlocked ones.
