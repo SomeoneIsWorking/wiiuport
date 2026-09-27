@@ -142,11 +142,23 @@ constexpr uint32_t orImmediate(uint32_t address) {
 constexpr uint32_t kReadDisplayPhase = 0x801e0074;  // lwz  r0,0x74(r30)  from 0x0274c2c4
 constexpr uint32_t kWriteDisplayPhase = 0x901e0074; // stw  r0,0x74(r30)  from 0x0274c38c
 
-// The most words any stand-in is: the swap-interval call, two loop bodies, and
-// the branch back. The block is reserved once, at startup, for this many.
-// The most words any stand-in is: the seven of the one-vblank form, one more
-// than the rest need. The block is reserved once, at link time.
-constexpr size_t kMaxWords = 7;
+// How many words of the loader's arena this mod reserves, once, at link time.
+//
+// **This is a reservation, not a description of the largest payload, and the two are different
+// numbers.** The arena is a bump allocator shared with every other module in the product, so the
+// block is taken before any mode is chosen and a payload that outgrows it does not fail -- it
+// writes over whatever was allocated next. Measured: a reservation of seven words and a payload of
+// eleven put this mod's block at `0x00e05880`, the logic gate's at `0x00e0589c`, and the gate's
+// counter stub landed in the stand-in's second call. The paint rate read 59.99 a second and the
+// gate counted zero, because the thing being measured at sixty was one paint and half a gate.
+//
+// So the rule has one owner, `payload()`, which refuses a payload that does not fit -- the same
+// refusal it already gives a branch that cannot reach, for the same reason: a stand-in that cannot
+// be built correctly must not be built. And `paint_tests.cpp` enumerates every mode and asserts
+// each one's payload fits, so a mode added later that outgrows the reservation fails the build
+// rather than the run. The two duplicated comment lines that stood here both claimed the number was
+// the largest any stand-in needed; neither was true, and neither is the rule now.
+constexpr size_t kReservedWords = 11;
 
 // A relative branch reaches 32 MiB either side of where it stands, which is
 // the fork's own rule for the same instruction.
@@ -525,6 +537,17 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
         return std::nullopt;
     }
     words.push_back(branchTo(backAt, kDisplayLoopTop, false));
+
+    // The reservation, enforced where the words are built rather than where they are written.
+    //
+    // This is the one rule about the block's size, and it is here for the same reason the reach
+    // check above is here: a stand-in that cannot be built correctly must not be built. Writing
+    // past the reservation is not a fault of its own -- the arena is a bump allocator, so the words
+    // land in whatever module asked for memory next, and the display thread then branches into
+    // someone else's stub. That was measured, not hypothesised: see `kReservedWords`.
+    if (words.size() > kReservedWords) {
+        return std::nullopt;
+    }
     return words;
 }
 
@@ -552,9 +575,9 @@ void WindWakerPaint::reserve(std::string& refusal) {
     // for: the loader's arena expects to be asked while it is linking, and the
     // one thing this mod does not need to do while the title is running is
     // allocate. Enabling is then a single word.
-    m_block = m_allocateCode(4 * kMaxWords);
+    m_block = m_allocateCode(4 * kReservedWords);
     if (m_block == 0) {
-        m_reservationRefusal = "the loader's arena had no " + std::to_string(4 * kMaxWords) +
+        m_reservationRefusal = "the loader's arena had no " + std::to_string(4 * kReservedWords) +
                                " bytes of executable guest memory";
         refusal = m_reservationRefusal;
         return;

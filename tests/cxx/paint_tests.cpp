@@ -664,6 +664,30 @@ void wiiuport::tests::runPaintTests() {
         }
     }
     {
+        // **Every mode's payload fits the reservation.** The arena is a bump allocator shared with
+        // every other module, so a payload that outgrows the reservation does not fail -- it writes
+        // over the next module's stub, and the display thread branches into it. Measured: a
+        // reservation of seven words against a payload of eleven put the logic gate's counter stub
+        // inside this mod's second call, and the paint rate read sixty while the gate counted zero.
+        //
+        // Enumerated rather than asserted once, so a mode added later that outgrows the reservation
+        // fails here instead of on a display thread that may not survive the arming.
+        for (long long number = 0; number <= 13; number++) {
+            const auto mode = WindWakerPaint::modeFrom(number);
+            if (!mode.has_value()) {
+                check::isTrue(number != 13, "and every number in that range still names a mode");
+                continue;
+            }
+            const auto words = WindWakerPaint::payload(0x00e07000, *mode);
+            check::isTrue(words.has_value(), "mode " + std::to_string(number) + " (" +
+                                                 std::string(WindWakerPaint::modeName(*mode)) +
+                                                 ") is built where the" + " loop is in reach");
+            check::isTrue(words.has_value() && words->size() <= 11,
+                          "  and fits the eleven words it reserved: " +
+                              std::to_string(words.has_value() ? words->size() : 0) + " of 11");
+        }
+    }
+    {
         // **The frame carried as a literal, twice.** This is the shape that can call the frame
         // rather than whatever slot 0xcc holds, and slot 0xcc holds the stand-in once this mod is
         // installed.
