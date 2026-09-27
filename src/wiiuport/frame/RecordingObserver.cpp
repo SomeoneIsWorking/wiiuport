@@ -56,12 +56,12 @@ void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly
     recorded.objectAddress = m_objectScope == nullptr ? 0u : m_objectScope->current();
     std::span<const uint32_t> sources = sourceWordsOf(assembly);
     recorded.blockSources.assign(sources.begin(), sources.end());
-    // The same words, for the base measurement: `(bufferId, physicalAddress)` pairs, and
-    // `address - offset` is the base the title is using. Handed over here because the observer
-    // is the one place that sees both the binding's relative offset and the draw's real
-    // addresses, in that order.
-    if (m_blockBase != nullptr) {
-        m_blockBase->observe(recorded.blockSources);
+    // The same words, for the address measurement: `(bufferId, physicalAddress)` pairs, which
+    // are the draw's real block addresses and the only ones the runtime has. Handed over here
+    // because the observer is the one place that sees both the descriptor record and the draw
+    // that followed it, in that order.
+    if (m_blockAddress != nullptr) {
+        m_blockAddress->observe(recorded.objectAddress, recorded.blockSources);
     }
     std::span<const float> values(assembly.data, assembly.sizeInBytes / sizeof(float));
     recorded.data.assign(values.begin(), values.end());

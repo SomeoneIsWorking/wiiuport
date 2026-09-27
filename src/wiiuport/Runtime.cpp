@@ -115,8 +115,8 @@ void Runtime::installHooks() {
     m_blocks.setVertexPoseHistory(&m_vertexHistory);
     m_blockRing.setFrameCounter(&m_paint.paintCounter());
     m_blocks.setBlockRing(&m_blockRing);
-    m_blocks.setBlockBase(&m_blockBase);
-    m_recorder.setBlockBase(&m_blockBase);
+    m_blocks.setBlockAddress(&m_blockAddress);
+    m_recorder.setBlockAddress(&m_blockAddress);
     m_nodePose.install();
     m_paint.install();
     m_blocks.install();

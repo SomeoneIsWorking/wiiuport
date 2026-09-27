@@ -6,7 +6,7 @@
 #include "wiiuport/title/ObjectIdentityScope.h"
 #include "wiiuport/title/ObjectPoseHistory.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
-#include "wiiuport/title/UniformBlockBase.h"
+#include "wiiuport/title/UniformBlockAddress.h"
 #include "wiiuport/title/UniformBlockRing.h"
 #include "wiiuport/title/VertexPoseHistory.h"
 
@@ -72,12 +72,18 @@ class UniformBlockCensus {
     //
     // Measured, once, on the real title: **the word at +0x0c reads 0x40 for every object, and
     // 0x40 is 64 bytes**, which agrees with 233 whole-block scans of a 64-byte block finding no
-    // rigid transform in one. So +0x0c is the size. The word at +0x04 is the address, and
-    // `blockOf` says it is *relative to a base the title set elsewhere*.
+    // rigid transform in one. So +0x0c is the size and +0x04 is the address -- and the binder's
+    // decompilation agrees, modulo one thing worth stating: `FUN_027ff88c` passes `entry[0x0c]`
+    // as the 2nd argument and `entry[0x04]` as the 3rd, while the fork's export maps its `gpr[4]`
+    // to its own `size` and its `gpr[5]` to its `virtualAddress`, the reverse of the documented
+    // GX2 order. So the *fork* is the odd one out, and it is the fork's reading -- address at
+    // `+0x04` -- that these constants follow.
     //
-    // The names now say which is which. `kEntryBlockSize` is the one a caller may use as a
-    // length; `kEntryBlockAddress` is a relative offset and reading it as a guest address is
-    // the mistake this comment now exists to prevent.
+    // **The names say which is which, and neither is a relative offset.** There is no base: the
+    // fork's `_GX2SubmitUniformBlock` writes `memory_virtualToPhysical(entry[0x04])` into the
+    // uniform block register with nothing added to it. `kEntryBlockSize` is the word a caller may
+    // use as a length; `kEntryBlockAddress` is the word the address comes from, and reading it as
+    // a *guest* address is the mistake this comment exists to prevent -- it is a physical one.
     static constexpr uint32_t kEntriesOffset = 0x10;
     static constexpr uint32_t kCursorOffset = 0x4c;
     static constexpr uint32_t kEntrySize = 0x1c;
@@ -85,8 +91,11 @@ class UniformBlockCensus {
     static constexpr uint32_t kEntryBlockSize = 0x0c;
     // How many words a descriptor entry is, all of them reported.
     static constexpr size_t kEntryWords = kEntrySize / sizeof(uint32_t);
-    // The list is allocated with two entries; a cursor above that is a reading
-    // this census reports rather than one it explains.
+    // The list is *allocated* with two entries -- a cursor above 0 is a reading this census reports
+    // rather than one it explains -- but **only the first is mapped**: the entry at
+    // `kEntriesOffset + kEntrySize` failed to read in 199,280 of 199,280 bindings. So this is the
+    // allocated depth, not the readable one, and nothing may be read at the far slot as though it
+    // were there.
     static constexpr int kEntries = 2;
     // How many worked examples the report carries, each one a binding with the
     // cursor, the block's offset and the block's size.
@@ -137,9 +146,9 @@ class UniformBlockCensus {
     // place that knows which block a binding names. Null is allowed and reported as null.
     void setBlockRing(UniformBlockRing* ring);
 
-    // The base the relative offset is relative to, measured against the draw's real block
-    // addresses. Null is allowed and reported as null.
-    void setBlockBase(UniformBlockBase* base);
+    // Where the block is, and which word of the record says so. Null is allowed and reported
+    // as null.
+    void setBlockAddress(UniformBlockAddress* address);
 
     UniformBlockCensus(Register registerProbe, ReadWord readWord,
                        ObjectPoseHistory::ReadWords readWords,
@@ -188,24 +197,21 @@ class UniformBlockCensus {
         // is only a ring from the object that owns it.
         uint32_t object = 0;
         std::array<uint32_t, kEntryWords> entry{};
-        // Each slot's block *offset* and size, taken from the words the binder's
-        // own decompilation takes them from.
+        // Each slot's block address and size, taken from the words the binder's own
+        // decompilation takes them from.
         //
-        // Offsets and not addresses: the title binds them against a base it sets
-        // elsewhere. Resolving one to an address by trying entry words until one
-        // reads finds the object itself, whose vtable reads perfectly well -- a
-        // wrong answer that looks like a right one, and which is what the first
-        // attempt did.
+        // `block` is **0 when no word of the record names the address**, which is what the
+        // measurement currently says: five of the seven words read as guest memory, so
+        // `addressWordByMapping` refuses rather than picking one, and a block of 0 is the
+        // refusal. It was not always a refusal -- naming a word that read turned out to name the
+        // record's own leading pointer, and the ring then compared the record with itself.
         uint32_t block = 0;
         uint32_t otherBlock = 0;
         uint32_t blockSize = 0;
         uint32_t otherBlockSize = 0;
-        // Which of those words, added to the entry's offset, is somewhere the
-        // guest can actually read. The binder hands the GPU a *relative* offset,
-        // so the block's address is a base the title set elsewhere, and the
-        // entry is the only place left to look for it. This does not decide
-        // which word it is: it reports which ones read, and what they hold is
-        // then dumped and looked at.
+        // Which words of the record read as guest addresses **on their own**, with nothing added.
+        // Adding one word to every other word -- the first version -- assumed a base, and that
+        // assumption is what made "word 0 reads" an artefact rather than a finding.
         std::array<bool, kEntryWords> mapped{};
         // The other of the two entries, read the same way, because the question
         // the ring exists to answer is what the *other* slot holds: if it still
@@ -239,10 +245,20 @@ class UniformBlockCensus {
     // previous tick drew from.
     void readEntry(uint32_t object, uint32_t cursor, std::array<uint32_t, kEntryWords>& entry,
                    bool& read) const;
-    uint32_t blockOf(const std::array<uint32_t, kEntryWords>& entry,
-                     std::array<bool, kEntryWords>& mapped, uint32_t& size) const;
-    void mapWords(uint32_t object, const std::array<uint32_t, kEntryWords>& entry,
-                  std::array<bool, kEntryWords>& mapped) const;
+    uint32_t blockOf(const std::array<uint32_t, kEntryWords>& entry, uint32_t& size) const;
+
+    // Which word of the record is the block's address, decided by whether the word reads as guest
+    // memory on its own, or -1 when no word does in a large enough share of the bindings. -1 is
+    // the honest answer for a record whose address is not one of its own words, which is what the
+    // relative-offset reading implied and the decompilation refutes.
+    int addressWordByMapping() const;
+
+    // How large a share of the bindings a word must read in to be called the address. A majority
+    // rather than a lead: several words of a record are small integers that land in mapped memory
+    // often enough to lead by accident.
+    static constexpr double kMappedWordShare = 0.5;
+    void mapWords(const std::array<uint32_t, kEntryWords>& entry,
+                  std::array<bool, kEntryWords>& mapped);
 
     Register m_register;
     ReadWord m_readWord;
@@ -253,13 +269,22 @@ class UniformBlockCensus {
     const DrawAttributeCensus* m_drawAttributes = nullptr;
     const VertexPoseHistory* m_vertexHistory = nullptr;
     UniformBlockRing* m_ring = nullptr;
-    UniformBlockBase* m_base = nullptr;
+    UniformBlockAddress* m_address = nullptr;
     Binder m_first{*this, false};
     Binder m_second{*this, true};
     std::atomic<uint64_t> m_bindings{0};
     mutable std::mutex m_mutex;
     // A cursor histogram: how many bindings read each entry of the two.
     std::array<uint64_t, kEntries> m_cursors{};
+    // Per word, how many bindings it read as guest memory, over `m_wordTests` bindings.
+    std::array<std::atomic<uint64_t>, kEntryWords> m_wordReads{};
+    std::atomic<uint64_t> m_wordTests{0};
+    // Why a record was not handed to the address measurement. A silent skip is a pairing that
+    // went wrong without saying so, and the first version of this published nothing at all for
+    // four minutes of a run before anyone could see why.
+    std::atomic<uint64_t> m_otherRecordsRead{0};
+    std::atomic<uint64_t> m_otherRecordsUnread{0};
+    std::atomic<uint64_t> m_recordsPublished{0};
     // And the ones that named something else, which the report carries as itself.
     uint64_t m_cursorsOutOfRange = 0;
     // Whether the ring turns per bind or per frame, counted rather than read:

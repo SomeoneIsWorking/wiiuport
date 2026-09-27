@@ -69,8 +69,8 @@ void UniformBlockCensus::setBlockRing(UniformBlockRing* ring) {
     m_ring = ring;
 }
 
-void UniformBlockCensus::setBlockBase(UniformBlockBase* base) {
-    m_base = base;
+void UniformBlockCensus::setBlockAddress(UniformBlockAddress* address) {
+    m_address = address;
 }
 
 void UniformBlockCensus::setIdentityScope(ObjectIdentityScope* scope) {
@@ -116,18 +116,32 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
     // identified. So the size goes over -- 64 bytes, measured, agreeing with 233 whole-block
     // scans of a 64-byte block -- and the address does not, because a relative offset read as a
     // guest address is a wrong answer rather than a missing one.
-    if (binding.read && m_ring != nullptr) {
-        m_ring->bindSize(object, binding.entry[UniformBlockCensus::kEntryBlockSize / 4]);
-    }
-    // The relative offset, published for the base measurement: the draw's own uniform assembly
-    // follows this call with the block's real guest address, and `address - offset` is the
-    // base the title is using.
-    if (binding.read && m_base != nullptr) {
-        m_base->publish(object, binding.entry[UniformBlockCensus::kEntryBlockAddress / 4],
-                        binding.entry[UniformBlockCensus::kEntryBlockSize / 4]);
-    }
     if (binding.read) {
-        mapWords(object, binding.entry, binding.mapped);
+        mapWords(binding.entry, binding.mapped);
+        // Counted for the bound slot only. The other slot's words are counted too and would
+        // double every number here while describing a record that was not the one bound, so the
+        // address word is decided from the record the binder was actually holding.
+        for (size_t word = 0; word < kEntryWords; word++) {
+            if (binding.mapped[word]) {
+                m_wordReads[word]++;
+            }
+        }
+        m_wordTests++;
+        // The ring, which needs a *place* to re-read. Placed here rather than before the mapping so
+        // that this binding has already counted towards the answer: the word that is the address is
+        // decided by measurement (`addressWordByMapping`) rather than assumed, so until a word has
+        // been shown to name guest memory in a majority of bindings the ring is told the size and
+        // nothing else and reports zero comparisons -- which is honest where naming an offset is
+        // not.
+        if (m_ring != nullptr) {
+            const int word = addressWordByMapping();
+            if (word < 0) {
+                m_ring->bindSize(object, binding.entry[kEntryBlockSize / 4]);
+            } else {
+                m_ring->bind(object, binding.entry[static_cast<size_t>(word)],
+                             binding.entry[kEntryBlockSize / 4]);
+            }
+        }
         // The other of the two, read the same way. This is the slot a blend
         // reads: if it still holds the previous tick's pose, the two ticks'
         // values are both in memory when the tick binds and the in-between frame
@@ -139,17 +153,33 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
             }
         }
         readEntry(object, binding.otherCursor, binding.otherEntry, binding.otherRead);
-        mapWords(object, binding.otherEntry, binding.otherMapped);
-        binding.block = blockOf(binding.entry, binding.mapped, binding.blockSize);
-        binding.otherBlock =
-            blockOf(binding.otherEntry, binding.otherMapped, binding.otherBlockSize);
-        // What those two blocks hold, read now, while the binder is about to hand
-        // them to the GPU. The entry's word at `+0x04` is the block's own address --
-        // the two slots of every object measured are exactly `0x100` apart, and the
-        // word at `+0x0c` the binder passes to `GX2Set*UniformBlock` is `0x40` for
-        // every one of them, a constant and so an offset within the block rather than
-        // a size. Read before the lock, because a binding on the display thread must
-        // not queue behind a report being written.
+        // Both records, published whole. The word that names the block's address is decided by
+        // which of them the draw's real addresses match, and both slots are quoted raw so the
+        // decision can be read off two records of one object rather than taken on trust.
+        if (binding.otherRead) {
+            m_otherRecordsRead.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            m_otherRecordsUnread.fetch_add(1, std::memory_order_relaxed);
+        }
+        // Published from the bound record alone. Waiting on the other slot published nothing at
+        // all -- 179,597 of 179,597 other-slot reads failed, because that entry is not mapped --
+        // and the measurement that was supposed to name the address word never ran at all.
+        if (m_address != nullptr) {
+            m_address->publish(object, std::span<const uint32_t>(binding.entry));
+            m_recordsPublished.fetch_add(1, std::memory_order_relaxed);
+        }
+        mapWords(binding.otherEntry, binding.otherMapped);
+        binding.block = blockOf(binding.entry, binding.blockSize);
+        binding.otherBlock = blockOf(binding.otherEntry, binding.otherBlockSize);
+        // What the bound block holds, read now, while the binder is about to hand it to the GPU.
+        //
+        // **The `0x100`-apart claim is withdrawn.** It came from `mapWords`, which added one word
+        // to every other word and so produced differences out of unmapped memory; the second
+        // entry is not mapped at all (199,280 of 199,280 reads failed), so there is no second
+        // block here and nothing to be 0x100 from. What is passed is the record's own size word
+        // and the same word from the other record, which is the only pair of sizes this binder
+        // hands over. Read before the lock, because a binding on the display thread must not queue
+        // behind a report being written.
         m_poseHistory.observe(object, binding.entry[kEntryBlockSize / 4],
                               binding.otherEntry[kEntryBlockSize / 4]);
     }
@@ -226,30 +256,65 @@ void UniformBlockCensus::readEntry(uint32_t object, uint32_t cursor,
 // the product for a gigabyte and the product died, so it is reported as it
 // stands and never used as a length.
 uint32_t UniformBlockCensus::blockOf(const std::array<uint32_t, kEntryWords>& entry,
-                                     std::array<bool, kEntryWords>& mapped, uint32_t& size) const {
-    const uint32_t offset = entry[kEntryBlockAddress / 4];
+                                     uint32_t& size) const {
+    // **There is no base.** The binder at 0x027ff88c / 0x027ff9c0 decompiles to
+    // `GX2SetVertexUniformBlock(iVar5, uVar4, uVar6)` with `uVar4 = entry[0x0c/4]` and
+    // `uVar6 = entry[0x04/4]`, and the fork's `_GX2SubmitUniformBlock` writes one of those two
+    // straight into the uniform block register as `memory_virtualToPhysical(...)` with nothing
+    // added to it. So the two words are the address and the size, in one order or the other, and
+    // the earlier reading of `+0x04` as a relative offset -- with a base to be found -- was the
+    // difference of a size and an address. The word that is the address is decided by measurement
+    // (`addressWordByMapping`, and `title::UniformBlockAddress` by a second route) and not here.
     size = entry[kEntryBlockSize / 4];
-    (void)mapped;
-    // The offset is relative to a base the title set elsewhere, and the only
-    // bases in hand are the other slot of the same ring and the object itself.
-    // Both are reported rather than one being chosen, because choosing is what
-    // made the first attempt name the object.
-    return offset;
+    const int word = addressWordByMapping();
+    return word < 0 ? 0 : entry[static_cast<size_t>(word)];
 }
 
-void UniformBlockCensus::mapWords(uint32_t object, const std::array<uint32_t, kEntryWords>& entry,
-                                  std::array<bool, kEntryWords>& mapped) const {
-    (void)object;
-    // Which words, added to the offset, name memory the guest can read. The
-    // offset is the entry's own word at +0x0c, which the binder passes to the GPU
-    // and which is relative to a base the title set elsewhere -- so the entry is
-    // the only place left to look for the address, and every word that reads is
-    // reported rather than the first one that happened to work.
+void UniformBlockCensus::mapWords(const std::array<uint32_t, kEntryWords>& entry,
+                                  std::array<bool, kEntryWords>& mapped) {
+    // Each word tested as an address on its own, with nothing added to it.
+    //
+    // The first version added the word at `+0x04` to every other word, which assumed what it was
+    // trying to find: that one of them was a base. That assumption is what produced 233 whole-block
+    // scans all agreeing, because `word + 0x40`-ish arithmetic lands in mapped memory often enough
+    // to look like a hit. Read straight, a word either is the address or is not, and the count of
+    // how often each one reads is what names it -- no base needed and none assumed.
     uint32_t probe = 0;
     for (size_t word = 0; word < kEntryWords; word++) {
-        const uint32_t base = entry[word] + entry[kEntryBlockAddress / 4];
-        mapped[word] = m_readWord(base, probe) && m_readWord(base + 4, probe);
+        const uint32_t at = entry[word];
+        mapped[word] = m_readWord(at, probe) && m_readWord(at + 4, probe);
     }
+}
+
+int UniformBlockCensus::addressWordByMapping() const {
+    // The word that reads as guest memory in a large share of the bindings. Every word is tested
+    // the same way on the same bindings, so this is a majority rather than a lead: a lead is a
+    // guess with a number on it, and several words of a record are small integers that land in
+    // mapped memory often enough to lead by accident.
+    if (m_wordTests == 0) {
+        return -1;
+    }
+    // **Exactly one word, or nothing.** Measured: five of the record's seven words read as guest
+    // memory in every one of 179,597 bindings, and word 3 in none of them. A route that returns
+    // the first word to clear a majority therefore returns word 0 -- the record's own leading
+    // pointer -- and the ring then re-reads the descriptor instead of the block, which is exactly
+    // what it did: 16 of 16 comparisons agreed, because it was comparing the record with itself.
+    //
+    // So a majority is not the bar here; *being the only one* is. With five words reading, this
+    // route has no answer to give and says so, and the word is named instead by
+    // `title::UniformBlockAddress`, which compares the record's words against the block addresses
+    // the draw actually sourced -- a question where a wrong word loses rather than ties.
+    int found = -1;
+    for (size_t word = 0; word < kEntryWords; word++) {
+        if (static_cast<double>(m_wordReads[word]) / static_cast<double>(m_wordTests.load()) >=
+            kMappedWordShare) {
+            if (found >= 0) {
+                return -1;
+            }
+            found = static_cast<int>(word);
+        }
+    }
+    return found;
 }
 
 std::string UniformBlockCensus::json() const {
@@ -268,6 +333,58 @@ std::string UniformBlockCensus::json() const {
     }
     body.raw("cursors", cursors.text());
     body.number("cursorsOutOfRange", m_cursorsOutOfRange);
+    body.number("otherRecordsRead", m_otherRecordsRead.load());
+    body.number("otherRecordsUnread", m_otherRecordsUnread.load());
+    body.number("recordsPublished", m_recordsPublished.load());
+    // The address word by the mapping route, with every word's share beside it: this is the
+    // second, independent answer to which word is the address, and the two routes agreeing is
+    // what makes it an answer rather than a coincidence that repeated.
+    {
+        const uint64_t tests = m_wordTests.load();
+        const int named = addressWordByMapping();
+        body.number("addressWordTests", tests);
+        size_t candidates = 0;
+        for (const auto& reads : m_wordReads) {
+            if (tests != 0 && static_cast<double>(reads.load()) / static_cast<double>(tests) >=
+                                  kMappedWordShare) {
+                candidates++;
+            }
+        }
+        body.number("addressWordCandidates", candidates);
+        if (named < 0) {
+            body.raw("addressWord", "null");
+            // `string` and not `raw`: a bare word is not JSON, and a report that has to be parsed
+            // to be read is a report that can fail to parse.
+            body.string("addressWordRefused",
+                        candidates == 0 ? "noWordReads" : "severalWordsReadSoNoneIsDistinguished");
+            uint64_t best = 0;
+            for (const auto& reads : m_wordReads) {
+                best = std::max(best, reads.load());
+            }
+            // Null rather than a division of nothing: `0/0` printed as `nan`, which reads as a
+            // measurement and is not one.
+            body.raw("bestWordShare", tests == 0 ? "null"
+                                                 : JsonBody::real(static_cast<double>(best) /
+                                                                  static_cast<double>(tests)));
+        } else {
+            body.number("addressWord", named);
+            body.number("addressWordOffset", static_cast<uint32_t>(named) * 4);
+            body.number("addressWordReads", m_wordReads[static_cast<size_t>(named)].load());
+        }
+        body.raw("addressWordShare", JsonBody::real(kMappedWordShare));
+        JsonBody shares;
+        for (size_t word = 0; word < kEntryWords; word++) {
+            JsonBody one;
+            one.number("offset", word * 4);
+            one.number("reads", m_wordReads[word].load());
+            one.raw("share",
+                    JsonBody::real(tests == 0 ? 0.0
+                                              : static_cast<double>(m_wordReads[word].load()) /
+                                                    static_cast<double>(tests)));
+            shares.object(std::to_string(word), one.text());
+        }
+        body.object("wordReadShares", shares.text());
+    }
     body.number("cursorSwitches", m_cursorSwitches);
     body.number("cursorCompared", m_cursorCompared);
     JsonBody examples;
@@ -287,7 +404,7 @@ std::string UniformBlockCensus::json() const {
         for (size_t word = 0; word < kEntryWords; word++) {
             readable.raw(std::to_string(word).c_str(), binding.mapped[word] ? "true" : "false");
         }
-        one.raw("readableAtOffset", readable.text());
+        one.raw("readableAsAddress", readable.text());
         // The other slot, whole, because whether the previous tick's values are
         // still in memory when this tick binds is the question a blend rests on
         // and it is answered by reading that slot and not by assuming a ring.
@@ -311,8 +428,10 @@ std::string UniformBlockCensus::json() const {
         // These are offsets, not addresses, and the report says so: the title
         // binds them against a base it sets elsewhere, and naming an address
         // here is what made a first attempt report the object as the block.
-        one.number("blockOffset", binding.block);
-        one.number("otherBlockOffset", binding.otherBlock);
+        // Named `address` and not `offset` because there is no base: the decompilation shows
+        // the binder handing one of these two words straight to the uniform block register.
+        one.number("blockAddress", binding.block);
+        one.number("otherBlockAddress", binding.otherBlock);
         one.raw("read", binding.read ? "true" : "false");
         examples.raw(std::to_string(index).c_str(), one.text());
     }
@@ -359,7 +478,7 @@ std::string UniformBlockCensus::json() const {
     // are still there when tick N paints. Measured by re-reading the earlier address, so it is
     // in the report rather than in a note beside it.
     body.object("blockRing", m_ring == nullptr ? "null" : m_ring->json());
-    body.object("blockBase", m_base == nullptr ? "null" : m_base->json());
+    body.object("blockAddress", m_address == nullptr ? "null" : m_address->json());
     if (!m_refusal.empty()) {
         body.string("refusal", m_refusal);
     }

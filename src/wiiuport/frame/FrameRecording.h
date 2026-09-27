@@ -41,15 +41,20 @@ struct RecordedUniformAssembly {
     // Whether the stage compares against a depth texture: it looks up a map,
     // such as the light's, that the frame drew before it.
     bool looksUpDepthMap{false};
-    // The guest addresses of the uniform blocks this draw sourced, as
-    // (bufferId, physicalAddress) pairs.
+    // Word 0 of the uniform-block register banks this draw's *shader* names, as
+    // (bufferId, value) pairs.
     //
-    // **Measured not to be an identity.** This was documented here as "the engine's own
-    // storage for the object, and the only identity a recorded draw carries", and over 836,990
-    // assembled buffers it matched exactly one identity across the 438,872 that had sources:
-    // the uniform block is re-uploaded at a new guest address each frame, so the set of
-    // addresses is nearly unique per draw and the same object's assemblies never meet. It is
-    // kept because it is what the draw actually read, and it is no longer called an identity.
+    // **Measured not to be the block this draw sourced, and not an identity.** This was
+    // documented here as "the engine's own storage for the object, and the only identity a
+    // recorded draw carries". Two measurements killed both halves. Over 836,990 assembled
+    // buffers it matched exactly one identity across the 438,872 that had sources. And the
+    // reader picks each bank by the shader's own group while the guest writes each bank by the
+    // index it passes to `GX2Set*UniformBlock`, so the value is whatever last wrote that
+    // register slot: 1,555 distinct values over 382,575 sourced addresses, none of which any
+    // word of the title's descriptor record matches over 142,682 exact per-object pairs.
+    //
+    // Kept because it is a faithful reading of the register bank, and no longer called the
+    // block's address or an identity. See LatteFrameHooks.h.
     std::vector<uint32_t> blockSources;
     // The node whose draw this assembly belongs to, when the title's own code has said so.
     //

@@ -1333,18 +1333,153 @@ address. Then the discriminator, whose null case is **two paints of one pass** �
 condition 4 asks for and the thing two *consecutive presents* are not, since with the tick at
 thirty consecutive presents are a tick apart.
 
-**What this leaves, stated rather than assumed.** The block the descriptor's `+0x04` names is
-a 256-byte block in a pool of fixed-size blocks, and it holds no rigid transform at any offset
-at the moment it is bound. The title's own document found a twelve-float 3x4 at `+0xc4` by
-dumping a block while the title was **held at a frame's end** — after the draw, so at a
-different moment from the bind, and the moment is the whole of the difference. So either the
-filler writes this block later in the frame than the bind that names it, or this is a
-different block from the one the dump was of. **The next read separates those two**, and it is
-bounded: hold the title at a frame's end with `POST /gate?pause=1`, then read every candidate
-block — the `+0x04` word of each object's descriptor, a pool already known and already
-0x100-strided — and test each for a rigid 3x4 at every 4-aligned offset. A hit names the
-block and the offset; no hit over the whole pool says the pose is not in that pool at all,
-which is a different answer and a shorter search for the next one.
+### The base was a phantom, and the binder says so
+
+Everything above was built on one word: that the descriptor entry's `+0x04` is a **relative
+offset** and that a base the title set elsewhere had to be found before anything could be
+re-read. The binder at `0x027ff88c` / `0x027ff9c0` was decompiled to find that base, and the
+decompilation is what removed it:
+
+```c
+uVar6 = *(uint32 *)(iVar2 + 4);      /* 3rd argument */
+uVar4 = *(uint32 *)(iVar2 + 0xc);   /* 2nd argument */
+GX2SetVertexUniformBlock(iVar5, uVar4, uVar6);
+```
+
+and on the host side, `external/cemu/src/Cafe/OS/libs/gx2/GX2_shader_legacy.cpp`:
+
+```c
+void _GX2SubmitUniformBlock(uint32 registerBase, uint32 index, MPTR virtualAddress, uint32 size)
+{
+    gx2WriteGather_submit(..., registerBase + index * 7,
+                          memory_virtualToPhysical(virtualAddress),
+                          size - 1, ...);
+}
+```
+
+**Nothing is added to either word.** One of them becomes `memory_virtualToPhysical(...)` in the
+uniform block register and the other becomes `size - 1`. So the two words are the address and
+the size, in one order or the other, and *there is no base to find*: the earlier arithmetic
+measured the difference of a size and an address, which is a number with no meaning, and it
+found none.
+
+That measurement is deleted rather than left to rot. `UniformBlockBase` histogrammed
+`address - offset` over 180,707 bindings and 218,850 candidates from 815,562 assemblies, and
+reported `base: null` with the leader at a **2.0% share** against a 20% bar — correct, and for
+the wrong reason twice over:
+
+- **The corpus was a lottery.** Only **95,943 of 815,562** assemblies (11.8%) had a binding
+  pending, because 815,562 assemblies arrive against 180,707 bindings, so most assemblies were
+  paired with whatever record happened to be last. **84,764 of 180,707** bindings (47%) were
+  overwritten before an assembly arrived. A wrong pairing lowers every candidate's count equally
+  and a right one is invisible, so the histogram could not have found a base even if the base
+  were real and the pairing exact.
+- **The 4096-entry map was saturated**: 153,407 candidates were refused, so the leader's 2.0%
+  was a share of a truncated set and the real base, if any, could have been among the refused.
+
+The pairs are now by the **title's own object** rather than by adjacency: the assembly names the
+object the draw is in the middle of (`ObjectIdentityScope::current()`) and the binder named the
+same object, so the pair is exact and identity is the title's, read from its own binder.
+
+### `mapWords` assumed the thing it was looking for, and found itself
+
+`mapWords` read each word of the record **added to the word at `+0x04`**, on the theory that one
+of them was a base. Each word is now read as an address on its own, with nothing added. Measured
+over **199,280** bindings:
+
+| word | reads | share |
+|---|---|---|
+| `+0x00` | 199,280 | 1.00 |
+| `+0x04` | 199,280 | 1.00 |
+| `+0x08` | 199,280 | 1.00 |
+| `+0x0c` | **0** | 0.00 |
+| `+0x10` | **0** | 0.00 |
+| `+0x14` | 199,280 | 1.00 |
+| `+0x18` | 199,280 | 1.00 |
+
+**Five of the seven words read in every single binding**, so a "first word to clear a majority"
+rule returns word 0 — the record's own leading pointer. That is what it returned, the ring was
+wired to it, and the ring reported:
+
+> is tick N-1's uniform block still there when tick N paints? **16 of 16 comparisons say still
+> present** … 8 consecutive pairs used different addresses, which is double buffering measured
+
+**That result is withdrawn.** The ring was re-reading the descriptor record and comparing it with
+itself, which is the most agreement a measurement can produce and means nothing. A route that
+cannot discriminate must say so rather than return the first index, so `addressWordByMapping`
+now requires that **exactly one** word read, and reports
+`addressWordRefused: severalWordsReadSoNoneIsDistinguished` with the candidate count when more
+than one does. The ring gets a size and no address, and reports **0 of 0** comparisons — honest,
+where a named word was not.
+
+### `kEntries = 2` is wrong, and the other slot does not exist
+
+`readEntry` for the second slot failed in **199,280 of 199,280** bindings: the entry at
+`object + 0x10 + kEntrySize` is not mapped. So this binder's descriptor list has one entry it can
+read, and a publication that waited on the second slot waited for memory that does not exist —
+which is why the address measurement reported `0 bindings` for two full runs before the
+`otherRecordsRead` / `otherRecordsUnread` counters were added to say so. **The earlier claim that
+"the two slots of every object measured are exactly `0x100` apart" is withdrawn**: it came from
+the same `mapWords` arithmetic, reading unmapped memory as though it were a difference.
+
+### What is left, and it is a real answer about the draw
+
+The draw's own block addresses are not in doubt: **1,555 distinct values** over 382,575 sourced
+addresses, from the fork's `(bufferId, physicalAddress)` pairs. What is in doubt is which record
+word names one of them. Over **142,682 exact object-keyed pairs**, **no word of the record
+matched any of the draw's addresses** — the best word hit **3 times**, a share of 2.1e-05
+against a 50% bar.
+
+**And the records say why.** The report quotes four of them raw, and they are not what a
+descriptor naming a block looks like:
+
+```
+record at 0x3e595304: [1046692688, 1046692864, 1046692864, 64, 64, 50397184, 269917568]
+                    =  [0x3e5953d0, 0x3e595400, 0x3e595400, 0x40, 0x40, 0x03010000, 0x10163e00]
+record at 0x3e597adc: [0x3e5957c0, 0x3e5957e0, 0x3e5957e0, 0x40, 0x40, 0x03010000, 0x10163e00]
+```
+
+- Words 0, 1 and 2 are **pointers `object + 0xCC`, `object + 0xEC`, `object + 0xEC`** — sibling
+  structures, which is exactly why five of the seven words "read as guest memory": they point into
+  the object's own mapped neighbourhood. They are not block addresses and never were.
+- Words 3 and 4 are **both `0x40`**. So the binder hands `GX2Set*UniformBlock` the pair
+  `(0x40, 0x40)` — and the fork writes `memory_virtualToPhysical(0x40) = 0x40` and `size - 1 =
+  0x3f` into the uniform block register. **There is no block address in this record at all.**
+- Word 6 is `0x10163e00`, 0x24c past `cWorldViewMatrix[0]` at `0x10163bb4` — the record points
+  into the title's own global data, and not at a uniform block.
+
+**So the 1,555 distinct addresses are not this binder's.** The fork reads
+`contextRegister[mmSQ_VTX_UNIFORM_BLOCK_START + group.kcacheBankIdOffset / 4]` — word 0 of the
+bank the *shader* names, not the bank the binder wrote. The binder writes `0x40` into the banks
+it names; the values being read come from whatever else last wrote the slot the shader's group
+points at. Which is also why `blockSources` matched **1** identity across 438,872 assemblies when
+it was first measured, and why the comment in `LatteFrameHooks.h` calling it "the only identity a
+recorded draw carries" is wrong: it carries the register file's contents, not the draw's.
+
+**The base route is now a proper measurement rather than a truncated one.** The histogram of
+`address - word` is a **space-saving sketch** of 65,536 slots, not a bounded map: a plain bounded
+map keeps the first keys that arrive and evicts nothing, and with 1,441,075 candidates into 4,096
+slots the whole tail was discarded, so a base that recurred in a large share of draws could have
+been among what was thrown away. The sketch displaces the *least frequent* entry instead, and the
+evictions are counted — its counts are upper bounds, which the report says and the tests assert as
+bounds rather than as equalities.
+
+**What this leaves, stated rather than assumed.** The uniform block's address is **not in the
+descriptor record** — that is now measured over 142,682 exact pairs with the records quoted raw,
+not inferred. It is not reachable by a base, by reading a record word as an address, or by
+matching a record word against the address the draw sourced. The block is somewhere the draw can
+read it from; the record does not say where, and the fork's reported address is a register slot
+this binder never wrote.
+
+**The next read is bounded and it does not need a new guess.** The title's own write is visible in
+the register the binder fills: word 0 `0x40` and word 1 `0x3f` at
+`mmSQ_VTX_UNIFORM_BLOCK_START + index * 7`. Reading the whole uniform-block register bank and
+keeping the slots whose **size word is `0x3f`** — the ones a 64-byte block was written into —
+names the banks the title actually filled, and their word 0 is the address the title meant. The
+size word is the discriminator because it is a small constant the title wrote, where word 0 is
+whatever the register held before. That needs one seam: the register bank beside `UniformAssembly`,
+which today carries the address the *shader* names and not the one the *binder* wrote.
+
 
 It runs on the display thread inside the title's own draw. For each tracked object it reads the pose
 at both blocks the descriptor names, keeps the last three readings with the address each
