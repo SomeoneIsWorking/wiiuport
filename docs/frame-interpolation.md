@@ -909,11 +909,15 @@ title's RPX**: 0 matches over 9,432,460 executable bytes against a control found
 frame's own field usage is measured and the mod's offsets are confirmed against it. Five payload
 shapes have each been measured -- four fault, and the objective's own neither faults nor paints.
 
-One thing is open, and it is the whole of what is left: **the faulting code is in a module this
-project has not analysed.** The second paint enters the loader's arena and leaves it executing
-something outside the title's own code, and the arena is where the mod's stand-in and its probes live.
-The next step is therefore to identify the module the arena address belongs to, which is a question
-about cemu's loader rather than about the title's draw path.
+One thing is open, and it is now specific: **which branch of the second paint lands in the loader
+arena's data.** The arena's base holds the HLE registry's code and symbol names and then zero padding,
+the fault's program counter is in that range on every run, and the recompiler is registered for the
+whole 2 MiB because the loader does put real code there -- so a branch into the registry is translated
+as instructions. The display object's being cleared is a consequence of the frame never having been
+entered, not a cause. The candidates are the stand-in's own control flow after the frame returns, or
+one of the frame's five `bctrl`s; the five targets come from `display+0x24`, measured identical across
+paints, so the targets are not the divergence. This is a question about the mod's own code, not about
+the title.
 
 ### A real bug found on the way, which is not this fault
 
