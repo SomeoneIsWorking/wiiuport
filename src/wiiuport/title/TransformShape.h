@@ -49,18 +49,45 @@ struct TransformShape {
     // bar finds one at every offset -- a bar that cannot fail.
     static constexpr double kDeterminantFloor = 1e-6;
 
+    // **And a ceiling on the scale, because a floor alone is not a bar either.**
+    //
+    // Measured over 836,990 assembled uniform buffers, the floor-only loose class named an
+    // offset at byte 36 with "rows off unit by 364193" -- held in 262,978 of them. A scale of
+    // 364,193 is a projection constant or a coordinate, not a pose, and a class that counts it
+    // has not found a transform, it has found arithmetic. A transform a renderer multiplies
+    // has rows near unit length; the bound is generous on purpose, at a hundredfold, because
+    // the point is to exclude the numbers that are not transforms rather than to find one.
+    static constexpr float kScaleCeiling = 100.0f;
+
     // How many floats make a 3x4. Three rows of three, then the translation.
     static constexpr size_t kWords = 12;
 
     // Three unit rows, pairwise perpendicular.
     static bool isRigid(const float* words);
 
-    // A non-singular 3x3, whatever its row lengths. The loose class.
+    // A non-singular 3x3 whose rows are within `kScaleCeiling` of unit length. The loose
+    // class: everything a rigid transform is, plus the scaled ones, and nothing that is
+    // arithmetic wearing a 3x3's shape.
     static bool isAffine(const float* words);
+
+    // Whether a 3x3 is a transform by the loose class, with the reason it is not when it is
+    // not: "singular", "tooLarge", or empty. A bar that can only say no cannot be argued
+    // with, and these are the two ways it says no.
+    enum class Affine : uint8_t {
+        Yes,
+        Singular,
+        TooLarge,
+        NotFinite
+    };
+    static Affine classify(const float* words);
 
     // How far the row lengths are from 1, so a scaled transform is visible as a number rather
     // than being silently excluded by the strict class. Zero is rigid.
     static float scaleOf(const float* words);
+
+    // The 3x3's determinant, in double so a large-but-finite matrix does not overflow on the
+    // way to being compared with the floor.
+    static double determinantOf(const float* words);
 
     // The largest absolute difference between two readings of the same `kWords` floats.
     static float deltaOf(const float* before, const float* after);
