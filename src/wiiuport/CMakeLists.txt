@@ -73,6 +73,8 @@ add_library(wiiuport STATIC
   guest/CallerCensus.h
   title/LogicGate.cpp
   title/LogicGate.h
+  title/ObjectPoseHistory.cpp
+  title/ObjectPoseHistory.h
   title/UniformBlockCensus.cpp
   title/UniformBlockCensus.h
   title/WindWakerPaint.cpp

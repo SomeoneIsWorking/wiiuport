@@ -1,5 +1,7 @@
 #include "wiiuport/title/UniformBlockCensus.h"
 
+#include "wiiuport/title/JsonBody.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -7,48 +9,6 @@
 namespace wiiuport::title {
 
 namespace {
-
-// A JSON object written one member at a time, owning the separators and the
-// quoting, so a report cannot come out with a stray quote in it.
-class JsonBody {
-  public:
-    void raw(const char* name, const std::string& value) {
-        separate();
-        m_body += '"';
-        m_body += name;
-        m_body += "\":";
-        m_body += value;
-    }
-
-    void string(const char* name, const std::string& value) {
-        raw(name, "\"" + value + "\"");
-    }
-
-    void number(const char* name, uint64_t value) {
-        raw(name, std::to_string(value));
-    }
-
-    // The body closed, with the newline a report ends on.
-    std::string finish() const {
-        return text() + "\n";
-    }
-
-    // The body closed, without it: for a member of another body.
-    std::string text() const {
-        return m_body + "}";
-    }
-
-  private:
-    void separate() {
-        if (!m_first) {
-            m_body += ',';
-        }
-        m_first = false;
-    }
-
-    std::string m_body = "{";
-    bool m_first = true;
-};
 
 std::string hex(uint32_t value) {
     std::array<char, 11> text{};
@@ -75,8 +35,9 @@ std::string_view installationName(std::optional<GuestCallProbes::Installation> v
 
 } // namespace
 
-UniformBlockCensus::UniformBlockCensus(Register registerProbe, ReadWord readWord)
-    : m_register(registerProbe), m_readWord(readWord) {
+UniformBlockCensus::UniformBlockCensus(Register registerProbe, ReadWord readWord,
+                                       ObjectPoseHistory::ReadWords readWords)
+    : m_register(registerProbe), m_readWord(readWord), m_poseHistory(readWords) {
 }
 
 void UniformBlockCensus::install() {
@@ -127,6 +88,15 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
         binding.block = blockOf(binding.entry, binding.mapped, binding.blockSize);
         binding.otherBlock =
             blockOf(binding.otherEntry, binding.otherMapped, binding.otherBlockSize);
+        // What those two blocks hold, read now, while the binder is about to hand
+        // them to the GPU. The entry's word at `+0x04` is the block's own address --
+        // the two slots of every object measured are exactly `0x100` apart, and the
+        // word at `+0x0c` the binder passes to `GX2Set*UniformBlock` is `0x40` for
+        // every one of them, a constant and so an offset within the block rather than
+        // a size. Read before the lock, because a binding on the display thread must
+        // not queue behind a report being written.
+        m_poseHistory.observe(object, binding.entry[kEntrySizeOffset / 4],
+                              binding.otherEntry[kEntrySizeOffset / 4]);
     }
     std::scoped_lock lock(m_mutex);
     if (std::find(m_seen.begin(), m_seen.end(), object) == m_seen.end()) {
@@ -212,7 +182,6 @@ uint32_t UniformBlockCensus::blockOf(const std::array<uint32_t, kEntryWords>& en
     return offset;
 }
 
-
 void UniformBlockCensus::mapWords(uint32_t object, const std::array<uint32_t, kEntryWords>& entry,
                                   std::array<bool, kEntryWords>& mapped) const {
     (void)object;
@@ -293,6 +262,11 @@ std::string UniformBlockCensus::json() const {
         examples.raw(std::to_string(index).c_str(), one.text());
     }
     body.raw("examples", examples.text());
+    // The pose history, whole, as its own report: what the block the binder names
+    // holds, binding after binding. Whether the title writes the pose before the bind
+    // or after it is what decides whether a blend can be driven from the binder alone,
+    // and it is counted rather than read off the code.
+    body.object("poseHistory", m_poseHistory.json());
     if (!m_refusal.empty()) {
         body.string("refusal", m_refusal);
     }

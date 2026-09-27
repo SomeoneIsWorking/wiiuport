@@ -13,6 +13,7 @@ void runControlTests();
 void runPaintTests();
 void runBlockCensusTests();
 void runLogicGateTests();
+void runObjectPoseHistoryTests();
 void runReplayTests();
 void runSearchTests();
 void runInputTests();

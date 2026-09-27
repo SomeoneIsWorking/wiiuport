@@ -138,7 +138,8 @@ class Runtime {
     title::LogicGate m_logic{&GuestCallProbes::Register, &GuestPatching::AllocateCode,
                              &GuestPatching::AllocateData, &GuestPatching::WriteWord,
                              &GuestPatching::ReadWord};
-    title::UniformBlockCensus m_blocks{&GuestCallProbes::Register, &GuestPatching::ReadWord};
+    title::UniformBlockCensus m_blocks{&GuestCallProbes::Register, &GuestPatching::ReadWord,
+                                      &GuestPatching::ReadWords};
     title::WindWakerPaint m_paint{&GuestCallProbes::Register,      &GuestPatching::AllocateCode,
                                   &GuestPatching::WriteWord,       &GuestPatching::ReadWord,
                                   &GuestPatching::SetSwapInterval, &GuestPatching::SwapInterval};

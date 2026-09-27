@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Cafe/HW/Espresso/GuestCallProbes.h"
+#include "wiiuport/title/ObjectPoseHistory.h"
 
 #include <array>
 #include <atomic>
@@ -87,7 +88,8 @@ class UniformBlockCensus {
                               GuestCallProbes::Probe& probe, bool holdsEntry, uint32_t resume);
     using ReadWord = bool (*)(uint32_t guestAddress, uint32_t& value);
 
-    UniformBlockCensus(Register registerProbe, ReadWord readWord);
+    UniformBlockCensus(Register registerProbe, ReadWord readWord,
+                       ObjectPoseHistory::ReadWords readWords);
 
     // Registers both binder probes, before the title is linked.
     void install();
@@ -164,6 +166,17 @@ class UniformBlockCensus {
     // Called on the display thread, once per binding, with the object.
     void record(uint32_t object, bool second);
 
+    // What the block's pose holds, binding after binding.
+    //
+    // Handed the two blocks the descriptor names at the moment the binder is about to
+    // use them, because the binder is the only place per object per frame where both
+    // are known and where the title's own draw is about to consume them. It is a
+    // separate owner rather than more of this one: the census answers what the binder
+    // *does* with a descriptor, and this answers what the block it names *holds*.
+    const ObjectPoseHistory& poseHistory() const {
+        return m_poseHistory;
+    }
+
     // One slot of the ring, read whole: the seven words of its entry, and then
     // which of those words, added to the entry's offset, names memory the guest
     // can read. Both are needed for *both* slots -- the bound one, to find the
@@ -178,6 +191,7 @@ class UniformBlockCensus {
 
     Register m_register;
     ReadWord m_readWord;
+    ObjectPoseHistory m_poseHistory;
     Binder m_first{*this, false};
     Binder m_second{*this, true};
     std::atomic<uint64_t> m_bindings{0};

@@ -50,6 +50,10 @@ bool noReadWord(uint32_t /*address*/, uint32_t& /*value*/) {
     return false;
 }
 
+bool noReadWords(uint32_t /*address*/, uint32_t* /*values*/, uint32_t /*count*/) {
+    return false;
+}
+
 uint32_t noPacingChange(uint32_t vblanks) {
     return vblanks;
 }
@@ -91,7 +95,7 @@ struct Fixture {
     wiiuport::interp::ObjectBlend objects{wiiuport::interp::ContinuousInterpolator::kBlendPoint};
     wiiuport::guest::BufferWriters writers;
     wiiuport::guest::CallerCensus callers{&noRegistration};
-    wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord};
+    wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord, &noReadWords};
     wiiuport::title::LogicGate logic{&noRegistration, &noCodeSpace, &noCodeSpace, &noWriteWord,
                                      &noReadWord};
     wiiuport::title::WindWakerPaint paint{&noRegistration, &noCodeSpace,    &noWriteWord,
