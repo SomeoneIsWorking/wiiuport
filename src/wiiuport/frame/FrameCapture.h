@@ -44,13 +44,25 @@ class FrameCapture {
     static constexpr size_t kSlotCount = 5;
     // How a capture is armed, injected so a test drives this without a
     // renderer. Returns false when no capture could be armed.
-    using Request = bool (*)(LatteFrameHooks::CaptureCallback&& callback);
+    // The fork's arm, with the count a run asks for. A one-shot capture is a run
+    // of one, so there is one request type and not two that can disagree.
+    using Request = bool (*)(LatteFrameHooks::CaptureCallback&& callback, int count);
 
     explicit FrameCapture(Request request);
 
     // False when the request was refused, which is reported rather than
     // leaving the caller waiting for an image that will never arrive.
     bool armOnce(size_t slot = 0);
+
+    // `count` consecutive presents, the first into `slot` and the rest into the
+    // slots after it.
+    //
+    // Consecutive, not "ask again": the renderer's screenshot request is one at a
+    // time, so asking for the second after the first lands waits a whole frame,
+    // and in a title that animates that is a different picture. Two presents
+    // belonging to one pass -- the two paints of a stand-in that paints twice --
+    // are only obtainable this way, and comparing them is the null case.
+    bool armRun(size_t count, size_t firstSlot = 0);
 
     // Empty until a capture has landed in that slot. An out-of-range slot is
     // empty too, which the callers all treat as "nothing captured".

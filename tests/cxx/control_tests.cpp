@@ -25,7 +25,7 @@ bool acceptEverySubmission(const void*, uint32_t) {
     return true;
 }
 
-bool refuseCapture(LatteFrameHooks::CaptureCallback&&) {
+bool refuseCapture(LatteFrameHooks::CaptureCallback&&, int) {
     return false;
 }
 

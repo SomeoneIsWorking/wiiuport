@@ -1052,7 +1052,15 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
                 std::to_string(m_presenter.presentsRefusedBySubmit()) + "}");
     }
     if (request.method == "POST" && request.path() == "/capture") {
-        auto armed = m_capture.armOnce(requestedSlot(std::string(request.query())));
+        // `count` asks for that many *consecutive* presents rather than one. Two
+        // arms of one is not two presents: the renderer's screenshot request is
+        // one at a time, so the second arm waits a whole frame, and in a title
+        // that animates that is a different picture. Comparing two consecutive
+        // presents -- the two paints of a stand-in that paints twice -- is the
+        // null case, and it needs this.
+        const size_t count = requestedCount(std::string(request.query()), "count", 1);
+        auto armed = count <= 1 ? m_capture.armOnce(requestedSlot(std::string(request.query())))
+                                : m_capture.armRun(count, requestedSlot(std::string(request.query())));
         return lucent::http::Response::json(
             armed ? 200 : 503, armed ? "OK" : "Service Unavailable",
             std::string("{\"armed\":") + (armed ? "true" : "false") +
