@@ -56,6 +56,10 @@ struct RecordedUniformAssembly {
     // Kept because it is a faithful reading of the register bank, and no longer called the
     // block's address or an identity. See LatteFrameHooks.h.
     std::vector<uint32_t> blockSources;
+    // Word 1 of the same register slots -- `size - 1` as the guest wrote it, one word per pair in
+    // `blockSources`. **The half that says the slot was written**: word 0 is whatever last held the
+    // slot, and a size the guest chose is a small constant that register state does not invent.
+    std::vector<uint32_t> blockSizes;
     // The node whose draw this assembly belongs to, when the title's own code has said so.
     //
     // The node is not in anything the GX2 hook sees; it is one step away, because the draw
