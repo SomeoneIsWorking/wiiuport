@@ -409,10 +409,8 @@ this is the block index itself, and it is out of range rather than early.
 **That redirects the work.** Four payloads were built to test shapes, and the shape is no longer
 the question: every payload that actually paints twice faults, and it faults in the emulator's code
 cache with a healthy guest. Mode 6 and mode 8 survive precisely because they never reach a second
-pass through the stand-in. The next step is in `external/cemu`, not in a payload, and it is
-bounded: instrument the recompiler's block-index computation for a guest address in
-`mmuRange_TRAMPOLINE_AREA` and report the index and the table's size together, refusing a block
-whose index the table cannot address.
+pass through the stand-in. So the work is in `external/cemu`, not in a payload -- and the first
+candidate there is now cleared, which is worth as much as a suspect confirmed.
 
 **The earlier reading of this fault is withdrawn.** It was recorded as "the display thread's PC is
 outside the title's code, `0x02c12ffc` and `0x00e000b28` in two runs" and as "what remains
