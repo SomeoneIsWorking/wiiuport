@@ -1155,6 +1155,75 @@ display because it does not know it.** The mod already holds the frame's own `or
 the display in a register when it loads vtable slot `0xcc` and dispatches. Which register that is says
 whether the stand-in must be given one, and which. Everything else about this fault is now accounted for.
 
+### The loop is eleven instructions, and it names the fault and the fix
+
+`kDisplayLoopTop` is `0x0274c020`, and the function containing it is **eleven instructions long**. In
+whole, from the image:
+
+```
+0x0274c00c  mfspr r0, LR
+0x0274c010  stwu  r1,-0x10(r1)
+0x0274c014  stw   r31,0xc(r1)
+0x0274c018  or    r31,r3,r3      <- the display, out of r3 and into r31
+0x0274c01c  stw   r0,0x14(r1)
+0x0274c020  lwz   r12,0x24(r31)  <- the vtable        } kDisplayLoopTop is the
+0x0274c024  lwz   r0,0xcc(r12)   <- slot 0xcc, frame } FOURTH word, not the top
+0x0274c028  mtspr CTR,r0
+0x0274c02c  or    r3,r31,r31     <- the display back into r3, before the call
+0x0274c030  bctrl
+0x0274c034  b    0x0274c020     <- the loop
+```
+
+**Three things, and the second is the fault.**
+
+1. **The display arrives in `r3` and the loop keeps it in `r31`.** So a stand-in reached through slot
+   `0xcc` has the display in `r31` already, and does not need to be told.
+2. **The loop rebuilds `r3` from `r31` immediately before every dispatch** -- `or r3,r31,r31` at
+   `0x0274c02c` -- because the frame is a method on the display: it takes it in `r3`, copies it to
+   `r30`, dereferences `r30` for every field, and then **treats `r3` as scratch for the rest of its
+   body**. A stand-in that does not rebuild `r3` is handing the second paint a scratch register where
+   the frame wants the display, and the measurement is exactly that: at the fault the frame's `r30` is
+   **zero** and the display object is sitting in `r31`.
+3. **`kDisplayLoopTop` is the loop's fourth word, not its top.** The stand-in branches to the middle of
+   it, which is correct for a stand-in in the dispatch -- the prologue has already run and `r31` is
+   already the display -- and it means the mod's own word check is checking the `lwz` rather than the
+   loop's entry.
+
+### The objective's eleven words are the loop's five, with the registers shifted
+
+Lifted word for word from `0x0274c020`:
+
+| the loop at `0x0274c020` | the objective's payload |
+|---|---|
+| `819f0024` lwz r12,0x24(r31) | `819f0024` lwzu **r3**,0x24(**r30**) |
+| `800c00cc` lwz **r0**,0xcc(**r12**) | `800c00cc` lwz **r12**,0xcc(**r0**) |
+| `7c0903a6` mtspr CTR,**r0** | `7c0903a6` mtspr CTR,**r12** |
+| `7fe3fb78` or **r3**,**r31**,r31 | `7fe3fb78` or **r31**,**r3**,r3 |
+| `4e800421` bctrl | `4e800421` bctrl |
+
+**Every opcode and every displacement is identical and every register field is shifted along by one.**
+That is the whole of why the objective's payload reads the slot the mod rewrote and calls itself: its
+fourth word moves the display out of `r3` instead of into it.
+
+**Built as mode 12, with the loop's own five words twice and a branch back to the loop, and measured:**
+
+```
+at rest:      installed False (twiceAtSixty),      block 0x00e05880, 1554 paints, interval 2
+armed mode 12: installed True  (loopDispatchTwice), block 0x00e05880, 1554 paints, interval 2
+87.1s  capture refused: no image reached slot 0 within 25s      ALIVE
+```
+
+**It does not fault, and it does not paint.** That is a different outcome from every other two-paint
+shape -- all of them fault -- and it is the first shape that installs and survives.
+
+**And the reason it does not paint is the same self-reference, now with the loop's own registers: its
+second word is `lwz r0,0xcc(r12)`, and slot `0xcc` is the word the mod rewrote with the stand-in's
+address.** The loop's dispatch reads that slot to find the frame; a stand-in installed in that slot and
+running the loop's dispatch reads *itself*. **The one value that resolves it is the slot's original
+contents, `0x0274c264`, which the mod reads on every arming precisely so it can give it back** -- and
+the payload has to carry it as a literal rather than re-read it, which is the one word the loop's own
+dispatch cannot express.
+
 ### Correctly paired at last: the fault is in the title's own code, and the gdb window was a host read
 
 One run reporting both the counter and the window, which is the only way the two may be paired:

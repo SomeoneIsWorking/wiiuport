@@ -104,6 +104,18 @@ constexpr uint32_t kObjectiveMoveCtr = 0x7c0903a6;           // mtspr CTR,r12
 constexpr uint32_t kObjectiveSaveDisplay = 0x7fe3fb78;       // or    r31,r3,r3
 constexpr uint32_t kObjectiveCallThroughVtable = 0x4e800421; // bctrl
 
+// **The display thread's own dispatch, lifted word for word from 0x0274c020-0x0274c030.**
+//
+// These are the same five opcodes and the same five displacements as the objective's payload above,
+// with the register fields as the loop has them rather than shifted along by one. The difference is
+// the whole of why one of them reaches the frame twice and the other calls itself, so the two sets
+// sit side by side here rather than one set being replaced by the other.
+constexpr uint32_t kLoopLoadVTable = 0x819f0024;     // lwz   r12,0x24(r31)
+constexpr uint32_t kLoopLoadFrameSlot = 0x800c00cc;  // lwz   r0,0xcc(r12)
+constexpr uint32_t kLoopMoveToCounter = 0x7c0903a6;  // mtspr CTR,r0
+constexpr uint32_t kLoopRestoreDisplay = 0x7fe3fb78; // or    r3,r31,r31
+constexpr uint32_t kLoopCallFrame = 0x4e800421;      // bctrl
+
 constexpr uint32_t kReadDisplayPhase = 0x801e0074;  // lwz  r0,0x74(r30)  from 0x0274c2c4
 constexpr uint32_t kWriteDisplayPhase = 0x901e0074; // stw  r0,0x74(r30)  from 0x0274c38c
 
@@ -239,6 +251,8 @@ std::string_view WindWakerPaint::modeName(Mode mode) {
         return "samePhaseTwice";
     case Mode::ObjectivePayload:
         return "objectivePayload";
+    case Mode::LoopDispatchTwice:
+        return "loopDispatchTwice";
     }
     return "unknown";
 }
@@ -267,6 +281,8 @@ std::optional<WindWakerPaint::Mode> WindWakerPaint::modeFrom(long long number) {
         return Mode::SamePhaseTwice;
     case 11:
         return Mode::ObjectivePayload;
+    case 12:
+        return Mode::LoopDispatchTwice;
     default:
         return std::nullopt;
     }
@@ -332,7 +348,31 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
     // word between the two calls is the fix, and a step list that appended a third paint would
     // undo the finding it exists to test.
     std::vector<Step> steps;
-    if (mode == Mode::ObjectivePayload) {
+    if (mode == Mode::LoopDispatchTwice) {
+        // **The display thread's own dispatch, twice, verbatim.** These are the five words at
+        // 0x0274c020, lifted from the title's image and not encoded here -- every one of them is
+        // the word the loop itself executes, and this project has measured what a hand-derived
+        // encoding costs twice.
+        //
+        // The fourth word is the one that matters. The frame is a method on the display: it takes
+        // it in `r3`, copies it to `r30` on its sixth word, dereferences `r30` for every field, and
+        // then treats `r3` as scratch for the rest of its body. So the loop rebuilds `r3` from
+        // `r31` before every dispatch, and a stand-in that does not is handing the second paint a
+        // scratch register where the frame wants the display. Measured: at the fault the frame's
+        // `r30` is
+        // **zero**, and the display object is sitting in `r31`.
+        //
+        // `r31` is available because the stand-in is reached through vtable slot `0xcc`, and the
+        // loop established `r31` at 0x0274c018 before it dispatched. The stand-in must not disturb
+        // it, and none of these ten words does.
+        for (int pass = 0; pass < 2; pass++) {
+            steps.push_back({false, 0, kLoopLoadVTable});     // lwz   r12,0x24(r31)
+            steps.push_back({false, 0, kLoopLoadFrameSlot});  // lwz   r0,0xcc(r12)
+            steps.push_back({false, 0, kLoopMoveToCounter});  // mtspr CTR,r0
+            steps.push_back({false, 0, kLoopRestoreDisplay}); // or    r3,r31,r31
+            steps.push_back({false, 0, kLoopCallFrame});      // bctrl
+        }
+    } else if (mode == Mode::ObjectivePayload) {
         // **Ten verbatim words and one computed branch.** The two groups are the objective's, in
         // its order, and the branch after them is the objective's `b` with its displacement worked
         // out -- the one word that cannot be verbatim, because the stand-in's block is handed out
