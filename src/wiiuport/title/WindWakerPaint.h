@@ -253,6 +253,26 @@ class WindWakerPaint {
         // verbatim**: the load is 0x0274c2c4 and the store is 0x0274c38c, both with the frame's own
         // `r30` base.
         SamePhaseTwice = 10,
+        // **The objective's payload, word for word.** Eleven words -- its group of five twice, then
+        // a branch back to the title's loop:
+        //
+        //     lwzu r3,0x24(r30)   lwz r12,0xcc(r0)   mtspr CTR,r12   or r31,r3,r3   bctrl
+        //
+        // **This is the only mode that reaches the frame the way the title does**: by loading it
+        // out of the vtable and calling it indirectly. Every other mode reaches it by a literal
+        // `bl` and never touches the vtable from inside the payload.
+        //
+        // It matters because the measured fault is a guest load at `0x198`, and `0x198` is
+        // `0xcc + 0xcc` -- the second word of this payload with a small number where the vtable
+        // pointer belongs. The other modes cannot produce that load at all, so a run of this one
+        // either works, which settles conditions 3 and 4, or fails differently, which says the
+        // difference between the two shapes is the whole of it.
+        //
+        // The eleventh word is the objective's `4e800020`, lifted as a form: a `b` whose
+        // displacement reaches the title's loop from wherever the loader's arena put this block. It
+        // is the one word here that is not verbatim, because a fixed displacement can only reach
+        // one address.
+        ObjectivePayload = 11,
     };
     // The name a refusal or a report uses for a mode.
     static std::string_view modeName(Mode mode);

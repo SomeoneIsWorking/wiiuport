@@ -571,12 +571,55 @@ in the same instruction stream -- and it is the one measurement that would say w
 vtable-derived path the objective specifies and the literal-address path this file's modes use fail
 for the same reason or for two different ones.
 
-**This is where the double-paint fault stands, stated as what is known rather than as a theory.** The
-guest is healthy at the fault; the fault is a guest load at address `0x198` in recompiled code; the
-display object is cleared (its flag, its phase, and all five of its call targets are identical across
-the two paints); and three payload shapes built on three different readings of the cause have each
-been measured and each faults. The remaining candidates are the five callees' own state and the
-vtable-derived load, and both are one probe each in an instrument that already exists.
+### The objective's own eleven words, and what they depend on
+
+Built exactly as the objective specifies, as mode 11 -- its group of five twice, then a branch to
+the loop:
+
+```
+819f0024  lwzu   r3,0x24(r30)    the display's sub-object, updating r30
+800c00cc  lwz    r12,0xcc(r0)    the vtable's slot 0xcc
+7c0903a6  mtspr  CTR,r12
+7fe3fb78  or     r31,r3,r3
+4e800421  bctrl                 the frame, reached through the vtable
+```
+
+Ten of the eleven words are verbatim, and the test asserts them word for word rather than
+asserting that the payload differs from another one, which a payload with an invented encoding would
+also satisfy. The eleventh is the objective's `4e800020` as a form, with its displacement computed:
+a `b` with a fixed displacement reaches one address, and the stand-in's block is handed out at run
+time.
+
+**It does not fault, and it paints nothing.** Armed on the real title over a run that had reached
+1,854 paints at rest: 1,854 at 68.0s and 1,854 at 97.1s, the gate reading 1,854 calls at the probe
+and nothing in it, and the capture refused with no image reaching its slot in 25 seconds.
+
+**So the objective's payload is not self-sufficient, and the reason is in its own second word.**
+`lwz r12, 0xcc(r0)` loads the frame out of the vtable *held in `r0`*. The stand-in is entered
+through vtable slot `0xcc` by the title's own `bctrl`, and the title's loop does not leave the
+vtable pointer in `r0` -- so the load reads some other structure's field `0xcc`, `mtspr CTR` takes
+that, and the payload's `bctrl` dispatches through a call target that is not the frame. The title
+never comes back through the payload, the paint count does not move, and nothing faults because the
+target it did jump to was a real one.
+
+The same applies to the first word: `lwzu r3, 0x24(r30)` presumes `r30` already holds the display,
+and `r30` is non-volatile, so the title restores it on the way in -- but the first entry arrives
+with whatever the title's loop had in it, and the update form then leaves `r30` advanced by `0x24`,
+so the second group would read `display + 0x48` rather than the same place the first did.
+
+**That is a finding about the payload, not about the fault**, and it is the kind the objective
+should have: reaching the frame through the vtable needs the vtable *somewhere the payload can read
+it*, and the eleven words name `r0` without anything putting it there. The paint mod knows the
+vtable -- it reads it from the display and patches slot `0xcc` in it on every arming -- so the
+missing piece is one word the mod supplies rather than one the payload guesses, and a run of that
+is the shape this file's modes never had.
+
+**This is where the double-paint fault stands, as known rather than as a theory.** The guest is
+healthy at the fault; the fault is a guest load at `0x198` in recompiled code; the display object is
+cleared (its flag, its phase and all five of its call targets are identical across the two paints);
+four payload shapes built on four readings have each been measured -- three fault, and the
+objective's own does not fault and does not paint. The candidates left are the five callees' own
+state, and the vtable register the objective's payload assumes.
 
 ### A real bug found on the way, which is not this fault
 
