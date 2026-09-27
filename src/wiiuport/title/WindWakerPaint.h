@@ -239,7 +239,10 @@ class WindWakerPaint {
 
     class Frame final : public GuestCallProbes::Probe {
       public:
-        explicit Frame(std::atomic<uint64_t>& paints) : m_paints(paints) {
+        // `readWord` is the owner's seam, handed in rather than reached for: a
+        // nested class has no access to its enclosing class's members.
+        Frame(std::atomic<uint64_t>& paints, ReadWord readWord)
+            : m_paints(paints), m_readWord(readWord) {
         }
 
         // Also where the stand-in's memory is reserved, through the reservation
@@ -252,6 +255,13 @@ class WindWakerPaint {
         }
 
         void OnCall(std::span<const uint32_t, 32> gpr, uint32_t returnAddress) override;
+
+        // `display+0x74` and `display+0x78`, sampled at the last two paints. The
+        // frame's `if (flags & 1) flags ^= 2` toggle is a per-paint event, and a
+        // report that reads the field on request sees one value rather than the
+        // sequence, which is the difference between "the toggle is not happening"
+        // and "the toggle is not visible in one sample".
+        std::array<uint32_t, 2> recent{0, 0};
         // Held for the whole time the display thread is inside the frame, and
         // taken by whoever rewrites the words that route it here.
         //
@@ -274,6 +284,7 @@ class WindWakerPaint {
 
       private:
         std::atomic<uint64_t>& m_paints;
+        ReadWord m_readWord;
         // Called once, at link time, to take the stand-in's memory.
         std::function<void(std::string&)> m_reserve;
     };
