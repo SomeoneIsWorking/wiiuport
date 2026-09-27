@@ -185,13 +185,46 @@ second (181 over 6.0s) with the gate out, 30.00 (180) with the gate in, and the 
 counter from 30 to 151 in 3.0s against a probe call rate of 40.33 a second over the same
 window.
 
-### What is still open: the paint mod kills the product on its own
+## Sixty paints a second, through the title's own paint path
+
+The gate is not what doubles the picture. The stand-in does that, and the measurement is on
+the real title through the control channel, in one driven run, in the same scene, with the
+mod off and on in adjacent windows:
+
+    window off:  30.12 paints/s  (241 paints over 8.0s)
+    window on:   60.12 paints/s  (481 paints over 8.0s)
+
+The logic rate reads 30.12 in both windows, from the probe on the tick's entry — inside the
+29.9-30.0 band the gate exists to hold. So the picture reaches sixty **without the logic
+following it**, and the gate is a backstop rather than the mechanism. That is the finding:
+the title's display thread paints as often as it is asked to, and the simulation runs at its
+own rate underneath. A second run of the same shape gave 59.40 (297 over 5.0s) with the
+logic at 29.80, so 60.12 and 59.40 are two samples of the same rate, not one of them.
+
+### Which stand-in does it, and which ones kill the product
+
+Four modes were run identically, arming only the paint mod:
+
+| mode | what it does | result |
+|------|--------------|--------|
+| 1 | tail branch to the frame, one paint | survives, 30.00 paints/s |
+| 2 | `bl` the frame twice, back to back | **kills the product** |
+| 3 | set pacing, then `bl` the frame twice | **kills the product** |
+| 6 | set pacing, then `bl` the frame twice, one vblank a flip | survives, **60.12 paints/s** |
+
+Modes 3 and 6 have the same payload and differ only in how many vblanks a flip waits.
+One kills the product and the other reaches sixty, so the trigger is not the payload and
+not the words in it: it is doing the work back to back rather than once a vblank. Mode 6 is
+the one that presents at sixty, and it is a payload of four words lifted from the title's
+own image.
+
+### What is still open: two stand-ins kill the product on their own
 
 Correcting an earlier reading of this, which blamed the gate. **The paint stand-in alone
 faults, with the gate never armed.** Arming it at 71 seconds killed the product within three,
 and the fault is a segmentation fault inside recompiled code on the display thread's core
-(`OSSched[core=1]`). Mode 1 survives and holds its rate; mode 2, which is the first mode that
-calls the frame twice, does not.
+(`OSSched[core=1]`). Modes 2 and 3 do this; modes 1 and 6, which have the same words or
+fewer, do not.
 
 So the two are independent: the gate runs, and the paint mod's second mode does not. That is
 also why the two are now armed separately (`probe_run.py --arm paint|gate|both`). They are two
