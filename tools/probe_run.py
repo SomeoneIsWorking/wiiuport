@@ -94,7 +94,8 @@ def measure(
                 f"    gate {'in ' if gate.enabled else 'out'}: "
                 f"{gate.probe}, block {gate.block}, at the tick's entry {gate.word_at_entry}, "
                 f"at the word after it {gate.word_at_body}, "
-                f"calls {gate.calls}, ticks {gate.ticks}",
+                f"calls {gate.calls}, ticks {gate.ticks}, "
+                f"entries {gate.gate_entries} through a probe {gate.gate_probe}",
                 flush=True,
             )
         except ControlUnavailable as unavailable:

@@ -91,7 +91,8 @@ struct Fixture {
     wiiuport::guest::BufferWriters writers;
     wiiuport::guest::CallerCensus callers{&noRegistration};
     wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord};
-    wiiuport::title::LogicGate logic{&noRegistration, &noCodeSpace, &noWriteWord, &noReadWord};
+    wiiuport::title::LogicGate logic{&noRegistration, &noCodeSpace, &noCodeSpace, &noWriteWord,
+                                     &noReadWord};
     wiiuport::title::WindWakerPaint paint{&noRegistration, &noCodeSpace,    &noWriteWord,
                                           &noReadWord,     &noPacingChange, &noPacing};
     wiiuport::interp::VertexBlend vertices{objects, writers,

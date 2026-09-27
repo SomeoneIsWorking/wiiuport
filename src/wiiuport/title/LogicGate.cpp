@@ -137,10 +137,10 @@ void LogicGate::Moment::OnInstall(GuestCallProbes::Installation installation) {
 void LogicGate::Moment::OnCall(std::span<const uint32_t, 32>, uint32_t) {
 }
 
-LogicGate::LogicGate(Register registerProbe, AllocateCode allocateCode, WriteWord writeWord,
-                     ReadWord readWord)
-    : m_register(registerProbe), m_allocateCode(allocateCode), m_writeWord(writeWord),
-      m_readWord(readWord), m_moment(new Moment(*this)) {
+LogicGate::LogicGate(Register registerProbe, AllocateCode allocateCode, AllocateData allocateData,
+                     WriteWord writeWord, ReadWord readWord)
+    : m_register(registerProbe), m_allocateCode(allocateCode), m_allocateData(allocateData),
+      m_writeWord(writeWord), m_readWord(readWord), m_moment(new Moment(*this)) {
 }
 
 void LogicGate::install() {
@@ -161,13 +161,21 @@ void LogicGate::onInstalled(GuestCallProbes::Installation installation) {
     }
     // Taken at link time, for the same reason the paint mod's block is: the
     // loader's arena is not something to ask while the title is running.
-    m_block = m_allocateCode(4 * kBlockWords);
+    m_block = m_allocateCode(kBlockBytes);
     if (m_block == 0) {
         m_refusal = "the loader's arena had no room for a logic gate";
+        return;
+    }
+    // Writable memory for the two counters, from a different allocator because it
+    // is a different kind of memory. See the header on why the code arena is the
+    // wrong place for anything the guest has to store into.
+    m_counters = m_allocateData(kCounterBytes);
+    if (m_counters == 0) {
+        m_refusal = "there was no writable guest memory for the gate's two counters";
     }
 }
 
-std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress) {
+std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t countersAddress) {
     // The gate runs in its own block, because a 52-byte tick has no room for it.
     // The word at 0x025d42f0 -- the tick's second instruction -- takes a branch
     // to here, and the gate's return and its tail branch both go to the title's
@@ -186,8 +194,12 @@ std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress) {
     // r3 to r6 are volatile under the EABI and the tick reads none of them on
     // entry, so the gate keeps to them. r0 and r1 are untouched until the through
     // path, where the title's own two instructions touch them.
-    const uint32_t calls = blockAddress + 4 * kCallsWord;
-    const uint32_t ticks = blockAddress + 4 * kTicksWord;
+    // The counters are in the data block: memory the guest writes, not memory it
+    // executes from. A store into the code arena is not something to rely on,
+    // because a store that lands nowhere is indistinguishable from code that
+    // never ran -- which is what the counters said when they lived there.
+    const uint32_t calls = countersAddress + 4 * kCallsWord;
+    const uint32_t ticks = countersAddress + 4 * kTicksWord;
     const uint32_t testAt = blockAddress + 4 * 6;
     const uint32_t through = blockAddress + 4 * kThroughWord;
     const uint32_t tailAt = through + 8;
@@ -219,8 +231,15 @@ std::string LogicGate::enable() {
     if (m_enabled) {
         return {};
     }
-    if (m_block == 0) {
-        return m_refusal.empty() ? "no guest memory was reserved for a logic gate" : m_refusal;
+    if (m_block == 0 || m_counters == 0) {
+        // Named by which half is missing, because "no guest memory" for a gate
+        // whose instructions are allocated and whose counters are not is a
+        // sentence that sends a reader to the wrong allocator.
+        if (m_block == 0) {
+            return m_refusal.empty() ? "no guest memory was reserved for a logic gate" : m_refusal;
+        }
+        return m_refusal.empty() ? "no writable guest memory was reserved for the gate's counters"
+                                 : m_refusal;
     }
     // The word the gate takes is the tick's second instruction, and it is
     // checked rather than assumed: a revision whose tick starts differently gets a
@@ -234,7 +253,7 @@ std::string LogicGate::enable() {
         return m_refusal;
     }
     m_original = first;
-    const std::vector<uint32_t> words = payload(m_block);
+    const std::vector<uint32_t> words = payload(m_block, m_counters);
     if (words.size() != kGateWords) {
         m_refusal = "the gate at " + hex(m_block) + " cannot reach the tick's body or its skip";
         return m_refusal;
@@ -285,9 +304,14 @@ std::string LogicGate::json() const {
     body.string("tick", hex(kTick));
     body.string("frameEntry", hex(kFrameEntry));
     body.string("block", hex(m_block));
-    body.string("calls", hex(m_block + 4 * kCallsWord));
-    body.string("ticks", hex(m_block + 4 * kTicksWord));
+    // The counters' address, not the code block's: they are two different kinds
+    // of memory now, and a report that named the code block for both would send a
+    // reader to look for a count in sixteen instructions.
+    body.string("counters", hex(m_counters));
+    body.string("calls", hex(m_counters + 4 * kCallsWord));
+    body.string("ticks", hex(m_counters + 4 * kTicksWord));
     body.number("blockBytes", kBlockBytes);
+    body.number("counterBytes", kCounterBytes);
     // What the fork says about the probe that holds the tick's entry, and what
     // the entry's next word actually holds right now. Between them they say
     // whether a zero count means "no calls came" or "the gate is not wired to
@@ -313,12 +337,12 @@ std::string LogicGate::json() const {
     body.raw("enabled", m_enabled ? "true" : "false");
     uint32_t calls = 0;
     uint32_t ticks = 0;
-    if (m_block != 0 && m_readWord(m_block + 4 * kCallsWord, calls)) {
+    if (m_counters != 0 && m_readWord(m_counters + 4 * kCallsWord, calls)) {
         body.number("callsCount", calls);
     } else {
         body.raw("callsCount", "null");
     }
-    if (m_block != 0 && m_readWord(m_block + 4 * kTicksWord, ticks)) {
+    if (m_counters != 0 && m_readWord(m_counters + 4 * kTicksWord, ticks)) {
         body.number("ticksCount", ticks);
     } else {
         body.raw("ticksCount", "null");
