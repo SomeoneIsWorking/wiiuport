@@ -289,7 +289,7 @@ void wiiuport::tests::runPaintTests() {
                 "\"installed\":false,\"mode\":\"passThrough\",\"block\":\"0x00e07000\","
                 "\"swapIntervalAsked\":1,\"pacing\":2,\"titleSwapInterval\":2,\"paints\":1,"
                 "\"probe\":\"installed\",\"flagsAtLastPaint\":0,"
-                "\"nextFieldAtLastPaint\":0,"
+                "\"phaseAtLastPaint\":0,"
                 "\"display\":\"0x43e08af8\","
                 "\"liveVTable\":\"0x10004e88\",\"fields\":{}}\n",
             "the report is one JSON object, spelled out");
