@@ -372,9 +372,32 @@ None of that is a guest that has wandered; it is a guest doing exactly what the 
 
 **The fault is a host instruction.** `movbe` is how Cemu's recompiler reads a big-endian guest word
 out of its own code cache, and the faulting form indexes it by `%rax` off the cache base in `%r13`.
-The block index the harness printed beside it, `(rsi << 2) / 0x400000`, is **`0x7ffe792`**, against a
-reserved-block mask of `0x749` -- eleven bits, so indices 0 to 2047. **The block index is four
-orders of magnitude outside the table it indexes.**
+**One number beside it is not evidence and was nearly written up as if it were.** The harness also
+prints `(rsi << 2) / 0x400000`, and it reads `0x7ffe792` -- which looks like a block index four
+orders of magnitude outside the table. It is not: `rsi` at the fault is `0x7ffe79218be5`, a **host**
+address, and the expression is the harness dividing it by a constant. It says nothing about the
+recompiler. The guest-state line above is evidence; that one is arithmetic done on a pointer.
+
+**The obvious suspect was checked and it is not the cause.** The natural next suspect is the direct
+jump table, which is indexed by `enterAddress / 4`, and `PPCRecompiler_readJumpTableEntry` is the
+guarded accessor -- it calls `PPCRecompiler_hasJumpTableBlock`, refusing an address at or past
+`PPC_REC_CODE_AREA_END` and a block at or past the address space's block count. Three reads of that
+table in `PPCRecompiler_visitAddressNoBlock` are **not** guarded, and they looked exactly like the
+fault: guest code in the **loader's trampoline arena** is mapped and executable, is not in the
+recompiler's code area, and would index a table that does not have it.
+
+They are inside `#if PPCREC_FORCE_SYNCHRONOUS_COMPILATION`, and that macro is `0`. **The compiled
+path was already guarded** -- its quick read-only check calls the accessor and refuses, and a second
+`hasJumpTableBlock` call under the lock was added by the fork earlier for the same reason. A patch
+routing the dead reads through the accessor was written, found to add a duplicate declaration to
+live code, and **reverted**: it would have been a change to the emulator justified by a code path
+that does not compile.
+
+So the jump table is cleared and the fault is elsewhere in the host. Finding it needs a different
+instrument than reading the source: the out-of-bounds access is a `movbe` out of the recompiler's
+code cache, so the honest next step is a run under AddressSanitizer with the same capture workload
+that reproduces it here, which will name both the function and the offset rather than leaving an
+index computed by a debugging command to be interpreted.
 
 So the two candidates this section weighed -- the payload clobbering `r3`, and the frame not being
 re-entrant -- are **both refuted by the guest state**, and the fault is in the emulator's handling
