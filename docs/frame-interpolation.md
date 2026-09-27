@@ -877,6 +877,72 @@ Both were predicted by this file's own measurements before they were run, and th
 payload with eleven words has one call target and one call site; this one has two of each and they
 disagree.**
 
+### The fault is deterministic, and the guest is executing data in the arena
+
+With the two fixes in, two independent runs report the fault's guest state **byte for byte
+identically**:
+
+```
+OSSched[core=1]  via recompiled  guest pc=0x00e0586c  lr=0x0274c280  r1=0x0e275a38
+  r0..r7 = 00e05888 0e275a38 10008000 00000000 0e275a24 0e275a28 0e275a30 44213980
+```
+
+**The frame returned correctly** -- `lr` is its own seventh word, which is where a frame that returned
+from its sixth word belongs. **The guest is at `0x00e0586c`, which is 300 bytes *below* the stand-in's
+own block at `0x00e05898`.** And the register file is not the guest's:
+
+- `r1`, the stack pointer, is `0x0e275a38`. MEM1 on this console ends at `0x017fffff` and the loader
+  arena ends at `0x00ffffff`, so **`r1` is not a guest address at all**.
+- `r4`, `r5`, `r6` are `0x0e275a24`, `0x0e275a28`, `0x0e275a30` -- four words at four-byte spacing,
+  which is the shape of a structure and not of a register file mid-computation.
+- `r3`, which the frame's first act copies into `r30` and which the probe reports as the display, is
+  zero.
+
+**A register file holding equally spaced words and a stack pointer that is not a guest address is what
+executing data looks like from the inside.** So the second paint's frame returns correctly and the
+guest is then somewhere in the arena it was never told about, running whatever is there.
+
+**And the recompiler is registered for all of it.** `PPCRecompiler.cpp:759` registers the whole
+trampoline area --
+
+```
+PPCRecompiler_allocateRange(mmuRange_TRAMPOLINE_AREA.getBase(), mmuRange_TRAMPOLINE_AREA.getSize());
+```
+
+-- because the loader does put real code there, which is correct as far as it goes. But the area's
+**base** is the HLE function registry's dispatch stubs, then its symbol names, then zero padding, and
+elsewhere in it the host's own bookkeeping. **None of that is guest code, and a branch into it is
+translated as instructions.** That is the shape of this fault, and it is why the fault's *address* has
+been the same every time: the branch target is a fixed piece of the registry, and the guest's own path
+to it is deterministic.
+
+So the remaining cause is named as far as the evidence goes: **a branch out of the frame's return path
+lands in the loader arena's data, and the recompiler has no way to say that region is not code.**
+Whether the fix belongs in the recompiler -- which would need a way to mark a range as
+not-translatable, and does not have one -- or in the stand-in, which would mean never returning into a
+context the title's loop would not have set up, is the open choice. **This file does not pick one
+without measuring which the branch is**, and the discriminator is available: the second paint as a tail
+branch survives (`TailTwiceAtSixty`, which "paints nothing") and the second paint as a call faults, so
+the difference is entirely in what happens *after* the frame returns.
+
+### The frame writes one word above its own allocation
+
+From its own measured words, which is worth knowing before standing-in anything that calls it twice:
+
+```
+0x0274c268  stwu  r1,-0x18(r1)     the frame is [old-0x18, old)
+0x0274c26c  stw   r30,0x10(r1)     -> old-0x08   inside
+0x0274c270  stw   r31,0x14(r1)     -> old-0x04   inside
+0x0274c274  stw   r0,0x1c(r1)      -> old+0x04   FOUR BYTES ABOVE ITS OWN ALLOCATION
+```
+
+**The frame stores a word into its caller's frame, every time it is entered.** With the title's loop as
+the caller that is whatever the loop kept at `old+4`; with the stand-in as the caller it is four bytes
+above the display thread's own stack pointer. It is the *same* address on the first paint and on the
+second, so on its own it cannot be what makes a second call differ -- but it does mean the stand-in is
+standing in a frame it is silently writing to, which is the one thing a stand-in in someone else's
+return path should say out loud.
+
 ### The probe was on a word that reads the link register, and the frame returns through what it produced
 
 Read at the fault, with the guest's own program counter and link register taken from the CPU state
