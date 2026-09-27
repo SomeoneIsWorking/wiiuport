@@ -1464,6 +1464,40 @@ been among what was thrown away. The sketch displaces the *least frequent* entry
 evictions are counted — its counts are upper bounds, which the report says and the tests assert as
 bounds rather than as equalities.
 
+### Condition 2's second question, answered: the block is a two-deep ring and it survives
+
+The ring is fed the title's own two words from the record -- the address and the size the binder
+passes to `GX2Set*UniformBlock` -- with no base, no offset and no host interpretation between.
+Measured on the real title:
+
+```
+block ring: 178,021 bindings, 8 objects, 0 unreadable, 0 past the bound of 4096
+where the block sits: 16 distinct block addresses over 8 objects, 16 distinct offsets
+is tick N-1's uniform block still there when tick N paints?
+  16 of 16 comparisons say still present, 0 say overwritten, 0 could not be read
+  8 consecutive pairs used different addresses
+```
+
+**Yes.** Each of the 8 objects names **two** distinct block addresses and alternates between them
+-- 16 addresses over 8 objects, and one transition per object, which is double buffering measured
+rather than assumed. And the ring does not compare across an address change, so each of the 16
+comparisons is between two bindings of the same object *at the same address*, which are at least
+two ticks apart: **the previous use of that address is still there when the next tick binds.**
+That is the question the objective asks, and the answer is yes, with the denominator stated: 16
+comparisons over 8 objects.
+
+Two things this does **not** say, because the earlier report had them backwards:
+
+- **The 233 whole-block scans were not of this block.** They read `object + 0xFC`, which is the
+  record's own word 1 used as an address. This block is elsewhere: the offsets from the object are
+  large and all different, the leading one 0xA7C44. So "every transform in every one is static"
+  was a statement about a record's neighbourhood and says nothing about *these* 64 bytes. The
+  scan has to be redone against this address.
+- **`consecutivePairsWithDifferentAddress` is not evidence on its own.** 8 objects at 8 different
+  addresses also gives 8. That is why the report now carries `distinctBlockAddresses` and
+  `distinctOffsetsFromObject` beside it: 16 addresses over 8 objects is two each, and one
+  transition each is a ring, where 8 would have been 8 objects.
+
 ### The size word tells the guest's writes from register leftovers, and the pool is 0x100-strided
 
 Word 0 of a uniform block register is whatever last held the slot — the guest indexes these
