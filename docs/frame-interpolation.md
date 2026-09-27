@@ -716,22 +716,67 @@ a fact about the patch rather than about the title's draw path. The `lwz` handle
 `(rA ? hCPU->gpr[rA] : 0) + imm`, so with `imm = 0x6e2` and `rA = 0` the guest read guest address
 `0x6e2` with `r0` contributing nothing.
 
-**The instruction is not in the title's RPX.** The opcode word the interpreter was executing is
-`0x800306e2` in one run and `0x800006e2` in the other -- the same `0x6e2` displacement off `r0` with
-`r0 = 0`, differing only in the destination register. Searched over the analyzed program:
+**The instruction gdb named does not survive its own second run, so it is not evidence.** Across two
+runs of identical code the backtrace reported the effective address as 1762 and then 1763, the opcode
+as `0x800006e2` and then `0x800306e2`, and the guest program counter as three different values. One
+fixed instruction cannot be all of those, so the `0x6e2` displacement and the `r0 = 0` are both read
+off a frame that has already been unwound, and neither is a measurement.
+
+**What can be checked without gdb is the image, and it answers.** Searching the analyzed program's
+instruction text for a load at `0x6e2`:
 
 ```
-scanned 9,432,460 executable bytes in 17 blocks
-  control 0x7c0802a6 (the frame's first word, mfspr r0): 23,265 matches
-  sought  0x800006e2 (lwz r0,0x6e2(r0)):                  0 matches
-verdict: the control was found, so the search works; the faulting opcode is not in this program
+scanned 29,408 functions, matching on the full instruction text
+  0x6e2(r0):  0 instructions in 0 functions
+  0x6e2(  :   2 instructions in 2 functions   -- lbz r0,0x6e2(r31) at 0x021c54e0
+                                                -- lbz r12,0x6e2(r3) at 0x021c5cb8
+  control, 0x3c(:  3,047 instructions in 1,608 functions
 ```
 
-**So the faulting code is in one of the other modules** -- coreinit, rpl, or another of the title's
-RPX files -- and not in `cking.elf`. That moves the question: it is no longer "what state does the
-display object leave behind", but "which library function runs on the second pass with `r0 = 0`".
-A near-null base register in a *system* library is a different failure with a different fix, and the
-five callees of the frame are no longer the place to look.
+The title's code contains **exactly two** loads at displacement `0x6e2`, both `lbz`, neither off
+`r0`, in `FUN_021c54e0` and `FUN_021c5cb8`. A search that found none would be indistinguishable from
+this one, which is why the control is there and why it finds three thousand.
+
+**So the fault is not the title's draw path** -- not because the faulting instruction was located
+outside `cking.elf`, which the gdb numbers no longer support, but because the shape the fault was
+reported with is not a shape the title's code contains, and because the fault arrives through
+`PPCInterpreterSlim_executeInstruction`, the JIT's *fallback*. **The second pass is running where the
+recompiler declined**, and that is a fact about the patch rather than about the title's draw path.
+Which of the two remaining causes it is, and where `FUN_021c54e0` and `FUN_021c5cb8` sit relative to
+the display thread, are not yet measured.
+
+### The guest dump works now, and its first result is a question
+
+With the three instrument defects below repaired, the dump read guest memory for the first time. The
+addressing is right -- `memory_base` came back `0x7ffed4000000` and every read is that base plus the
+guest address -- and **the words it found are not the words the image has at those addresses**:
+
+```
+the frame, guest 0x0274c264:     0x1c966b4a 0xe8ff2194 0x1000c193 0x1400e193 ...
+the vtable slot, guest 0x01004f4c: 0x00000000 0x00000000 0x00000000 0x00000000
+the stand-in block, guest 0x00e05898: 0x01006038 0x9154af49 0xc5699449 ...
+```
+
+So the running guest's memory does not match the disc image **at the addresses this whole file's
+reasoning is quoted from**, and that has to be settled before any of the disassembly here can be
+treated as a statement about the running title. Three explanations are consistent with it and one
+measurement would choose between them, so none is claimed: the title's code and data are **encrypted
+on disc and decrypted into place**; or the frame is in a **different module** than the one
+`cking.elf` was converted from and `0x0274xxxx` is not its load address at run time; or the mod's
+block, vtable and display addresses are reported as host-side values where the guest wants guest ones.
+**What is not consistent with it is the paint mod's own working**: it installs, it patches a vtable
+it reports, and it counts paints, so something at those addresses is being written.
+
+That is why the dump's self-check changed. It used to fail the whole dump when the frame's word did
+not match the image and declare "nothing in it is evidence" -- quietly assuming the thing now in
+question. It now prints both numbers and draws no verdict, and its constant is the listing's own
+`0x7c7e1b78` rather than a hand-encoded one: **that encoding was got wrong three times** before being
+read out of the image (`0x4b800003` is not an instruction, `0x7ff31b78` is not this instruction), and
+a fourth attempt to derive it would have been the fourth wrong one.
+
+**And the `display+0x18` correction above is a correction to the image's listing, not yet a statement
+about the running title.** It stands as a correction to what this file quoted; whether the running
+frame reads `display+0x18` is one of the things this question decides.
 
 ### A search that reported a falsifier it had not earned
 
@@ -777,12 +822,15 @@ Two more defects in the same instrument, both found by its own output rather tha
   that it could not be read. They are read at arming time now, while the product still answers.
 
 **This is where the double-paint fault stands, as known rather than as a theory.** The guest is
-healthy at the fault; the fault is a host segfault in the **interpreter's** guest load on the display
-fiber, at a guest address of `0x6e2` with `r0 = 0`; **the instruction is not in the title's RPX**;
-the display object is cleared (its flag, its phase and all five of its call targets are identical
-across the two paints); five payload shapes built on five readings have each been measured -- four
-fault, and the objective's own neither faults nor paints. The candidates left are the five callees'
-own state, and the modules outside the title's own code.
+healthy at the fault; the fault is a host segfault reached through `PPCInterpreterSlim_executeInstruction`
+-- the recompiler's *fallback* -- on the display fiber; the specific instruction gdb named does not
+survive a second run of identical code and is withdrawn; the title's own code holds **two** loads at
+the displacement that fault was reported with and neither is the one; the display object is cleared
+(its flag, its phase and all five of its call targets are identical across the two paints); five
+payload shapes built on five readings have each been measured -- four fault, and the objective's own
+neither faults nor paints. Two things are open, and both are prerequisites: **why the recompiler
+declined the second pass**, and **whether the running guest's memory is the image's memory at all**,
+which every disassembly-derived claim in this file depends on.
 
 ### A real bug found on the way, which is not this fault
 
