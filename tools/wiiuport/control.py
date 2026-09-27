@@ -910,6 +910,94 @@ def capture_frame(port: int, slot: int, timeout: float = 15.0) -> bytes:
     raise ControlUnavailable(f"no image reached slot {slot} within {timeout:.0f}s: {refusal}")
 
 
+def capture_run(port: int, count: int, slot: int = 0, timeout: float = 25.0) -> tuple[bytes, ...]:
+    """`count` consecutive presents, each of them *new*.
+
+    A slot keeps whatever last landed in it, so polling it and taking the first
+    non-empty body returns the previous run's image whenever the new one has not
+    arrived yet. That is not a slower read, it is a different answer: two rounds
+    of a comparison came back with byte-identical checksums and a paint count
+    that had not moved, which is what a stale pair looks like and what a
+    re-capture does not.
+
+    So the arm's own `imagesReceived` is the watermark. The product counts every
+    image it hands over, the answer to the arm says what that count was, and the
+    wait is for the count to reach watermark + count before a single slot is
+    read. Each image then got here after the arm, which is the property the
+    comparison needs and the property a bare poll does not have.
+
+    Consecutive, not "ask `count` times": the renderer's screenshot request is
+    one at a time, so asking again waits a whole frame, and a title that animates
+    gives a different picture.
+    """
+    if count < 1:
+        raise ControlUnavailable(f"refused: a run of {count} presents is not a run")
+    answer = request_bytes("POST", f"/capture?slot={slot}&count={count}", port, timeout)
+    try:
+        watermark = int(json.loads(answer.decode("utf-8"))["imagesReceived"])
+    except (json.JSONDecodeError, KeyError, ValueError) as unreadable:
+        raise ControlUnavailable(
+            f"POST /capture answered something without a watermark to wait on: {unreadable}; "
+            f"body was {answer[:200].decode('utf-8', 'replace')!r}"
+        ) from unreadable
+
+    deadline = time.monotonic() + timeout
+    wanted = watermark + count
+    received = watermark
+    while time.monotonic() < deadline:
+        received = _counter_field(port, "imagesReceived", timeout=5.0)
+        if received is not None and received >= wanted:
+            break
+        time.sleep(0.1)
+    if received is None or received < wanted:
+        raise ControlUnavailable(
+            f"only {received} images reached the product's slots within {timeout:.0f}s, and "
+            f"{wanted} were needed for a run of {count}"
+        )
+
+    images: list[bytes] = []
+    for index in range(count):
+        where = slot + index
+        body = b""
+        last = time.monotonic() + min(timeout, 10.0)
+        while time.monotonic() < last and not body:
+            try:
+                body = request_bytes("GET", f"/capture?slot={where}", port, 5.0)
+            except ControlUnavailable:
+                time.sleep(0.1)
+        if not body:
+            raise ControlUnavailable(
+                f"the run reported {received} images received, and slot {where} is empty"
+            )
+        images.append(body)
+    return tuple(images)
+
+
+def _counter_field(port: int, name: str, timeout: float = 5.0) -> int | None:
+    """One number out of `GET /counters`, or None when the report does not carry it.
+
+    `/counters`, and not `/setup`: the capture counts are in the counters report,
+    and `/setup` is the first-run setup status with four fields in it. Reading the
+    wrong one is a None that looks like a report, which is how a wait for a
+    watermark that is never there passes for a wait that succeeded.
+
+    None rather than zero: a missing field is not a count of nothing, and a
+    watermark that silently read zero would let a stale image through as though it
+    were fresh -- which is the exact failure this wait exists to prevent.
+    """
+    try:
+        payload = _get("/counters", port, timeout)
+    except ControlUnavailable:
+        return None
+    value = payload.get(name)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 # The most a tool may ask the product to hand over in one piece. A gigabyte is
 # not a hypothetical: the title's own descriptor entry has a word at +0x04 that
 # reads 0x3e634300, which a tool took for a byte count and asked for, and the

@@ -267,6 +267,13 @@ std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t counter
     if (!withinReach(testAt, through) || !withinReach(through, kTickBody)) {
         return {};
     }
+    // The ticks counter is incremented on the path that *runs* the tick, not on
+    // the one that skips it. It read the other way round, which made the report
+    // say "0 ticks through it" for a gate that was letting every call through --
+    // a counter named for one thing and counting the other, and a report nobody
+    // can check. With the ticks on the through path, the count that answers
+    // "how many ticks ran" is the count the report calls ticks, and the count of
+    // skipped calls is calls minus ticks.
     return {
         kLoadUpper | (3 << 21) | ((calls >> 16) & 0xffff),       // lis  r3, calls
         kOrImmediate | (3 << 21) | (3 << 16) | (calls & 0xffff), // ori  r3, r3, calls
@@ -275,12 +282,12 @@ std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t counter
         kStoreWord | (4 << 21) | (3 << 16),                      // stw  r4, 0(r3)
         kAndImmediate | (4 << 21) | (4 << 16) | 1,               // andi. r4, r4, 1
         kBranchNotEqual | ((through - testAt) & 0xfffc),         // bne  the through path
+        kReturn,                                                 // blr  on a skipped call
         kLoadUpper | (5 << 21) | ((ticks >> 16) & 0xffff),       // lis  r5, ticks
         kOrImmediate | (5 << 21) | (5 << 16) | (ticks & 0xffff), // ori  r5, r5, ticks
         kLoadWord | (6 << 21) | (5 << 16),                       // lwz  r6, 0(r5)
         kAddImmediate | (6 << 21) | (6 << 16) | 1,               // addi r6, r6, 1
         kStoreWord | (6 << 21) | (5 << 16),                      // stw  r6, 0(r5)
-        kReturn,                                                 // blr  on a skipped call
         branchTo(through, kTickBody, false),                     // b    the tick's own body
     };
 }
@@ -296,11 +303,18 @@ std::vector<uint32_t> LogicGate::throughPayload(uint32_t blockAddress, int flavo
     // target it has a jump-table entry for -- the way a stand-in reached through a
     // vtable runs. `mtctr` does not touch the link register, so the tick's return
     // still reaches the title's caller.
+    //
+    // The address loaded is the one the direct form branches to, the tick's own
+    // second instruction. Loading the *block's* address here instead -- which is
+    // what this did -- branches to the payload itself, and a payload that
+    // branches to itself is a loop with no exit: measured as the display painting
+    // 0 times in an 8-second window with the control channel still answering,
+    // which reads exactly like a title that has stopped and is not one.
     return {
-        kLoadUpper | (12 << 21) | ((blockAddress >> 16) & 0xffff),        // lis  r12,hi
-        kOrImmediate | (12 << 21) | (12 << 16) | (blockAddress & 0xffff), // ori  r12,r12,lo
-        kMoveToCounter | (12 << 21),                                      // mtctr r12
-        kBranchCount,                                                     // bctr
+        kLoadUpper | (12 << 21) | ((kTickBody >> 16) & 0xffff),        // lis  r12,hi
+        kOrImmediate | (12 << 21) | (12 << 16) | (kTickBody & 0xffff), // ori  r12,r12,lo
+        kMoveToCounter | (12 << 21),                                    // mtctr r12
+        kBranchCount,                                                   // bctr
     };
 }
 
