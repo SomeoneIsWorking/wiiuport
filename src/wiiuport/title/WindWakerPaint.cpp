@@ -1142,10 +1142,6 @@ std::string WindWakerPaint::probeName() const {
         return "entryHeldOther";
     case GuestCallProbes::Installation::EntryNotRelocatable:
         return "entryNotRelocatable";
-    case GuestCallProbes::Installation::EntryReadsLinkRegister:
-        // Named rather than folded into "unknown", because it is a refusal a caller can act on: the
-        // probe belongs on a different word, and the report says which one it wanted.
-        return "entryReadsLinkRegister";
     case GuestCallProbes::Installation::NoCodeSpace:
         return "noCodeSpace";
     }
