@@ -1026,6 +1026,47 @@ seven *different* objects agreeing. The census reports the refusals beside the b
 exactly this reason: "7 of 7" and "7 of the first 7" are not the same statement, and only one of
 them is what the number says.
 
+### The position is per vertex layout, and a single global one was wrong
+
+The falsifier's first honest run said 2 of 8 nodes blendable, 5 identical, and the 2 blendable
+ones carried `magnitude believable=false` with 18 and 60 components out of range. The 5 identical
+nodes were at **stride 32** and compared cleanly -- 585, 975, 1235, 845 and 4 vertices, zero
+differing bytes, every magnitude believable. The 2 were at strides of **20 and 64**.
+
+**So the position is per layout, and my census was naming one offset for a title with several.**
+The attribute the census named sits at offset 0 *of its own layout*, and a title packs positions
+differently per vertex layout. The cause was in the census's own key: `Signature` recorded a
+stride and the comparison key **ignored it**, so a stride-32 draw and a stride-20 draw whose
+attribute fields agreed folded into one signature and the majority counted both. That is how one
+global position came to be reported, and it is why 18 and 60 components came out as
+unreadable floats.
+
+The stride is in the key now, `positionFor(stride)` asks about one layout, and the report lists
+**every layout** with its own position and its own denominator -- because the number of layouts is
+precisely what the one global answer was hiding. `VertexPoseHistory` asks per draw, over the
+draw's own buffers, and takes no stride on faith: the stride that identifies the layout is the
+stride of the buffer the position is *in*, which is not known until the census answers.
+
+And with the magnitude ceiling in place, a position that moves believably is now separable from
+one whose bytes are not a position: node 1046041348 reported 40 differing bytes with a largest
+component delta of **0.488** -- a plausible half-unit of travel -- alongside 18 components that
+were out of range. That is a real movement with a real layout problem beside it, and before the
+ceiling both were reported as the single number 1.06e+38.
+
+### A verification lesson, because three of my mutation checks were vacuous
+
+Three times I "verified" that removing the stride from the key broke nothing, and reported the
+test as not having teeth. **The mutation had never been applied.** clang-format aligns that
+return across two lines, so my replacement string -- written with single spaces -- matched
+nothing, the build succeeded, and the suite passed on unmodified code. A mutation check that
+reports "not caught" is ambiguous between *the test is weak* and *the mutation did not land*, and
+I read it as the first three times.
+
+Done with a regular expression, which reports its substitution count: the mutation applies, and
+**four checks fail**. The assertion that catches it is on the histogram and counts two entries at
+the same offset with different strides -- because the `layouts` block lists both strides either
+way and so cannot tell whether the key separated them.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It

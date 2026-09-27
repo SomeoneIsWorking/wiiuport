@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <set>
 #include <tuple>
 
 namespace wiiuport::title {
@@ -13,11 +14,19 @@ namespace {
 // A signature, as a comparable value. One comparison rule for the whole census: the ordering
 // used to sort the report and the one used to fold a draw into a node are the same, so a
 // signature cannot be counted as two because it was reached two ways.
-using Key = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>;
+// **The stride is part of the identity, and leaving it out is what produced one global
+// position.** The signature recorded a stride and the key ignored it, so a stride-32 draw and a
+// stride-20 draw whose attribute fields agreed folded into one signature and the majority
+// counted both. The census named a single position at a single offset, and the real run showed
+// the cost: five objects compared cleanly at stride 32 while two at strides of 20 and 64
+// reported 18 and 60 components out of range, because offset 0 of a 20-byte stride is not a
+// position. A title has several vertex layouts and each packs its position differently, so the
+// stride belongs in the identity of the thing being counted.
+using Key = std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t>;
 
 Key keyOf(const DrawAttributeCensus::Signature& signature) {
-    return {signature.semanticId,  signature.format, signature.sizeInBytes,
-            signature.perInstance, signature.buffer, signature.offset};
+    return {signature.semanticId, signature.format, signature.sizeInBytes, signature.perInstance,
+            signature.buffer,     signature.offset, signature.stride};
 }
 
 const char* hexValue(uint32_t value) {
@@ -130,42 +139,101 @@ uint64_t DrawAttributeCensus::nodesTracked() const {
 }
 
 DrawAttributeCensus::Position DrawAttributeCensus::positionLocked() const {
-    const uint64_t nodes = nodesTrackedLocked();
+    return positionForLocked(0);
+}
+
+uint64_t DrawAttributeCensus::nodesAtStrideLocked(uint32_t stride) const {
+    // Distinct objects holding a position-sized attribute at this stride. A stride of zero asks
+    // over every stride, which is the question `position()` asks -- and the answer to it is a
+    // mixture of layouts, which is why a draw should ask about its own.
+    std::map<uint32_t, std::set<uint32_t>> byStride;
+    for (const Node& node : m_nodes) {
+        if (node.address == 0) {
+            continue;
+        }
+        for (const Signature& signature : node.signatures) {
+            if (signature.sizeInBytes == kPositionBytes ||
+                signature.sizeInBytes == kPositionBytesPadded) {
+                byStride[signature.stride].insert(node.address);
+            }
+        }
+    }
+    if (stride != 0) {
+        const auto found = byStride.find(stride);
+        return found == byStride.end() ? 0 : static_cast<uint64_t>(found->second.size());
+    }
+    uint64_t total = 0;
+    for (const auto& [one, objects] : byStride) {
+        total += objects.size();
+    }
+    return total;
+}
+
+DrawAttributeCensus::Position DrawAttributeCensus::positionForLocked(uint32_t stride) const {
+    // **The objects whose draws had this stride, and only those.** A position named across
+    // layouts is one layout's answer presented as the title's.
+    const uint64_t nodes = nodesAtStrideLocked(stride);
     if (nodes < 2) {
         // One object cannot agree with another, and the cross-object bar is the whole of the
         // census. Its signatures are reported; none is named.
         return {};
     }
     const uint64_t needed = nodes / 2 + 1;
-    // Key -> how many distinct objects held it.
-    std::map<Key, uint64_t> across;
+    std::map<Key, std::set<uint32_t>> across;
     for (const Node& node : m_nodes) {
         if (node.address == 0) {
             continue;
         }
         for (const Signature& signature : node.signatures) {
+            if (stride != 0 && signature.stride != stride) {
+                continue;
+            }
             if (signature.sizeInBytes != kPositionBytes &&
                 signature.sizeInBytes != kPositionBytesPadded) {
                 continue;
             }
-            across[keyOf(signature)]++;
+            across[keyOf(signature)].insert(node.address);
         }
     }
     Position out;
     uint64_t bestObjects = 0;
-    for (const auto& [key, count] : across) {
-        if (count >= needed && count > bestObjects) {
-            bestObjects = count;
+    for (const auto& [key, objects] : across) {
+        if (objects.size() >= needed && objects.size() > bestObjects) {
+            bestObjects = objects.size();
             out.semanticId = std::get<0>(key);
             out.format = std::get<1>(key);
             out.sizeInBytes = std::get<2>(key);
             out.perInstance = std::get<3>(key);
             out.buffer = std::get<4>(key);
             out.offset = std::get<5>(key);
+            out.stride = std::get<6>(key);
             out.known = true;
         }
     }
     return out;
+}
+
+DrawAttributeCensus::Position DrawAttributeCensus::positionFor(uint32_t stride) const {
+    std::scoped_lock lock(m_mutex);
+    return positionForLocked(stride);
+}
+
+std::vector<uint32_t> DrawAttributeCensus::stridesWithPosition() const {
+    std::scoped_lock lock(m_mutex);
+    return stridesWithPositionLocked();
+}
+
+std::vector<uint32_t> DrawAttributeCensus::stridesWithPositionLocked() const {
+    std::set<uint32_t> strides;
+    for (const Node& node : m_nodes) {
+        for (const Signature& signature : node.signatures) {
+            if (signature.sizeInBytes == kPositionBytes ||
+                signature.sizeInBytes == kPositionBytesPadded) {
+                strides.insert(signature.stride);
+            }
+        }
+    }
+    return {strides.begin(), strides.end()};
 }
 
 DrawAttributeCensus::Position DrawAttributeCensus::position() const {
@@ -229,6 +297,7 @@ std::string DrawAttributeCensus::json() const {
         one.number("perInstance", std::get<3>(key));
         one.number("buffer", std::get<4>(key));
         one.number("offsetInStride", std::get<5>(key));
+        one.number("stride", std::get<6>(key));
         one.number("nodes", counts.first);
         one.number("draws", counts.second);
         one.raw("positionSized",
@@ -240,6 +309,26 @@ std::string DrawAttributeCensus::json() const {
         shown++;
     }
     body.object("signatures", entries.text());
+    // The layouts, because "one position for the title" was the thing that hid them. A reader
+    // who sees a single named position and a list of four strides knows immediately that the
+    // one answer is one layout's.
+    JsonBody layouts;
+    const std::vector<uint32_t> strides = stridesWithPositionLocked();
+    for (size_t index = 0; index < strides.size(); index++) {
+        const Position one = positionForLocked(strides[index]);
+        JsonBody layout;
+        layout.number("stride", strides[index]);
+        layout.number("objects", nodesAtStrideLocked(strides[index]));
+        layout.raw("positionKnown", one.known ? "true" : "false");
+        if (one.known) {
+            layout.number("semanticId", one.semanticId);
+            layout.number("sizeInBytes", one.sizeInBytes);
+            layout.number("buffer", one.buffer);
+            layout.number("offsetInStride", one.offset);
+        }
+        layouts.object(std::to_string(index), layout.text());
+    }
+    body.object("layouts", layouts.text());
     const Position at = positionLocked();
     body.raw("positionKnown", at.known ? "true" : "false");
     if (at.known) {

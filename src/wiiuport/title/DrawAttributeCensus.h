@@ -52,6 +52,10 @@ class DrawAttributeCensus final : public frame::DrawRecordedListener {
     // substitution with the wrong stride writes the wrong bytes rather than none.
     struct Position {
         bool known = false;
+        // The stride of the layout this position belongs to. Zero means the answer was asked
+        // over every stride at once, which is a mixture of layouts and is why a draw should ask
+        // about its own.
+        uint32_t stride = 0;
         uint32_t semanticId = 0;
         uint32_t format = 0;
         uint32_t sizeInBytes = 0;
@@ -61,6 +65,27 @@ class DrawAttributeCensus final : public frame::DrawRecordedListener {
     };
 
     Position position() const;
+
+    // **The position for one stride, and why a single global offset is wrong.**
+    //
+    // The first version named one position for the whole title: the position-sized signature
+    // held by a majority of the tracked objects, with its buffer and offset. The real run then
+    // showed why that cannot work. Five objects of eight compared cleanly -- zero differing
+    // bytes, every magnitude believable -- at a stride of 32. The other two, at strides of 20
+    // and 64, reported components out of range: 18 of 24 and 60 of 36. Bytes that are not a
+    // position read as one, and the cause is that the attribute the census named sits at offset
+    // 0 *of its own layout*. A title has several vertex layouts and each packs its position
+    // differently, so one global offset is right for one layout and nonsense for the rest.
+    //
+    // So the belief is per stride, and a draw is asked about its own. The stride is a property
+    // of the draw, so this is the draw's own correspondence rather than an inference -- the
+    // same rule the vertex history uses to pair samples.
+    Position positionFor(uint32_t stride) const;
+
+    // Every stride the census has seen a position-sized attribute at, with the position it
+    // named for it. A reader can see how many layouts there are, which is the number the one
+    // global answer was hiding.
+    std::vector<uint32_t> stridesWithPosition() const;
 
     // How many distinct nodes the census tracked, and how many draws it saw. The denominators.
     uint64_t draws() const {
@@ -116,6 +141,13 @@ class DrawAttributeCensus final : public frame::DrawRecordedListener {
     // the tracked nodes. With the lock already held, because `json()` holds it and needs the
     // answer and the report is the same answer.
     Position positionLocked() const;
+    // The same, over the objects whose draws had this stride, and only those. A stride of zero
+    // asks the question over every object, which is what `position()` does.
+    Position positionForLocked(uint32_t stride) const;
+    // How many distinct objects were seen at this stride, and the bar for them.
+    uint64_t nodesAtStrideLocked(uint32_t stride) const;
+    // Every stride seen with a position-sized attribute, with the lock already held.
+    std::vector<uint32_t> stridesWithPositionLocked() const;
 
     const ObjectIdentityScope* m_scope = nullptr;
     std::atomic<uint64_t> m_draws{0};
