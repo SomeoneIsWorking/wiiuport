@@ -1224,6 +1224,62 @@ contents, `0x0274c264`, which the mod reads on every arming precisely so it can 
 the payload has to carry it as a literal rather than re-read it, which is the one word the loop's own
 dispatch cannot express.
 
+### Mode 13: the same dispatch with the frame carried as a literal, and it paints
+
+So the frame is built into the payload instead of read from the slot the mod rewrote -- `lis`/`ori`
+whose *forms* are lifted from the title's image and whose immediates are the address the mod read out of
+that slot before rewriting it. Eleven words again, the objective's own shape, and the two address words
+are checked by **reconstructing** the frame from them rather than by asserting two constants.
+
+**It installs, it does not fault, and it paints.** The first two-paint shape to do any of the three.
+
+```
+at rest:       installed False (twiceAtSixty),          1549 paints, interval 2
+armed mode 13: installed True  (loopFrameLiteralTwice), 1550 paints, interval 1
+62.7s: 1804 paints, and eight captures of 6,220,816 bytes each
+```
+
+**254 paints over 4.7 s is 54.0 a second**, against 30.1 for the same window with the mod out.
+
+### The interval field alone does not open the gate, and that is measured
+
+The run before it wrote `display+0x50 = 1` and **left the emulator's flip pacing alone**, and the
+report read `interval 1` while the paints ran at **29.8 a second**:
+
+```
+1553 -> 1687 paints over 4.5 s = 29.8 a second, with the field at 1
+```
+
+**So the title's own record of the interval it asked for is a statement about the gate, not a thing
+that opens it** -- the display thread's rate follows the emulator's flip pacing, and the field only
+records what was asked for. Both are set for the painting shapes now, and the pacing is refused if it
+does not take, because a field saying one while the flip still takes two vblanks is a claim nothing
+backs.
+
+### The two paints differ, which is the first half of condition 4
+
+Eight captures, alternating slots, each 6,220,816 bytes, and consecutive shots differ by between
+1,795,613 and 3,598,070 bytes:
+
+```
+shot 0 against shot 1: 3,526,548 of 6,220,816 bytes differ, first at offset 3874
+shot 1 against shot 2: 3,526,548 of 6,220,816 bytes differ, first at offset 3874
+shot 2 against shot 3: 3,526,548 of 6,220,816 bytes differ, first at offset 3874
+shot 3 against shot 4: 3,598,070 of 6,220,816 bytes differ
+shot 4 against shot 5: 1,795,613 of 6,220,816 bytes differ
+```
+
+**These are consecutive ticks, not the two paints of one pass**, so they show the picture is changing
+and not that the two paints of a pass differ from each other -- which is the discriminator condition 4
+actually asks for, and which needs a capture that lands on one tick's two paints rather than on two
+ticks. That is the next measurement, and it is the reason the stand-in now reaches the frame twice: the
+two paints are finally both reachable, so there is something to tell apart.
+
+**What is not yet measured, and is stated here rather than left to be assumed:** 54.0 a second is two
+reads a window apart taken across a capture sequence, not the paired-window measurement condition 1
+specifies, and the logic rate was not read with the gate in -- the harness's arming sequence leaves the
+gate out, so it reported 0 calls at its probe. Both are one measurement each away.
+
 ### Correctly paired at last: the fault is in the title's own code, and the gdb window was a host read
 
 One run reporting both the counter and the window, which is the only way the two may be paired:
