@@ -97,12 +97,14 @@ def measure(
             return
         on = name == "on"
         try:
-            set_paint(on, port=args.port, mode=args.mode)
-            set_gate(on, port=args.port, through=args.through, flavour=args.flavour)
+            if args.arm in ("both", "paint"):
+                set_paint(on, port=args.port, mode=args.mode)
+            if args.arm in ("both", "gate"):
+                set_gate(on, port=args.port, through=args.through, flavour=args.flavour)
         except ControlUnavailable as unavailable:
             print(f"  refused to arm {name}: {str(unavailable)[:80]}", flush=True)
             return
-        print(f"  window {name}: mod {'on ' if on else 'off'}", flush=True)
+        print(f"  window {name}: {args.arm} {'on ' if on else 'off'}", flush=True)
         # What the gate says about itself, every window: its probe's installation
         # and the words at the tick's entry and the one after it. A rate of zero
         # with the gate in is either "no calls came" or "the gate is not wired to
@@ -135,6 +137,10 @@ def measure(
             flush=True,
         )
     for turn_off in (set_paint, set_gate):
+        if turn_off is set_paint and args.arm == "gate":
+            continue
+        if turn_off is set_gate and args.arm == "paint":
+            continue
         try:
             turn_off(False, port=args.port)
         except ControlUnavailable:
@@ -186,6 +192,16 @@ def main(argv: list[str] | None = None) -> int:
         help="how the pass-through control reaches the gate's block: 1 by a direct "
         "branch, 2 through the count register, which is the mechanism the "
         "recompiler's jump table serves",
+    )
+    parser.add_argument(
+        "--arm",
+        choices=("both", "paint", "gate"),
+        default="both",
+        help="what each window switches: both the paint stand-in and the logic gate, only "
+        "the paint stand-in, or only the gate. They are two separate questions -- whether "
+        "the picture rate reaches sixty, and whether the logic rate follows it -- and "
+        "arming them together answers neither on its own: a run that crashes with both in "
+        "has measured neither",
     )
     parser.add_argument("--window", type=float, default=6.0, help="seconds per window")
     parser.add_argument("--windows", type=int, default=3, help="how many, alternating off and on")

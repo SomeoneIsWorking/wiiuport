@@ -185,19 +185,46 @@ second (181 over 6.0s) with the gate out, 30.00 (180) with the gate in, and the 
 counter from 30 to 151 in 3.0s against a probe call rate of 40.33 a second over the same
 window.
 
-### What is still open, and it is not the gate
+### What is still open: the paint mod kills the product on its own
 
-Installing the paint mod and then the gate, in that order, kills the product: a
-segmentation fault in recompiled code on the display thread's core, at `movbe
-0x48(%r13,%rax,1),%ecx`. The reverse order survives 240 seconds. The paint stand-in is at
-0x00e05880 and the gate's block at 0x00e058e4 — 36 bytes apart, disjoint, both inside the
-trampoline area's single 2 MiB `CODE_TRAMPOLINE` range. The gate's install rewrites its
-block, which invalidates the recompiled function covering those bytes, and
-`PPCRecompiler_deleteFunction` unlinks the jump table under whatever is executing that
-function. So the fault is a recompiler lifetime defect in the fork — an invalidation racing
-another core — not a gate defect, and not a paint-mod defect. It is recorded here rather
-than worked around: arming the two in the other order is a measurement dodge, and a run
-that needs its order chosen to survive is not a measurement.
+Correcting an earlier reading of this, which blamed the gate. **The paint stand-in alone
+faults, with the gate never armed.** Arming it at 71 seconds killed the product within three,
+and the fault is a segmentation fault inside recompiled code on the display thread's core
+(`OSSched[core=1]`). Mode 1 survives and holds its rate; mode 2, which is the first mode that
+calls the frame twice, does not.
+
+So the two are independent: the gate runs, and the paint mod's second mode does not. That is
+also why the two are now armed separately (`probe_run.py --arm paint|gate|both`). They are two
+different questions — whether the picture rate reaches sixty, and whether the logic rate
+follows it — and a run that arms both has measured neither on its own.
+
+What is established about the fault, and what is not:
+
+- The payload is correct. The product logs the words it wrote, because arming is the step
+  after which nothing may survive to be asked: `0x499469e5 0x499469e1 0x49946798` at
+  0x00e05880, which is `bl 0x0274c264` twice (link bit set on both) then
+  `b 0x0274c020`, the display loop's top. Two paints per pass, as the mode intends.
+- The wiring at rest is as expected: vtable slot 0x10004f54 holds 0x0274c264, the frame
+  entry holds a branch to the paint probe's stub at 0x00e05868, and the stub is
+  `[HLE, mfspr r0,LR, lis r12, ori r12, mtctr r12, bctr]` to 0x0274c268.
+- Sampled twice three seconds apart at the fault, the display thread is at guest pc
+  0x00e0586c — the stub's displaced instruction — with r0 already holding 0x00e05888, the
+  stand-in plus eight. It is not moving. That is a thread stuck inside the stub, not a
+  memory fault, and the distinction matters: nothing is out of bounds.
+- Taking the display thread's probe lock across the block write and the vtable patch is
+  correct on its own terms — a thread already inside the stand-in is running the function
+  that write invalidates — and it is in. It did not cure this fault. It was tried first as
+  the whole explanation, which was wrong; the write is not the only thing that changes what
+  the display thread is running.
+
+What is not established is which of the remaining candidates it is. The recompiled function
+covering the stand-in's block is deleted and recompiled while the display thread is inside
+it; the block sits 24 bytes from the probe stub in the same bump-allocated arena, so one
+translation unit may cover both; and the stand-in calls back into a frame whose entry is
+itself the probe's, so each pass re-enters the probe. Separating those needs a run each, and
+each run is minutes, so this is recorded as open rather than guessed at. What is *not*
+available as an answer is arming the two in an order that happens to survive: a measurement
+that needs its order chosen is not a measurement.
 
 ## The gate that comes before any blending
 

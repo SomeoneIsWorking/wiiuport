@@ -443,6 +443,18 @@ std::string WindWakerPaint::enable(Mode mode) {
     }
     lucent::info("paint", "stand-in {} at {}: {} words", modeName(mode), hex(m_block),
                  std::to_string(at->size()));
+    // The display thread's lock, held across every word written here *and* the
+    // vtable slot rewritten below, because the two together are what changes what
+    // a display thread is running: a thread already inside the stand-in is in the
+    // recompiled function covering this block, and writing the block deletes that
+    // function under it.
+    //
+    // Measured, with the log naming the moment: a segmentation fault inside
+    // recompiled code one millisecond after the patch was armed, on the display
+    // thread's own core, with the frame's address 0x0274c268 in the stack. The
+    // probe takes this same lock on every call, so holding it here means the
+    // display thread has finished its frame and is not in the stand-in.
+    std::scoped_lock displayThread(m_frame.mutex);
     // A word at a time, through the seam that owns the guest's order. Written
     // as bytes from a host word array, every instruction in the block would
     // reach the guest with its halves exchanged -- which is a display thread
@@ -453,6 +465,21 @@ std::string WindWakerPaint::enable(Mode mode) {
                         std::to_string(word);
             return m_refusal;
         }
+    }
+    // The words, as written. Arming this stand-in is the step after which the
+    // product may not survive long enough to be asked anything, so the words it
+    // holds are reported here rather than by a later read: a run that faults
+    // one millisecond after arming leaves nothing alive to read.
+    //
+    // This is not a diagnostic left in for a fault. It is the only place the
+    // payload is ever visible as the guest received it, and the payload is what
+    // decides whether the display thread paints twice or loops.
+    {
+        std::string written;
+        for (size_t word = 0; word < at->size(); word++) {
+            written += " " + hex((*at)[word]);
+        }
+        lucent::info("paint", "stand-in {} at {} holds:{}", modeName(mode), hex(m_block), written);
     }
     if (mode == Mode::BranchEntry) {
         // The frame's own entry, not the vtable's slot: a direct branch out of the
@@ -520,6 +547,15 @@ std::string WindWakerPaint::disableLocked() {
         // every comparison is made against -- unmeasurable.
         return {};
     }
+    // The display thread's lock, for the same reason enable() takes it: putting
+    // the title's own frame back while a display thread is inside the stand-in
+    // leaves that thread in a function this is about to change. The lock is the
+    // probe's own, taken on every call, so this waits for the frame to finish
+    // rather than for anything the guest knows about.
+    //
+    // Held for the whole write-back rather than only the one word, because the
+    // interval field below is written after this and wants the same protection.
+    std::scoped_lock displayThread(m_frame.mutex);
     // The word that was written, which is the live vtable's slot. Not the
     // address out of the image: enable() patches whatever vtable the display
     // holds, so restoring to the image's address would rewrite a word nothing
@@ -540,11 +576,12 @@ std::string WindWakerPaint::disableLocked() {
     m_installed = false;
     m_refusal.clear();
     if (m_wroteInterval) {
-        uint32_t display = 0;
-        {
-            std::scoped_lock frameLock(m_frame.mutex);
-            display = m_frame.display;
-        }
+        // The display's address, read under the lock this function already holds
+        // rather than by taking it again: a scoped_lock is not recursive, and
+        // taking it here is a deadlock with itself. Which is what happened the
+        // first time this lock was added here, and it looked like a hang rather
+        // than like a mistake.
+        const uint32_t display = m_frame.display;
         if (display != 0 && !m_writeWord(display + kIntervalOffset, m_savedInterval)) {
             m_refusal =
                 "the display's interval field would not take " + hex(m_savedInterval) + " back";

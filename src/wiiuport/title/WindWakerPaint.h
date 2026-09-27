@@ -252,6 +252,22 @@ class WindWakerPaint {
         }
 
         void OnCall(std::span<const uint32_t, 32> gpr, uint32_t returnAddress) override;
+        // Held for the whole time the display thread is inside the frame, and
+        // taken by whoever rewrites the words that route it here.
+        //
+        // This is what makes arming and disarming safe. The stand-in is reached
+        // through a word in a vtable slot, and a display thread already inside it
+        // is running code that the next word written may invalidate -- the
+        // recompiled function covering the stand-in's block is deleted, and the
+        // core is still in it. Measured: a segmentation fault inside recompiled
+        // code one millisecond after the patch was armed, with the frame's own
+        // address 0x0274c268 in the stack, and nothing in the title's logs.
+        //
+        // The lock is the probe's own, already taken on every call, so a patch
+        // that takes it waits for the display thread to leave rather than
+        // invalidating the code under it. It is not a lock the guest takes: the
+        // guest does not know it exists, and a display thread that is mid-frame
+        // finishes its frame and releases it in the ordinary way.
         mutable std::mutex mutex;
         std::optional<GuestCallProbes::Installation> installation;
         uint32_t display = 0;
