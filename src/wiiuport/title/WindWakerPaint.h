@@ -206,6 +206,12 @@ class WindWakerPaint {
         return m_paints;
     }
 
+    // The counter itself, for a consumer that has to tell one frame from another and not
+    // merely count them. A count is no use to anything that has to schedule its own reads.
+    const std::atomic<uint64_t>& paintCounter() const {
+        return m_paints;
+    }
+
     // The stand-in's words for a block at `blockAddress`, or nothing when a
     // branch in it could not reach: one or two direct calls at the frame, with
     // or without the game's own call that asks for one vblank a flip, then an

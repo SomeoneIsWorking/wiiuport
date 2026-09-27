@@ -46,6 +46,10 @@ const char* NodePoseLocator::nameOf(Kind kind) {
     return "unknown";
 }
 
+void NodePoseLocator::setFrameCounter(const std::atomic<uint64_t>* counter) {
+    m_frames = counter;
+}
+
 void NodePoseLocator::install() {
     // The entry's own word, read before the probe is asked for it. The fork refuses the
     // install when the entry does not hold the word the probe names, and reports that as
@@ -94,7 +98,7 @@ bool NodePoseLocator::isPose(const float* words) {
     return true;
 }
 
-bool NodePoseLocator::claimLocked(uint32_t address, Kind kind) {
+bool NodePoseLocator::claimLocked(uint32_t address, Kind kind, uint64_t frame) {
     auto known =
         std::find_if(m_tracked.begin(), m_tracked.end(), [address, kind](const Tracked& one) {
             return one.address == address && one.kind == kind;
@@ -103,6 +107,13 @@ bool NodePoseLocator::claimLocked(uint32_t address, Kind kind) {
         if (known->scans >= kScansPerObject) {
             return false;
         }
+        // With a frame counter, one sample per object per frame. Without one, every binding
+        // is a sample, and the report says so -- because that schedule cannot see a pose
+        // move, so its negatives are worth less than they look.
+        if (m_frames != nullptr && known->lastFrame == frame) {
+            return false;
+        }
+        known->lastFrame = frame;
         known->scans++;
         return true;
     }
@@ -111,7 +122,7 @@ bool NodePoseLocator::claimLocked(uint32_t address, Kind kind) {
         m_refusedOfKind[which]++;
         return false;
     }
-    m_tracked.push_back(Tracked{address, kind, 1, {}});
+    m_tracked.push_back(Tracked{address, kind, 1, frame, {}});
     return true;
 }
 
@@ -123,9 +134,10 @@ void NodePoseLocator::scan(uint32_t address, Kind kind) {
     if (address == 0) {
         return;
     }
+    const uint64_t frame = m_frames == nullptr ? 0 : m_frames->load(std::memory_order_relaxed);
     {
         std::scoped_lock lock(m_mutex);
-        if (!claimLocked(address, kind)) {
+        if (!claimLocked(address, kind, frame)) {
             return;
         }
     }
@@ -361,6 +373,17 @@ std::string NodePoseLocator::json() const {
     body.number("nodeScanBytes", kNodeScanWords * 4);
     body.number("subObjectAtNodeOffset", kSubObjectOffset);
     body.number("scansPerObject", kScansPerObject);
+    // How the samples were spaced, because a negative means nothing without it: four
+    // bindings of one object can all fall inside one frame, where nothing has moved.
+    body.string("schedule", m_frames == nullptr ? "perBind" : "perFrame");
+    // A quoted string when there is a counter, a bare null when there is not. Written the
+    // other way round the body carried `0x00000001` unquoted, which is not JSON, and the
+    // whole report would fail to parse in the one client that reads it.
+    if (m_frames == nullptr) {
+        body.raw("frameCounter", "null");
+    } else {
+        body.string("frameCounter", hexValue(static_cast<uint32_t>(m_frames->load())));
+    }
     body.number("readsUnreadable", m_unreadable);
     // The two kinds, scored apart. A field at the same offset in a node and in its
     // sub-object would be one coincidence seen twice if they shared a table, so they do not.
