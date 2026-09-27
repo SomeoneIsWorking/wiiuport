@@ -524,7 +524,12 @@ void wiiuport::tests::runPaintTests() {
     {
         // A second paint and the interval are separable, so a failure says
         // which of the two the title would not take.
+        //
+        // The interval field is seeded with the two the title asks for, because the two-paint shape
+        // now **writes** it -- the fix that removed the call into the zero-filled hole -- and a
+        // field with nothing in it is not something the mod can save and restore.
         FakeGuest guest = loadedTitle();
+        guest.writeWord(kDisplay + WindWakerPaint::kIntervalOffset, 2);
         WindWakerPaint mod = makeMod(guest);
         mod.install();
         linked();
@@ -533,24 +538,59 @@ void wiiuport::tests::runPaintTests() {
         const auto twice = guest.block();
         check::isTrue(twice.size() == 3, "two paints are three words: two calls and a branch");
         mod.disable();
-        check::isTrue(mod.enable(WindWakerPaint::Mode::TwiceAtSixty).empty(),
-                      "two paints and one vblank install");
+        // The refusal is in the message, so a failure says *why* rather than only that: a check
+        // whose text is "it installed" cannot distinguish a wrong payload from a refused field.
+        const std::string refusal = mod.enable(WindWakerPaint::Mode::TwiceAtSixty);
+        check::isTrue(refusal.empty(),
+                      "two paints and one vblank install" +
+                          (refusal.empty() ? std::string() : " -- refused: " + refusal));
         const auto sixty = guest.block();
         // Guarded: an index into a block that was never written is a crash that
         // takes the whole report with it, which is the one thing a test suite
         // must never do to the run that reads it.
-        check::isTrue(sixty.size() == 5, "and five words: the interval call and two paints");
-        if (sixty.size() != 5) {
+        // **Four words, and none of them is a call into the hole.** This used to be five, the
+        // second of them a `bl` at 0x028fad2c, and that call was the double-paint fault: the
+        // address holds four zero words in the title's own image, so the branch ran off the end of
+        // the hole, the two `bl`s at the display frame were never reached, and the guest ended up
+        // executing host pointer bytes in the loader arena. The interval is set by writing the
+        // display's own field, which is what the shape that measures sixty a second has always
+        // done.
+        check::isTrue(sixty.size() == 3,
+                      "and three words: the frame twice and a branch back to the loop, with no "
+                      "interval call among them -- " +
+                          std::to_string(sixty.size()));
+        if (sixty.size() != 3) {
             return;
         }
-        check::isTrue(sixty[0] == 0x38600001, "starting with the title's own li r3,1");
-        check::isTrue(sixty[1] == WindWakerPaint::branchTo(0x00e07004, 0x028fad2c, true),
-                      "then the game's own swap-interval setter");
-        check::isTrue(sixty[2] == WindWakerPaint::branchTo(0x00e07008, 0x0274c264, true) &&
-                          sixty[3] == WindWakerPaint::branchTo(0x00e0700c, 0x0274c264, true),
-                      "then the frame, called twice");
-        check::isTrue(sixty[4] == WindWakerPaint::branchTo(0x00e07010, 0x0274c020, false),
+        check::isTrue(sixty[0] == WindWakerPaint::branchTo(0x00e07000, 0x0274c264, true) &&
+                          sixty[1] == WindWakerPaint::branchTo(0x00e07004, 0x0274c264, true),
+                      "the frame, called twice");
+        check::isTrue(sixty[2] == WindWakerPaint::branchTo(0x00e07008, 0x0274c020, false),
                       "and a branch back to the top of the loop");
+        // The field is the title's own record of the interval it asked for, and the two-paint shape
+        // sets it the same way the one-vblank shape does rather than by calling into a hole.
+        uint32_t interval = 0;
+        check::isTrue(readWord(kDisplay + WindWakerPaint::kIntervalOffset, interval) &&
+                          interval == 1,
+                      "and the title's own interval field reads one, set by writing it");
+        // **No word of any payload may be a branch to the address that is not code.** Asserted over
+        // the whole word list rather than by position, because a payload that grew a call anywhere
+        // is the failure and a position check would not see it.
+        bool callsTheHole = false;
+        for (uint32_t word : sixty) {
+            // A `bl` to 0x028fad2c has AA=0 and LK=1, so the top six bits are 0b010010 and bit 1 is
+            // set; the low 24 bits are the displacement. Reconstructing the target from the word
+            // catches the call whatever position it was written at.
+            if ((word >> 26) == 0x12 && ((word >> 1) & 1) == 1) {
+                int32_t displacement = static_cast<int32_t>(word << 2) >> 2;
+                if (displacement + 4 == 0x028fad2c) {
+                    callsTheHole = true;
+                }
+            }
+        }
+        check::isTrue(!callsTheHole,
+                      "and no word of it is a call to 0x028fad2c, which holds four zero words in "
+                      "the image and was the fault");
     }
     {
         // The one-vblank payload is a single branch. The pacing is the

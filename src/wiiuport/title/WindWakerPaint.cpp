@@ -381,10 +381,17 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
         steps.push_back({false, 0, kRestoreDisplay});
         steps.push_back({true, kDisplayFrame});
     } else {
-        if (mode == Mode::TwiceAtSixty || mode == Mode::TailTwiceAtSixty) {
-            steps.push_back({false, 0});               // li r3,1
-            steps.push_back({true, kSetSwapInterval}); // the game's own setter
-        }
+        // **No payload branches to `kSetSwapInterval` any more, and this is why.** That address
+        // holds four zero words in the title's own image -- `add r0,r0,r0`, four times -- so a `bl`
+        // into it ran off the end of the hole, and that was the double-paint fault: at the fault
+        // the link register was the stand-in's own and the program counter was in the loader arena
+        // executing host pointer bytes, and the two `bl`s at the display frame were never reached
+        // at all.
+        //
+        // The interval is set by writing the display's own field, which is what `OneAtSixty` -- the
+        // shape that measures 59.99 and 60.12 paints a second and survives -- has always done. The
+        // call was redundant before it was fatal: the field write is the title's own record of the
+        // interval it asked for, and a call into a zero-filled hole cannot set it.
         const bool calls = mode == Mode::Twice || mode == Mode::TwiceAtSixty;
         const bool paintsTwice = calls || mode == Mode::TailTwiceAtSixty;
         // `ObjectivePayload` carries its own two calls and its own words; the loop below would add
@@ -615,8 +622,31 @@ std::string WindWakerPaint::enable(Mode mode) {
                     hex(first) + ", not this title's loop";
         return m_refusal;
     }
+    // **The address the payloads used to call for the swap interval is checked and never called.**
+    // It holds four zero words in the title's own image -- `add r0,r0,r0`, four times -- so a
+    // payload that branched there ran off the end of the hole, and that was the double-paint fault.
+    // Nothing branches there now, and this says so at install time rather than leaving the next
+    // payload to find out by faulting. If a future revision ever puts code there, the refusal names
+    // both facts, so the change becomes a decision rather than an accident.
+    {
+        uint32_t hole = 0;
+        if (m_readWord(kSetSwapInterval, hole) && hole != kSynchronisationNoOp) {
+            m_refusal =
+                "the swap-interval address " + hex(kSetSwapInterval) + " now holds " + hex(hole) +
+                ", not a zero word: it is no longer the hole the payloads were " +
+                "measured against, and a payload branching there would branch into whatever " +
+                "it has become";
+            return m_refusal;
+        }
+    }
     m_original = frame;
-    if (mode == Mode::IntervalField || mode == Mode::OneAtSixty) {
+    // The interval field is written for every shape that needs one vblank a flip, which now
+    // includes the two-paint shapes. It used to be written for the single-paint ones and reached by
+    // a *call* for the two-paint ones -- and that call went to a zero-filled hole, so the
+    // distinction was the fault rather than a feature.
+    const bool wantsOneVblank = mode == Mode::IntervalField || mode == Mode::OneAtSixty ||
+                                mode == Mode::TwiceAtSixty || mode == Mode::TailTwiceAtSixty;
+    if (wantsOneVblank) {
         // The field the title's own `GX2SetSwapInterval` call was handed, written
         // to one. Recorded and restored on the way out, because it is the
         // title's state and not the mod's.

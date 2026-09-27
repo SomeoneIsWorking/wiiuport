@@ -76,7 +76,23 @@ class WindWakerPaint {
     // The frame's first instruction, as GuestCallProbes relocation needs it,
     // and the gx2 import that sets the flip interval.
     static constexpr uint32_t kDisplayFrameFirst = 0x7c0802a6;
+    // **The address the payloads used to branch to for the swap interval, and it is not code.**
+    // Measured out of the title's own image: 0x028fad2c, 0x028fad30, 0x028fad34 and 0x028fad38 all
+    // hold 0x00000000, which is `add r0,r0,r0` -- four synchronisation no-ops and then whatever
+    // follows at 0x028fad3c. Ghidra holds a function symbol there and no instruction at all, which
+    // is the signature of a zero-filled hole rather than of a body it failed to disassemble.
+    //
+    // A `bl` into it runs off the end of the hole, and that is the double-paint fault: the link
+    // register at the fault was the stand-in's own (0x00e058a0, its block plus 8) and the program
+    // counter was in the loader arena at 0x0e001128, executing host pointer bytes. The two `bl`s at
+    // the display frame were never reached.
+    //
+    // Nothing branches here any more -- the interval field is written directly, which is what the
+    // shape that reaches sixty a second already did -- and `reserve()` refuses if the address ever
+    // stops being a hole, so a future payload cannot quietly reintroduce the call.
     static constexpr uint32_t kSetSwapInterval = 0x028fad2c;
+    // What a zero word is. The hole is four of them, and one is enough to refuse on.
+    static constexpr uint32_t kSynchronisationNoOp = 0x00000000;
     // The vblanks a flip takes, the title's two become one.
     static constexpr uint32_t kSwapInterval = 1;
     // What the title asks for, named so a report can say what was replaced.
