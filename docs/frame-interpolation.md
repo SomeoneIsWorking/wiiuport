@@ -988,6 +988,44 @@ That is a change of mechanism, not a smaller version of the same one, and it is 
 the finding it is: the question "which node field holds the pose" has an answer, and the answer
 is that the pose is not held anywhere as a transform.
 
+### The position attribute, named from the title's own tables
+
+Because the pose is consumed into vertex bytes, the blend writes vertex bytes, and the one
+thing that has to be *known* is which attribute carries the position. Reading a semantic index
+out of a GX2 header would be a guess about a title nobody has disassembled, so it is measured
+instead -- how often each `(semantic, format, size, buffer, offset)` signature recurs across the
+title's own objects, with the bar over *distinct objects* so one odd mesh cannot name it.
+
+    502,922 guest draws, 916,081 attributes read, 7 objects tracked (386,949 refused),
+    0 draws with no attributes, 1,994 with no node published, 0 naming a buffer the draw lacks
+    a position is named when 4 of the tracked objects agree and it is 12 or 16 bytes
+
+    position: semantic 0, format 0x00000030, 12 bytes, buffer 0, offset 0, per instance 0
+
+    semantic 0: format 0x30, 12 bytes, buffer 0, offset  0, in 7 objects and  71,165 draws
+    semantic 0: format 0x30, 12 bytes, buffer 0, offset 16, in 4 objects and  39,689 draws
+    semantic 6: format 0x1e,  8 bytes, buffer 0, offset 12, in 6 objects and  27,520 draws
+    semantic 1: format 0x1e,  8 bytes, buffer 0, offset 24, in 7 objects and   1,855 draws
+
+**And the near-misses are in the report, which is the point of the histogram.** There is a
+*second* twelve-byte format-`0x30` attribute at offset 16, in 4 of 7 objects and 39,689 draws
+-- it clears the bar of 4 on its own. It is not named because the one at offset 0 is in 7 of 7,
+and a reader can see both. A bar that filtered the immovable and the runner-up out of the
+report would have shown one line and called it a finding.
+
+**What the format byte is, is not guessed.** `0x30` is what the title pairs with a
+twelve-byte, three-component position in 7 objects and 71,165 draws, and `0x1e` is what it
+pairs with eight-byte ones -- that much is the measurement. What `0x30` is *called* in Latte's
+enumeration is a lookup, and the report carries the byte in hex and in decimal precisely so a
+reader does not have to take this one's word for it.
+
+**The sampling limit, stated rather than buried.** Seven objects of the first eight the binder
+published, and 386,949 refused. Those seven may well be seven instances of one kind of thing --
+the sea, the sky, a particle system -- and every one of them agreeing is a weaker claim than
+seven *different* objects agreeing. The census reports the refusals beside the belief for
+exactly this reason: "7 of 7" and "7 of the first 7" are not the same statement, and only one of
+them is what the number says.
+
 A constant worth recording beside them: the hand-converted first word. The image's word is
 `0x9421FEB8`; a value worked out from the signed decimal Ghidra prints gave `0x9422FEB8`, and
 the fork's refusal — `entryHeldOther` — reads exactly like a real finding about the title. It
