@@ -834,6 +834,95 @@ is a defect and not a finding: the first version of it put the displacement *aft
 zero loads in a function full of them, and the check on a word the image and this file agree on
 (`lwz r3,0x18(r30)`) said so.
 
+### The objective's payload hands the frame the wrong pointer, and both of its defects are now named
+
+The eleven words were built verbatim and measured: no fault, no paint, 1,854 paints at 68.0s and 1,854
+at 97.1s. With the frame's own access pattern now measured rather than quoted, the reason is exact.
+
+**The frame takes the display and dereferences `+0x24` itself:**
+
+```
+0x0274c278  or    r30,r3,r3        the display pointer, from r3
+0x0274c280  lwz   r3,0x18(r30)     the display's +0x18
+0x0274c288  lwz   r10,0x24(r30)    the call-target base -- read five times in the function
+0x0274c28c  lwz   r12,0xd4(r10)    a call target, off that sub-object
+```
+
+**The payload's first word does that `+0x24` dereference itself, in the caller:**
+
+```
+819f0024    lwzu  r3,0x24(r30)    the call-target base into r3, and r30 := r30 + 0x24
+7fe3fb78    or    r31,r3,r3        the base into r31
+4e800421    bctrl                  the frame
+```
+
+So `bctrl` calls the frame with `r3` = the **sub-object**, not the display. The frame's first act is
+`or r30,r3,r3`, which makes `r30` the sub-object, and from there every field it reads is
+`sub-object+0x18`, `+0x24`, `+0x74` rather than the display's. **`+0x24` is read five times and each
+read feeds a `bctrl` target**, so a stand-in that hands over the wrong level of indirection does not
+merely read the wrong fields -- it dispatches through targets read out of whatever the sub-object
+happens to point at. That is a direct route to the arena finding below.
+
+The `lwzu` form compounds it: the update leaves `r30` advanced by `0x24`, so the payload's second group
+reads `display + 0x48` rather than where the first read. **The objective's two groups are not two
+passes over the same tree; they are two passes over two different addresses.**
+
+**So the payload has two independent defects, and neither is a missing register:**
+
+1. **Word 1** pre-dereferences the call-target base and passes it to a frame that wants the display.
+2. **Word 2** (`lwz r12,0xcc(r0)`) reads the slot the mod has just rewritten, so `mtspr CTR` takes the
+   stand-in's own address and `bctrl` calls the stand-in again.
+
+Both were predicted by this file's own measurements before they were run, and the run agrees. **A
+payload with eleven words has one call target and one call site; this one has two of each and they
+disagree.**
+
+### Where the second paint actually goes: into the loader arena's data
+
+The fault's program counter is in the loader arena every run -- `0x00e0006a8`, `0x00e000768`,
+`0x00e000e28` across three. That range is not mystery: `MEMORY_CODE_TRAMPOLINE_AREA_ADDR` is
+`0x00E00000` with a 2 MiB size (`MMU.h:145-146`), it is what `RPLLoader_AllocateTrampolineCodeSpace`
+hands out from (`rpl.cpp:86`), and it is registered with the recompiler wholesale at init
+(`PPCRecompiler.cpp:759`) because the loader does put real code in it.
+
+**And its base is not code.** Read as bytes, because of the reversal above, the first 256 bytes:
+
+```
+0x00e00000  04 00 01 96  04 00 02 78  04 00 02 8d  04 00 02 91      HLE calls, one per entry
+0x00e00010  04 00 02 96  04 00 02 9b  04 00 02 9f  04 00 02 a5
+0x00e00020  04 00 02 b0  04 00 02 b3  04 00 02 b7  04 00 02 bf
+0x00e00030  04 00 02 c2  04 00 02 ff  4e 80 00 20                  then `bctr`
+0x00e00038  6e 6e 5f 61  63 74 2e 46  69 6e 61 6c  69 7a 65 5f 5f   `nna_act.Finalize__Q32_2nn3actFv`
+0x00e00060  00 00 00 00  ...                                          zeros, at least 0x100 bytes
+```
+
+`0x0400xxxx` is cemu's HLE call encoding -- `1u << 26 | hleIndex`, the same shape `WriteStub` writes for
+a probe's dispatch -- so **the arena's first `0x38` bytes are the HLE function registry's code, what
+follows is its symbol names, and then zero padding.** The mod's stand-in is at `0x00e05898`, about
+22 KiB past that base, and the probes' stubs sit in the same area: the dump shows one at `0x00e058b4`
+holding `040004e4`, the displaced `7c0802a6`, the resume `3d80027f 618cf890`, and `7d8903a6`.
+
+**So a branch into the arena lands in the registry table or the zeros after it and executes data as
+code.** That accounts for the whole signature with no appeal to the display's state: a range registered
+as executable is translated as instructions, and the recompiler's behaviour there is not its behaviour
+on real code. The display object being cleared is what you see when the frame was never properly
+entered, not a cause.
+
+**What is still unknown is which branch goes there.** The candidates are narrow: the stand-in's own
+control flow after the frame returns, or one of the frame's five `bctrl`s. The five targets come from
+`display+0x24`, measured identical across paints, so the targets themselves are not the divergence --
+which makes the mod's own payload the place to look, and the objective's payload, which dispatches
+through a sub-object's fields, a candidate for exactly this.
+
+### The registrations print came back empty, and neither reading is built on
+
+`InstallRegistered` never clears `s_registrations` -- it installs, hands a non-holding entry its own
+word back, and advances the index -- so an empty deque at the fault means either that no probe was
+registered in that run, or that gdb resolved a different internal-linkage instance of the anonymous
+namespace's object than the one the product uses. A previous run printed nine registrations through the
+same expression, so both readings are live and one more check would tell them apart. Recorded as
+unresolved rather than as "no probes are installed", which is what a single empty print invites.
+
 ### The faulting instruction, decoded with the byte order right
 
 With the reversal undone, the opcode the interpreter was executing is `0xe2060380`, and
