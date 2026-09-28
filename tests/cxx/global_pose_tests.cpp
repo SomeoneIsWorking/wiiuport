@@ -16,6 +16,13 @@ namespace {
 
 using wiiuport::title::GlobalPoseCensus;
 
+// The range every case scans. **Not a constant but a call**, so the test exercises the same range
+// the product builds rather than one written out here that could drift from it.
+const GlobalPoseCensus::Range& RANGE() {
+    static const GlobalPoseCensus::Range range = GlobalPoseCensus::data();
+    return range;
+}
+
 // **The guest, as two snapshots rather than one.** The scan reads the range twice and compares, so
 // a reader that answered both reads from the same map would report that nothing ever moved -- and
 // would then be testing the double rather than the scan. So there are two maps and the reader
@@ -62,10 +69,10 @@ uint32_t floatBits(float value) {
 
 // The whole declared range as zeroes, so an offset the test does not write cannot satisfy the
 // predicate. A partly-filled range would let the assertion be about the filler.
-std::map<uint32_t, uint32_t> blankRange() {
+std::map<uint32_t, uint32_t> blankRange(const GlobalPoseCensus::Range& range) {
     std::map<uint32_t, uint32_t> words;
-    for (size_t word = 0; word < GlobalPoseCensus::kWords; word++) {
-        words[GlobalPoseCensus::kStart + 4 * word] = floatBits(0.0f);
+    for (size_t word = 0; word < (range.end - range.start) / 4; word++) {
+        words[range.start + 4 * word] = floatBits(0.0f);
     }
     return words;
 }
@@ -73,8 +80,8 @@ std::map<uint32_t, uint32_t> blankRange() {
 // A 3x4 at `offsetWords` into the range: three perpendicular rows of the given scale, and a
 // translation. `translationDelta` is how far the translation is between the two snapshots, and zero
 // means the same value in both -- the static case.
-void put3x4(std::map<uint32_t, uint32_t>& words, size_t offsetWords, float rotation, float scale,
-            float translationDelta) {
+void put3x4(std::map<uint32_t, uint32_t>& words, uint32_t start, size_t offsetWords, float rotation,
+            float scale, float translationDelta) {
     const float s = std::sin(rotation);
     const float c = std::cos(rotation);
     const float values[12] = {
@@ -83,7 +90,7 @@ void put3x4(std::map<uint32_t, uint32_t>& words, size_t offsetWords, float rotat
         -2.0f,     8.0f,
     };
     for (size_t word = 0; word < 12; word++) {
-        words[GlobalPoseCensus::kStart + 4 * (offsetWords + word)] = floatBits(values[word]);
+        words[start + 4 * (offsetWords + word)] = floatBits(values[word]);
     }
 }
 
@@ -97,7 +104,15 @@ std::string field(const std::string& body, const std::string& name) {
     while (end < body.size() && body[end] != ',' && body[end] != '}') {
         end++;
     }
-    return body.substr(start, end - start);
+    std::string value = body.substr(start, end - start);
+    // **A JSON string's value comes back with its quotes, and a comparison against a C++ literal
+    // that forgets them fails for a reason no failure message shows.** So they are stripped here,
+    // once, and every caller compares against the bare text. This cost an afternoon once already:
+    // a field that read exactly as expected and an assertion that was false.
+    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+        value = value.substr(1, value.size() - 2);
+    }
+    return value;
 }
 
 bool mentions(const std::string& haystack, const std::string& needle) {
@@ -117,19 +132,19 @@ void wiiuport::tests::runGlobalPoseCensusTests() {
         // **A 3x4 that moved between the two readings is found, at its own address.** The
         // denominator is in the report and the address is the one the test wrote to -- a scan that
         // found a transform somewhere would be a scan that found the filler.
-        auto before = blankRange();
-        auto after = blankRange();
+        auto before = blankRange(RANGE());
+        auto after = blankRange(RANGE());
         const size_t offsetWords = 4096;
         // The same 3x4 in both, with the translation moved: a pose that advanced, which is what a
         // camera between two frames is.
-        put3x4(before, offsetWords, 0.7f, 2.0f, 0.0f);
-        put3x4(after, offsetWords, 0.7f, 2.0f, 0.25f);
+        put3x4(before, RANGE().start, offsetWords, 0.7f, 2.0f, 0.0f);
+        put3x4(after, RANGE().start, offsetWords, 0.7f, 2.0f, 0.25f);
         g_first = &before;
         g_second = &after;
         g_reads = 0;
         GlobalPoseCensus census(&readWords, &frame);
         std::string refusal;
-        const size_t named = census.scan(refusal);
+        const size_t named = census.scan(refusal, RANGE());
         const std::string body = census.json();
         g_first = nullptr;
         g_second = nullptr;
@@ -137,11 +152,11 @@ void wiiuport::tests::runGlobalPoseCensusTests() {
         check::isTrue(named == 1, "a transform that moved is named exactly once, and once is "
                                   "the honest count for one written: " +
                                       std::to_string(named));
-        check::isTrue(mentions(body, hexOf(GlobalPoseCensus::kStart + 4 * offsetWords)),
+        check::isTrue(mentions(body, hexOf(RANGE().start + 4 * offsetWords)),
                       "and the report names the address it was written to, so the hit is the "
                       "written one and not the filler");
         check::isTrue(field(body, "windowsTestedLastScan") ==
-                          std::to_string(GlobalPoseCensus::kWords -
+                          std::to_string((RANGE().end - RANGE().start) / 4 -
                                          wiiuport::title::TransformShape::kWords + 1),
                       "and the denominator is every window in the range: " +
                           field(body, "windowsTestedLastScan"));
@@ -173,17 +188,17 @@ void wiiuport::tests::runGlobalPoseCensusTests() {
         // readings. This is the negative that matters most: a data area is full of basis matrices,
         // normals and identity blocks, and a scan that named them would be naming the whole `.data`
         // section.
-        auto before = blankRange();
-        auto after = blankRange();
+        auto before = blankRange(RANGE());
+        auto after = blankRange(RANGE());
         const size_t offsetWords = 8192;
-        put3x4(before, offsetWords, 0.3f, 1.0f, 0.0f);
-        put3x4(after, offsetWords, 0.3f, 1.0f, 0.0f);
+        put3x4(before, RANGE().start, offsetWords, 0.3f, 1.0f, 0.0f);
+        put3x4(after, RANGE().start, offsetWords, 0.3f, 1.0f, 0.0f);
         g_first = &before;
         g_second = &after;
         g_reads = 0;
         GlobalPoseCensus census(&readWords, &frame);
         std::string refusal;
-        const size_t named = census.scan(refusal);
+        const size_t named = census.scan(refusal, RANGE());
         const std::string body = census.json();
         g_first = nullptr;
         g_second = nullptr;
@@ -215,7 +230,7 @@ void wiiuport::tests::runGlobalPoseCensusTests() {
         g_reads = 0;
         GlobalPoseCensus census(&readWords, &frame);
         std::string refusal;
-        const size_t named = census.scan(refusal);
+        const size_t named = census.scan(refusal, RANGE());
         const std::string body = census.json();
         check::isTrue(named == 0,
                       "a scan that read nothing names nothing: " + std::to_string(named));
@@ -234,9 +249,9 @@ void wiiuport::tests::runGlobalPoseCensusTests() {
         // **A frame counter that stands still is a refusal too, and a different one.** Two readings
         // at the same instant cannot measure movement, and reporting the static transforms they
         // both hold as "not moved" would answer a question nobody asked.
-        auto before = blankRange();
-        auto after = blankRange();
-        put3x4(before, 1024, 0.5f, 1.0f, 0.0f);
+        auto before = blankRange(RANGE());
+        auto after = blankRange(RANGE());
+        put3x4(before, RANGE().start, 1024, 0.5f, 1.0f, 0.0f);
         g_first = &before;
         g_second = &after;
         g_reads = 0;
@@ -244,7 +259,7 @@ void wiiuport::tests::runGlobalPoseCensusTests() {
             return 42;
         });
         std::string refusal;
-        const size_t named = census.scan(refusal);
+        const size_t named = census.scan(refusal, RANGE());
         const std::string body = census.json();
         g_first = nullptr;
         g_second = nullptr;
@@ -256,17 +271,65 @@ void wiiuport::tests::runGlobalPoseCensusTests() {
                       "and is not counted as a scan: " + field(body, "scans"));
     }
     {
-        // **The range is the title's own data and bss, contiguous, and its size is reported.**
-        // Asserted rather than trusted: a scan that quietly covered less than it claimed would
-        // make every denominator in the report a smaller lie.
-        check::isTrue(GlobalPoseCensus::kEnd > GlobalPoseCensus::kStart, "the range is not empty");
-        check::isTrue(GlobalPoseCensus::kWords * 4 ==
-                          GlobalPoseCensus::kEnd - GlobalPoseCensus::kStart,
-                      "and its word count is the range divided by four, with nothing dropped");
+        // **Both ranges are named, and the two facts about them that a reader needs are asserted
+        // rather than trusted.** The first was measured to hold nothing that moves with the camera
+        // moving, and the second is where a GX2 uniform block lives -- so the scan can be pointed
+        // at either, and a scan that cannot be pointed elsewhere cannot answer the next question.
+        //
+        // A name the code does not have is a refusal rather than a default: a caller asking for a
+        // range that does not exist would otherwise get another range's answer and not know.
+        check::isTrue(GlobalPoseCensus::data().end > GlobalPoseCensus::data().start,
+                      "the data range is not empty");
+        check::isTrue(GlobalPoseCensus::gpuUniformBlocks().end >
+                          GlobalPoseCensus::gpuUniformBlocks().start,
+                      "and neither is the uniform-block range");
+        check::isTrue(GlobalPoseCensus::rangeByName("data").start == GlobalPoseCensus::data().start,
+                      "a name resolves to the range it names");
+        check::isTrue(GlobalPoseCensus::rangeByName("gpu-uniform-blocks").start ==
+                          GlobalPoseCensus::gpuUniformBlocks().start,
+                      "and so does the other one");
+        check::isTrue(GlobalPoseCensus::rangeByName("nowhere").end == 0,
+                      "while a name that names neither is an empty range, which the scan refuses "
+                      "rather than answering with another range's numbers");
+
+        // And the refusal is the refusal, through the census rather than by inspection.
+        g_first = nullptr;
+        g_second = nullptr;
+        g_reads = 0;
         GlobalPoseCensus census(&readWords, &frame);
-        check::isTrue(field(census.json(), "rangeBytes") ==
-                          std::to_string(GlobalPoseCensus::kEnd - GlobalPoseCensus::kStart),
-                      "and the report carries the range's own size: " +
+        std::string refusal;
+        const size_t named = census.scan(refusal, GlobalPoseCensus::rangeByName("nowhere"));
+        check::isTrue(named == 0 && mentions(refusal, "no such range"),
+                      "and a scan pointed at it refuses in those words: " + refusal);
+
+        // **A refused scan reports no range at all, and that is the honest value.** Reporting the
+        // default range's size would say "I read 3,072,264 bytes" about a scan that read none, and
+        // every denominator in the report would then be a lie with a number attached.
+        check::isTrue(field(census.json(), "rangeBytes") == "0",
+                      "and a census whose scan was refused reports a range of zero rather than the "
+                      "default's: " +
                           field(census.json(), "rangeBytes"));
+        check::isTrue(field(census.json(), "rangeName") == "(none scanned)",
+                      "and names no range rather than naming the default: " +
+                          field(census.json(), "rangeName"));
+
+        // A scan that *did* read reports the range's own size, so a bound that was too small is
+        // visible rather than assumed.
+        auto before = blankRange(RANGE());
+        auto after = blankRange(RANGE());
+        g_first = &before;
+        g_second = &after;
+        g_reads = 0;
+        std::string readRefusal;
+        census.scan(readRefusal, RANGE());
+        g_first = nullptr;
+        g_second = nullptr;
+        check::isTrue(field(census.json(), "rangeBytes") ==
+                          std::to_string(RANGE().end - RANGE().start),
+                      "and one that read reports the range's own size: " +
+                          field(census.json(), "rangeBytes"));
+        check::isTrue(field(census.json(), "rangeName") == "the title's .data and .bss",
+                      "under the name it was asked for: got [" + field(census.json(), "rangeName") +
+                          "]");
     }
 }

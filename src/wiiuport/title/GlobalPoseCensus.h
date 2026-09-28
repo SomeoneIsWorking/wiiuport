@@ -54,9 +54,39 @@ class GlobalPoseCensus {
         : m_readWords(std::move(readWords)), m_frame(std::move(frame)) {
     }
 
-    // One pass. Returns the number of offsets named, or zero with `refusal` saying why -- a scan
-    // that could not read its range has scanned nothing and must not report a zero as a finding.
-    size_t scan(std::string& refusal);
+    // **The ranges, named, because the first one was measured to hold nothing that moves.**
+    //
+    // `DataAndBss` is the title's own `.data` and `.bss`, 0x1018c0c0-0x1047a1c8, taken from the
+    // ELF's section table. With the camera *moving* -- gameplay reached, 16 display lists in the
+    // last frame, 109 shared-and-moving transform candidates over 214 shaders -- three rounds over
+    // 768,055 windows found **0 moving transforms**, with 23,210 windows in the affine class. So
+    // the view matrix is not in the module's own data.
+    //
+    // `GpuUniformBlocks` is where a GX2 uniform block lives: `MEMORY_DATA_AREA` is
+    // 0x10000000-0x4fffffff, and 0x15800000 is inside it but outside anything the module image
+    // carries, because GX2's allocators hand it out at run time. **A global uniform the shader
+    // reads is written there, which is exactly what a view matrix is** -- and the module's own data
+    // is where a static object's transform would be.
+    struct Range {
+        // **A token, not a phrase.** The first names had spaces, and a name with a space in a query
+        // string is percent-encoded by the client and not decoded by the server -- so a scan asked
+        // for "data and bss" was refused for naming a range that exists, which is a refusal that
+        // reads as a fault in the reader. The token is what a query carries; the label is what a
+        // report prints, and the two are separate because one is a wire value and one is prose.
+        const char* token;
+        const char* label;
+        uint32_t start;
+        uint32_t end;
+    };
+
+    static const Range& rangeByName(const std::string& name);
+    static Range data();
+    static Range gpuUniformBlocks();
+
+    // One pass over `range`. Returns the number of poses named, or zero with `refusal` saying why
+    // -- a scan that could not read its range has scanned nothing and must not report a zero as a
+    // finding.
+    size_t scan(std::string& refusal, const Range& range);
 
     // How long to wait for the frame counter to move, in milliseconds, and how many times to try
     // before giving up on the second snapshot being a frame later rather than the same instant.
@@ -66,7 +96,12 @@ class GlobalPoseCensus {
     // The title's `.data` and `.bss`, from the ELF's section table. Contiguous, and asserted to be.
     static constexpr uint32_t kStart = 0x1018C0C0;
     static constexpr uint32_t kEnd = 0x1047A1C8;
-    static constexpr size_t kWords = (kEnd - kStart) / 4;
+    // 16 MB of GX2 uniform block memory, which is the shape of the thing rather than a size the
+    // title states: the blocks are 64 KiB each on the hardware and the run only needs enough of the
+    // space to hold the ones a frame binds. The report carries the range it actually scanned, so a
+    // bound that was too small is visible rather than assumed.
+    static constexpr uint32_t kGpuStart = 0x15800000;
+    static constexpr uint32_t kGpuEnd = 0x16000000;
 
     std::string json() const;
 
@@ -91,6 +126,9 @@ class GlobalPoseCensus {
     ReadWords m_readWords;
     FrameCounter m_frame;
     std::vector<Hit> m_hits;
+    std::string m_rangeName;
+    uint32_t m_rangeStart = 0;
+    uint32_t m_rangeEnd = 0;
     size_t m_scans = 0;
     size_t m_wordsTested = 0;
     size_t m_classified = 0;

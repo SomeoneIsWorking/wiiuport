@@ -664,6 +664,23 @@ size_t ControlChannel::requestedCount(const std::string& query, std::string_view
     return fallback;
 }
 
+// A text-valued query parameter, beside the count and flag ones because the range a scan is pointed
+// at is a name and a name is not a number. The same parameter walk, and an empty value is the
+// fallback rather than a blank: a caller that asked for a range with no name meant the default, and
+// a caller that meant nothing at all would not have sent the parameter.
+std::string ControlChannel::requestedText(const std::string& query, std::string_view name,
+                                          std::string fallback) {
+    std::string_view rest(query);
+    while (auto parameter = nextParameter(rest)) {
+        auto [key, value] = *parameter;
+        if (key != name) {
+            continue;
+        }
+        return value.empty() ? fallback : std::string(value);
+    }
+    return fallback;
+}
+
 float ControlChannel::requestedBlend(const std::string& query, float fallback) {
     std::string_view rest(query);
     while (auto parameter = nextParameter(rest)) {
@@ -1084,7 +1101,11 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
         // frame between them. A route that ran on the display thread would spend milliseconds of a
         // sixty-hertz budget to answer a question asked once.
         std::string refusal;
-        m_globalPose.scan(refusal);
+        // The range is named rather than fixed, because the first range was measured to hold
+        // nothing that moves and a scan that cannot be pointed elsewhere cannot answer the next
+        // question. A name the code does not have is a refusal, not a default.
+        const std::string wanted = requestedText(std::string(request.query()), "range", "data");
+        m_globalPose.scan(refusal, title::GlobalPoseCensus::rangeByName(wanted));
         if (!refusal.empty()) {
             return lucent::http::Response::text(409, "Conflict", refusal + "\n");
         }
