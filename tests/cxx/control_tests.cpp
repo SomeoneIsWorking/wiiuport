@@ -58,12 +58,7 @@ const void* noGuestBytes(uint32_t /*address*/, uint32_t /*size*/) {
     return nullptr;
 }
 
-void noGuard() {
-}
 
-LatteFrameHooks::GuestStateRestore noRestore() {
-    return {};
-}
 
 // The clock the channel's pacing and frame gate are constructed with. It was the retired
 // interpolator's clock first; it is kept here as a seam rather than replaced, because the channel

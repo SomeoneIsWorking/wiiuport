@@ -413,6 +413,32 @@ guest's memory is not shown to be the disc image's" in the direction it pointed:
 the image's own module and the running guest reads at the same addresses, which is the identity of the
 two that was missing.
 
+### The block address was a physical one, read as a guest one
+
+**This is the fault the next read was blocked on, and it is in the value, not in the search.**
+`GX2Set*UniformBlock` takes a virtual address; the emulator writes `memory_virtualToPhysical` of it
+into the uniform-block register and reads it back as `memory_base + physicalAddr`. Only the physical
+form reached an observer, and everything since has compared it against a value in the other address
+space:
+
+- `UniformBlockAddress` compared each word of the binder's descriptor record against the draw's
+  *physical* addresses, and reported **`no word at all`** over 142,682 exact per-object pairs. Two
+  addresses for one block, in two spaces, compared like with like cannot hit, and no corpus fixes it.
+- Every scan that read a block's *contents* read a range that was never the block's. "No rigid
+  transform in 233 whole-block scans" was a true statement about a wrong address.
+
+The fork keeps the guest address per (stage, slot) as the title sets each block and hands over both,
+with `LatteFrameHooks::PhysicalBytes` as the matching reader for the physical form. The membership
+test now compares the guest address, which is the only form that can hit, and the test passes a
+*different* number in the physical slot on purpose -- a test that passed the same number twice would
+pass whether the comparison was across spaces or within one. **The test is shown its other answer:
+5 of 837 checks fail with the comparison broken, 0 with it in place.**
+
+**Measured on the title, this is not yet done.** The fork change is pinned at `7980661` and the first
+run against it is the next measurement, so "the record word is the address" is fixed in the code and
+unmeasured on the title, and every downstream statement that rested on "no word at all" is suspended
+rather than withdrawn. The arithmetic that produced it was sound; its input was in the wrong space.
+
 ### What the next read is: a range, not a search
 
 The view matrix is a global, so it is in none of the three regions above -- that is the answer, not the
