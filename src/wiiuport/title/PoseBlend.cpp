@@ -2,8 +2,10 @@
 
 #include "wiiuport/interp/Blendable.h"
 #include "wiiuport/title/JsonBody.h"
+
 #include "wiiuport/title/PoseByShader.h"
 #include "wiiuport/title/WindWakerPaint.h"
+#include <algorithm>
 
 namespace wiiuport::title {
 
@@ -119,6 +121,18 @@ void PoseBlend::onAssembly(float* words, size_t count, uint64_t shaderBaseHash,
         std::scoped_lock lock(m_mutex);
         ++m_tally.assemblies;
         ++m_tally.withoutShader;
+        // **Which shader, counted.** The first run on the title reported `withoutShader` equal to
+        // `assemblies` and no reason, and the reason -- that the table's accepted shaders are not
+        // the ones the scene draws with -- had to be found by hand. The count is the denominator
+        // the reader needs: 576,432 draws over some number of shaders says something a single total
+        // cannot.
+        const auto count = m_unplaced.find({shaderBaseHash, shaderAuxHash});
+        if (count == m_unplaced.end() && m_unplaced.size() >= kMaxUnplaced) {
+            m_unplacedCapped = true;
+        }
+        if (count != m_unplaced.end() || m_unplaced.size() < kMaxUnplaced) {
+            ++m_unplaced[{shaderBaseHash, shaderAuxHash}];
+        }
         return;
     }
     onAssemblyAtOffset(words, count, *offset, shaderBaseHash, objectAddress, inBetween);
@@ -126,11 +140,22 @@ void PoseBlend::onAssembly(float* words, size_t count, uint64_t shaderBaseHash,
 
 void PoseBlend::onAssemblyBeforeDraw(float* words, size_t count, uint64_t shaderBaseHash,
                                      uint64_t shaderAuxHash, uint32_t node) {
-    // **With no paint to ask, nothing is written.** A blend that cannot tell which paint of the
-    // pair is in progress would be writing a midpoint into the tick's own frame, which is the one
-    // place the title's own value must survive -- so the absence of the answer is a refusal and not
-    // a default of "blend it anyway".
-    const bool inBetween = m_paint != nullptr && m_paint->inBetweenPaint();
+    // **With no stand-in, nothing is written** -- and with the stand-in turned *off* nothing is
+    // written either, which is the part the first run on the title got wrong.
+    //
+    // `inBetweenPaint()` is the paint counter's parity, and a parity is only "half the paints"
+    // while the stand-in is doubling them. With one paint per tick the counter still climbs and the
+    // parity still alternates, so every second of the game's **own** frame read as an in-between
+    // paint and the blend wrote a midpoint into it. The falsifier in `pose_blend_run.py` caught it
+    // -- the blend reported lerps on paints it had been told were the tick's own -- and the
+    // measurement is what makes it a defect rather than a reading: without the stand-in off as a
+    // second arm, the blend would have been writing into the title's own frames and the counters
+    // would have said 100% of the in-between draws.
+    //
+    // **`installed()` is the guard, and it is asked rather than inferred.** A blend that derived
+    // "is the stand-in on" from the paint rate would be a second rule about what the stand-in is
+    // doing, and the stand-in is the thing that knows.
+    const bool inBetween = m_paint != nullptr && m_paint->installed() && m_paint->inBetweenPaint();
     onAssembly(words, count, shaderBaseHash, shaderAuxHash, node, inBetween);
 }
 
@@ -167,8 +192,44 @@ void PoseBlend::writeTo(JsonBody& body) const {
     // assembly count, because a number divided by the frame's draw count says how busy the frame
     // was rather than whether the blend is happening. A table full of held poses and no lerps is
     // the exact shape of a blend that looks installed, and this is the field that says it is not.
+    // The unplaced shaders, most frequent first, with the bound and whether it was reached.
+    body.raw("unplacedCapped", m_unplacedCapped ? "true" : "false");
+    {
+        std::vector<Unplaced> ranked;
+        ranked.reserve(m_unplaced.size());
+        for (const auto& [shader, draws] : m_unplaced) {
+            ranked.push_back(Unplaced{shader.first, shader.second, draws});
+        }
+        std::sort(ranked.begin(), ranked.end(), [](const Unplaced& left, const Unplaced& right) {
+            return left.draws > right.draws;
+        });
+        JsonBody list;
+        for (size_t index = 0; index < ranked.size(); index++) {
+            JsonBody one;
+            one.string("shaderBaseHash", JsonBody::hex(ranked[index].shaderBaseHash));
+            one.string("shaderAuxHash", JsonBody::hex(ranked[index].shaderAuxHash));
+            one.number("draws", ranked[index].draws);
+            list.object(std::to_string(index), one.text());
+        }
+        body.object("unplacedShaders", list.text());
+    }
     body.number("lerpsPerInBetween",
                 m_tally.inBetweenKnown == 0 ? 0 : m_tally.lerped * 100 / m_tally.inBetweenKnown);
+}
+
+std::vector<PoseBlend::Unplaced> PoseBlend::unplacedShaders() const {
+    std::scoped_lock lock(m_mutex);
+    std::vector<Unplaced> out;
+    out.reserve(m_unplaced.size());
+    for (const auto& [shader, draws] : m_unplaced) {
+        out.push_back(Unplaced{shader.first, shader.second, draws});
+    }
+    // **Most frequent first.** The map is keyed by hash, so its own order is meaningless to a
+    // reader; the order that answers a question is the order of how often each shader is drawn.
+    std::sort(out.begin(), out.end(), [](const Unplaced& left, const Unplaced& right) {
+        return left.draws > right.draws;
+    });
+    return out;
 }
 
 std::string PoseBlend::json() const {

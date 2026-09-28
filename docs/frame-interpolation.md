@@ -597,9 +597,71 @@ report grows a second one, and this project has paid for that once.
   `0x8cecd19741c6c1c7`, 76 in `0xb7252004aba21c10` for the pass's value;
 - and **tick N-1's block is still present when tick N paints**, 16 of 16, so the lerp has both ends.
 
-**And it is written.** `PoseByShader` and `PoseBlend` above, both built and tested, and **not yet
-measured on the title**: the table has to be fed from a live run's census and the blend's counters
-read back through `GET /pose` before anything can be said about a picture that moved.
+### Measured on the title: 1,240 lerps, 100% of the in-between draws — and a defect the falsifier found
+
+`scratch/frame-loop/pose_blend_run.py`, gameplay reached, camera moving, the stand-in in the mode
+measured at 59.99 paints a second:
+
+```
+POST /pose offered 299, took 64, refused 235
+  the first refusal: compared 0 assemblies, so nothing said whether it moves
+
+armed window, 8 s:   assemblies 1,526,356 -> 1,662,256   (+135,900)
+                     held 0 -> 78,  firstSight 78,  refreshed +2,544
+                     inBetweenKnown 1,240,  lerped 1,240  (100% of the in-between draws)
+```
+
+**So the blend writes 1,240 × 12 = 14,880 words in eight seconds, on the title's own in-between
+paint, at every in-between draw that could be blended.** And the denominators are the ones that make
+it a measurement rather than a total: 1,240 of 1,240, over 78 held pairs out of 135,900 assemblies.
+
+**The run also found two things by asking questions the first version of the instrument could not.**
+
+**One: `withoutShader` equal to `assemblies` said the blend was not happening and not why.** The
+first run reported 576,432 assemblies and 576,432 unplaced — a total, which says a blend is not
+working and names nothing. **The blend now counts the draws it could not place by shader**, bounded
+to 16 and ranked by frequency, because a ranked list says *which shaders* and a total does not:
+
+```
+0x6669a23d03806414 aux 0x0: 25,882 draws      0x686be36828313d88 aux 0x79: 1,240
+0x2802e519ac163806 aux 0x79: 15,700           0x3a8d0f380931d09b aux 0x3c9:   620
+0x5ae6d5fe34beb432 aux 0x0:  6,738           ...
+```
+
+**Two: the table was fed once, early, from a census that had been accumulating since boot.** A
+shader the game drew at the title screen and never drew again is in that table and will never be
+drawn again. The run discriminates staleness from a key mismatch by refeeding: **refeeding took 0 of
+300 and the table held 64 where it held 64, and the blend's held pairs went on growing — so the table
+was not stale, and the keys match.** That is worth stating because the opposite was the obvious
+suspicion, and the obvious suspicion was wrong.
+
+### The defect the falsifier found, and the fix
+
+The falsifier arm is the same run with the stand-in **off**, so the display paints once per tick and
+there is no in-between paint at all. It reported:
+
+> the blend wrote on paints where it had been told there was no in-between paint
+
+**That is a real defect and it is the kind a single arm cannot find.** `inBetweenPaint()` is the
+paint counter's parity. With the stand-in doubling the paints, odd is the in-between. **With one paint
+per tick the counter still climbs and the parity still alternates, so every second of the game's own
+frame read as an in-between paint and the blend wrote a midpoint into it.** The picture would have
+been wrong, and the counters would have said 100% of the in-between draws — because from the blend's
+own point of view they were.
+
+The fix is the one `inBetweenPaint()`'s own comment names and deliberately does not enforce:
+**`installed()` is the guard, and it is asked rather than inferred.** A blend that derived "is the
+stand-in on" from the paint rate would be a second rule about what the stand-in is doing, and the
+stand-in is the thing that knows.
+
+The unit test is in `paint_tests.cpp` rather than beside the blend's own tests, because installing a
+stand-in needs a guest to install it into and the fake guest is here. It drives the parity explicitly —
+**even, odd, even, odd from the first blend draw**, written out rather than assumed, because a test
+that read the other parity would pass for the wrong reason — and then takes the stand-in out and
+requires four paints of which two read an in-between parity to write nothing. **With the guard
+removed, draws 1 and 3 read 35 and 55 instead of 40 and 60 and `lerped` goes to 4.**
+
+### So the whole of condition 2 is answered with addresses
 
 **And one more defect, found by the measurement rather than by reading:** the per-shader denominator
 was keyed on the **base hash alone**, so shaders differing only in their aux hash were summed --
