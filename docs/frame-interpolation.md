@@ -450,11 +450,32 @@ because they are the fact the blend turns on**:
   the fold off, 8 candidates for 2 matrices.**
 
 **And the consequence for the blend, which is the opposite of what the block route assumed.** A
-pose's offset in an assembly is **not a constant** -- the same matrix is at up to twelve offsets
-depending on the draw that read it. So no fixed offset can be written, and the offset has to be
-*computed per draw*. The title's own answer to that is its shader's remapped uniform table: each
-entry carries a `mappedIndexOffset`, which is where that uniform lands in the assembled buffer, so
-the offset is derived from the draw rather than searched for.
+pose's offset in an assembly is **not a global constant** -- but it is not arbitrary either, and
+saying so precisely is what makes the blend writable:
+
+> **A uniform block's layout is fixed.** An assembly is one shader's uniform buffer, and two draws
+> of *one* shader put the same uniform at the same slot every frame. Two *different* shaders may put
+> the same uniform at different slots. **So the pose's offset in an assembly is a function of the
+> shader, not of the draw** -- and the eight alignments are eight shaders' layouts, not eight draws.
+
+That is a testable prediction, and the census can now test it, because the table is keyed on
+`(shader, offset)` rather than on the offset alone. It was keyed on the offset, which **pooled every
+shader's layout together** -- the same class of fault as pooling offsets over identities, and for
+the same reason: the instrument was keyed on the wrong subject. Two shaders sharing an offset found
+one candidate, and the second's assemblies were counted against the first's layout.
+
+The report now carries **`distinctShaders` and `distinctMovingOffsets` as a pair**, because the pair
+is the measurement: one offset each is a single shader, equal counts is a value every shader shares
+at its own offset, and more offsets than shaders is neither. It replaces a single `bestOffset` that
+was a maximum over offsets belonging to different shaders, so it named whichever shader happened to
+place its matrix lowest -- and moved between runs for that reason alone. The test writes one matrix
+into two shaders and one shader twice, and is shown its other answer: **with the key back to the
+offset alone, 1 candidate where there should be 2.**
+
+**So the blend's write is per shader, and the shader is a name the draw already carries** in
+`UniformAssembly::shaderBaseHash`/`shaderAuxHash`. No search, no native override of the title's
+code, and no fixed offset: for a draw, the pose is at the offset *that draw's own shader* puts it
+at, which is a lookup rather than a measurement.
 
 ### And the named address is the name, not the matrix
 

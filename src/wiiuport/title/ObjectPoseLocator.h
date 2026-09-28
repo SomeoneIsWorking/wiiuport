@@ -68,6 +68,17 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
 
     // A candidate offset, and what was seen there.
     struct Candidate {
+        // **The shader whose layout this candidate was found in.** An assembly is one shader's
+        // uniform buffer, and a uniform block's layout is fixed: two draws of one shader put the
+        // same uniform at the same slot every frame, and two *different* shaders may put the same
+        // uniform at different slots. So the pose's offset in an assembly is a function of the
+        // shader, not of the draw -- and the table was keyed on the offset alone, which pooled
+        // every shader's layout together and read one matrix as eight candidates. That is the same
+        // class of fault as pooling offsets over identities: the instrument was keyed on the wrong
+        // subject, and no corpus finds a per-shader answer from a table that has thrown the shader
+        // away.
+        uint64_t shaderBaseHash = 0;
+        uint64_t shaderAuxHash = 0;
         uint32_t offset = 0;
         uint64_t assemblies = 0;   // assemblies holding a transform here
         uint64_t compared = 0;     // repeat assemblies of one identity
@@ -190,7 +201,12 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     // with it. Bounded, and the refusal is counted. The offset is in BYTES, the unit the
     // candidates and the report both use: it was once a float index here and a byte
     // offset there, so no two readings ever matched and every comparison stayed at zero.
-    bool remember(const std::string& identity, uint32_t byteOffset, const float* words);
+    // **Keyed on the shader as well as the offset**, for the reason the candidate table is: a
+    // candidate is one shader's layout, and two shaders may hold a matrix at the same offset. A
+    // lookup by offset alone finds whichever came first, and counts a second shader's assemblies
+    // against the first shader's candidate.
+    bool remember(const std::string& identity, uint64_t shaderBaseHash, uint64_t shaderAuxHash,
+                  uint32_t byteOffset, const float* words);
 
     std::atomic<uint64_t> m_assemblies{0};
     mutable std::mutex m_mutex;

@@ -152,8 +152,88 @@ void oneMatrixIsOneCandidateHoweverManyAlignmentsItIsAffineAt() {
                   "and how many places the matrix was seen: " + entry);
 }
 
+// **One matrix in two shaders is two candidates, and one matrix twice in one shader is one.** A
+// uniform block's layout is fixed, so two draws of one shader put the same uniform at the same slot
+// every frame, and two *different* shaders may put the same uniform at different slots. The table
+// was keyed on the offset alone: two shaders sharing an offset found one candidate, and their
+// assemblies were counted against whichever shader's layout arrived first. The pose's offset in an
+// assembly is a function of the shader, not of the draw, so the shader is part of the key.
+void oneMatrixInTwoShadersIsTwoCandidatesAndTwiceInOneShaderIsOne() {
+    const size_t at = 8;
+    auto wordsWithPose = [](float spin) {
+        std::vector<float> words(64, 0.0f);
+        putPose(words, at, spin);
+        return words;
+    };
+    const std::string twoShaders = "1804";
+    const std::string oneShader = "3ec2040d";
+
+    // Two shaders, one offset, one matrix each: two candidates, each counting its own draws.
+    {
+        ObjectPoseLocator locator;
+        for (int round = 0; round < 30; round++) {
+            auto first =
+                assembly(wordsWithPose(0.1f * static_cast<float>(round)), {0x3e000000u}, 0x1000u);
+            first.shaderBaseHash = std::stoull(twoShaders, nullptr, 16);
+            auto second =
+                assembly(wordsWithPose(0.2f * static_cast<float>(round)), {0x3e000000u}, 0x2000u);
+            second.shaderBaseHash = std::stoull(oneShader, nullptr, 16);
+            locator.onAssemblyRecorded(first);
+            locator.onAssemblyRecorded(second);
+        }
+        const std::string body = locator.json();
+        check::isTrue(mentions(body, "\"distinctShaders\":2"),
+                      "two shaders were seen, so the report says two: " + body.substr(0, 160));
+        // The same offset under two shader hashes is two entries, and each carries its own shader.
+        const size_t offsetAt = body.find("\"offset\":" + std::to_string(at * sizeof(float)));
+        check::isTrue(offsetAt != std::string::npos, "the offset is in the report");
+        const size_t next = body.find("\"offset\":", offsetAt + 1);
+        const std::string entry = body.substr(offsetAt, (next - offsetAt));
+        check::isTrue(mentions(entry, "0x" + twoShaders) || mentions(entry, "0x" + oneShader),
+                      "and the entry names the shader it belongs to: " + entry);
+        // Counted in the affine table alone, for the reason the collapse test gives: the rigid and
+        // affine tables share an offset that is both, so a count over the whole body is a property
+        // of the report's shape rather than of the data.
+        const size_t affineAt = body.find("\"affine\":");
+        const std::string needle = "\"offset\":" + std::to_string(at * sizeof(float));
+        size_t sameOffset = 0;
+        for (size_t at_ = body.find(needle, affineAt); at_ != std::string::npos;
+             at_ = body.find(needle, at_ + 1)) {
+            ++sameOffset;
+        }
+        check::isTrue(sameOffset == 2,
+                      "the same offset under two shaders is two candidates, not one: " +
+                          std::to_string(sameOffset));
+    }
+    // One shader, twice: one candidate, twice the assemblies. The other half of the claim, and the
+    // half a test that only checked the two-shader case would not reach.
+    {
+        ObjectPoseLocator locator;
+        for (int round = 0; round < 30; round++) {
+            auto first =
+                assembly(wordsWithPose(0.1f * static_cast<float>(round)), {0x3e000000u}, 0x1000u);
+            first.shaderBaseHash = std::stoull(oneShader, nullptr, 16);
+            locator.onAssemblyRecorded(first);
+            locator.onAssemblyRecorded(first);
+        }
+        const std::string body = locator.json();
+        check::isTrue(mentions(body, "\"distinctShaders\":1"),
+                      "one shader was seen: " + body.substr(0, 160));
+        const size_t affineAt = body.find("\"affine\":");
+        const std::string needle = "\"offset\":" + std::to_string(at * sizeof(float));
+        size_t sameOffset = 0;
+        for (size_t at_ = body.find(needle, affineAt); at_ != std::string::npos;
+             at_ = body.find(needle, at_ + 1)) {
+            ++sameOffset;
+        }
+        check::isTrue(sameOffset == 1, "and the same matrix in that shader is one candidate: " +
+                                           std::to_string(sameOffset));
+    }
+}
+
 void wiiuport::tests::runObjectPoseLocatorTests() {
     oneMatrixIsOneCandidateHoweverManyAlignmentsItIsAffineAt();
+    oneMatrixInTwoShadersIsTwoCandidatesAndTwiceInOneShaderIsOne();
     // A pose that recurs in most assemblies is named, with the count that named it. A
     // transform seen in one assembly of ten is not an offset.
     {
