@@ -1583,6 +1583,72 @@ uniform block at offset 60, not the node's own field.** Which node field holds t
 answered *negatively* with denominators, and the pose is located in the draw's uniforms with the node
 as its identity -- which is the chain the objective named.
 
+### Is the pose at offset 60 a global or a per-object value? Measured: per-object, and that
+### closes the per-object chain for a camera move
+
+The share of assemblies an offset appears in cannot answer this. A camera's view matrix is written
+once a frame and read by every shader; a static prop's world matrix belongs to that prop. A quarter
+of the frame's draws being objects fits a per-object pose at 25% exactly as well as it fits a global,
+and the locator's best offset has been 60 at 24-25% in every run. **So the share is not the
+discriminator, and reading it as one is a guess with a denominator attached.**
+
+The discriminator is the value. A global is *the same twelve floats* in every object; a per-object
+pose is a different twelve floats in every object. `ObjectPoseLocator` now keeps, per candidate
+offset, the value most recently seen and compares each **new identity** against it exactly -- the
+twelve words, not a hash, because this is the one answer that decides what a blend writes. Compared
+only across identities, because within one object the value is expected to move between ticks and
+comparing an object against itself would count every per-object pose as differing from itself.
+
+**And the two rules the comparison needs, one of which was got wrong first.** The value compared
+against must be the *last* one seen, not the first ever: a view matrix changes every frame, so
+retaining the first would make every object from the second frame onwards "differ" from it, and the
+answer would be the opposite of the truth from an instrument that looked right. **The tests that
+caught it are worth more than the rule**, because the first two fixtures could not have caught it at
+all: a value that is always equal or never equal gives the same count whether the retained value
+advances or not. The distinguishing shape is **A, B, B** -- one agreement and two differences against
+the value just seen, and three differences against the first -- and with the advance removed that
+test fails.
+
+**On the real title, over 1,035,056 assemblies with the camera moving:**
+
+```
+offset  60: 200730 assemblies, 67860 repeat comparisons, 17620 moved
+           compared against 15 other objects, 6 the same value and 9 different
+offset  52: 185375 assemblies, 25200 moved        6 same,  9 different
+offset  56: 182874 assemblies, 17233 moved        6 same,  9 different
+offset  68: 181709 assemblies, 18054 moved        5 same, 10 different
+offset  36: 180632 assemblies,  1796 moved        6 same,  9 different
+offset   4: 174340 assemblies,  5790 moved        6 same,  9 different
+offset 104: 169483 assemblies,  2543 moved        8 same,  7 different
+offset  72: 167965 assemblies,  5151 moved        5 same, 10 different
+```
+
+**No offset is shared. The most shared is 8 of 15, and the best offset reads 6 of 15.** A camera's
+view matrix would read 15 of 15 the same, because every vertex draw in the scene pass would be
+holding the same matrix. **So the pose the per-draw chain finds is a per-object pose, and the
+per-object chain cannot carry a camera move.**
+
+**And that closes the three places the view matrix is not**, which together are the whole of what
+has been scanned:
+
+1. not in the per-draw assembled uniforms -- the locator scans *every* stage, so a vertex-stage
+   uniform would be in the assembly and would read as shared, and it does not;
+2. not in the module's own `.data` and `.bss` -- 768,055 windows over 3,072,264 bytes, 23,210 in the
+   affine class, **0 moved** with the camera moving, three rounds;
+3. not at `0x15800000` -- 2,097,141 windows over 8,388,608 bytes, **0 in the affine class at all**,
+   three rounds.
+
+**What is left is the place the title names.** `cWorldViewMatrix[0]` is a string at `0x10163bb4` in
+the running guest and in the converted ELF, in a flat NUL-terminated table followed by `uBlurOffset`,
+`uOneMinusNearDivFar` and `cToyCam_Saturation1`, and a registered uniform is written through whatever
+the renderer passes the registration. **The fork already records the other end of that:** each draw's
+`LatteFrameHooks::UniformAssembly` carries the assembled `data` *and* the guest block addresses the
+draw sourced. Those addresses were withdrawn as an *identity* -- the register bank holds `0x40` where
+the binder wrote, over 1,555 distinct values in 382,575 sourced addresses -- **but an identity and a
+pointer are different uses of the same word, and as a pointer the range is where the assembled bytes
+came from.** The data-area scan then stops guessing `0x15800000` and scans the block the draw
+actually sourced. That is the next read, and it is a range rather than a search.
+
 ### The camera's matrix is in neither the module's data nor GX2's uniform block memory
 
 The per-object census reads what each draw assembles. It cannot answer where a *global* uniform is
