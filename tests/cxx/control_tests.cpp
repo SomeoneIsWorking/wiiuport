@@ -522,6 +522,65 @@ void thePoseTableIsFedByAPostAndReadByAGet() {
                       after.body.substr(0, 60));
 }
 
+// **A named shader answers for itself, with the table's own refusal for each candidate.** The
+// report lists eight candidates out of 285, so "why is my shader not in the table" was a question
+// the instrument could not answer -- and two runs of the blend differed by exactly that: one
+// blended 1,240 times and one nothing at all, on tables of nearly the same size. The negative was
+// measurable and the reason was not, which is the worse of the two positions.
+void aNamedShaderAnswersForItselfWithTheTablesOwnRefusal() {
+    Fixture fixture;
+    // Two candidates of the named shader and one of another, so the query has to select rather than
+    // dump. Each is given a different reason to be refused.
+    for (int round = 0; round < 40; round++) {
+        wiiuport::frame::RecordedUniformAssembly assembly;
+        assembly.shaderBaseHash = 0x6669a23d03806414;
+        assembly.objectAddress = 0x027ff88c + static_cast<uint32_t>(round % 2) * 4;
+        assembly.blockSources = {0x3e000000u + static_cast<uint32_t>(round % 2) * 4};
+        assembly.data.assign(24, 0.0f);
+        const float pose[wiiuport::title::PoseBlend::kWords] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+                                                                0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f};
+        for (size_t word = 0; word < wiiuport::title::PoseBlend::kWords; word++) {
+            assembly.data[3 + word] = pose[word];
+        }
+        fixture.poses.onAssemblyRecorded(assembly);
+    }
+
+    lucent::http::Request query;
+    query.method = "GET";
+    query.target = "/pose?shader=0x6669a23d03806414";
+    auto answer = fixture.channel.dispatch(query);
+    check::isTrue(answer.status == 200, "a named shader answers");
+    check::isTrue(oneJsonDocument(answer.body),
+                  "as one JSON document: " + answer.body.substr(0, 60));
+    check::isTrue(contains(answer.body, "\"shaderBaseHash\":\"0x6669a23d03806414\""),
+                  "and names the shader it answered for: " + answer.body.substr(0, 120));
+    check::isTrue(contains(answer.body, "\"candidatesForThisShader\":"),
+                  "with the count of candidates it has for that shader: " +
+                      answer.body.substr(0, 200));
+    // **The refusal is the table's own, asked of the table**, so a reader is told what the blend
+    // would do with the offset rather than being handed counts to interpret.
+    check::isTrue(contains(answer.body, "\"refusal\":"),
+                  "and each candidate carries the table's own refusal for it");
+    // And the bare word form works, because every address in this project is written both ways.
+    lucent::http::Request bare;
+    bare.method = "GET";
+    bare.target = "/pose?shader=6669a23d03806414";
+    auto bareAnswer = fixture.channel.dispatch(bare);
+    check::isTrue(
+        bareAnswer.body == answer.body,
+        "and the same shader without the 0x is the same answer, because a diagnostic that "
+        "accepts one spelling of a hash is read as broken");
+    // And with no shader named, the whole report comes back as before -- the query is additive and
+    // not a different route.
+    lucent::http::Request plain;
+    plain.method = "GET";
+    plain.target = "/pose";
+    auto plainAnswer = fixture.channel.dispatch(plain);
+    check::isTrue(contains(plainAnswer.body, "\"table\":{"),
+                  "and with no shader named the whole report comes back as before: " +
+                      plainAnswer.body.substr(0, 80));
+}
+
 void everyAdvertisedRouteIsReachableByItsOwnMethod() {
     Fixture fixture;
     const std::string list{ControlChannel::routeList()};
@@ -670,6 +729,7 @@ void runControlTests() {
     anIdleCensusReportsNoEntriesRatherThanNothing();
     aMemoryReadNamesItsRangeAndIsBounded();
     thePoseTableIsFedByAPostAndReadByAGet();
+    aNamedShaderAnswersForItselfWithTheTablesOwnRefusal();
     everyAdvertisedRouteIsReachableByItsOwnMethod();
     aGetReportsAndDoesNotChangeAnything();
 }

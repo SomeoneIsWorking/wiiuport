@@ -615,10 +615,41 @@ armed window, 8 s:   assemblies 1,526,356 -> 1,662,256   (+135,900)
 paint, at every in-between draw that could be blended.** And the denominators are the ones that make
 it a measurement rather than a total: 1,240 of 1,240, over 78 held pairs out of 135,900 assemblies.
 
-**And a second run of the same harness wrote nothing at all.** Same title, same presses, same mode,
-same seed of play: `held` 0, `lerped` 0, `withoutShader` 29,440 of 29,440 — not one draw of any of
-the 56 shaders the table held. `POST /pose` took 64 candidates in the first run and 56 in the second,
-so the table was nearly the same size both times and covered a disjoint set of the game's draws.
+**A later run of the same harness wrote nothing at all.** Same title, same presses, same mode, same
+seed of play: `held` 0, `lerped` 0, `withoutShader` 29,440 of 29,440 — not one draw of any of the
+56 shaders the table held, where the first run had blended 1,240 times. `POST /pose` took 64
+candidates in the first run and 56 in the second, so the table was nearly the same size both times
+and covered a disjoint set of the game's draws.
+
+**And a third run blended 17,673 times in eight seconds**, so the spread is from nothing to
+everything:
+
+```
+third run, armed, 8 s:   assemblies +53,681
+                         held 1,007 pairs,  refreshed 33,548,  firstSight 1,007
+                         inBetweenKnown 17,673,  lerped 17,673 -- 100% of the in-between draws
+                         wordsWritten 212,076  (17,673 x 12)
+                         withoutShader 20,133 of 53,681  -- 63% of draws were placeable
+third run, stand-in off: assemblies +24,819,  inBetweenKnown 0,  lerped 0,  wordsWritten 0
+```
+
+**The stand-in-off arm is the guard's evidence on the title, in the arm that found it broken.** With
+the stand-in out the blend wrote nothing at all across 24,819 assemblies, and `inBetweenKnown` is
+zero because `installed()` is false. Before the fix that same arm reported lerps on paints it had
+been told were the tick's own.
+
+**The refusal breakdown, which is where the 255 went:** of 295 candidates offered, 40 taken, 255
+refused — **202 as a pass's value (the same twelve words as 12 or more of 15 other objects) and 53 as
+a value that never moved, and none for want of another object to compare against.** So the census
+*is* finding the scene's shaders and the table is refusing them for the two rules it was written with,
+each of which has its own test. That is the answer to "why is my shader not in the table", and it is
+an answer about the two rules rather than about the census missing something.
+
+**And a correction to what the first run seemed to show.** That run reported "none of the scene's
+shaders is one the table holds". It should have read **none of the sixteen most-used of 162** — the
+list is capped, the harness said so, and the third run's 17,673 lerps are the proof that the other
+146 are covered. A capped list read as a whole list is the exact mistake this project keeps making,
+and it was in a sentence I wrote.
 
 **So the mechanism is proven and it is not reliable, and the reason is in the table's lifetime.** The
 census is cumulative: it has found 162 distinct shaders since boot, of which the per-object signature
