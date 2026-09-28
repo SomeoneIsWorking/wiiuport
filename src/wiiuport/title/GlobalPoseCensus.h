@@ -132,6 +132,20 @@ class GlobalPoseCensus {
     static constexpr uint32_t kGpuStart = 0x15800000;
     static constexpr uint32_t kGpuEnd = 0x16000000;
 
+    // **The three named ranges, as constants of this class** rather than three function-local
+    // statics inside `rangeByName`. They were statics rebuilt into a cache on first use, around
+    // values that are already constant expressions: a cache is a second way of saying what a
+    // `constexpr` says once, and the ownership rule asks for the second way to go.
+    //
+    // The third is the **refusal**, and it is a constant beside the other two rather than a value
+    // built at the call site because a name matching neither has to be refused at the channel and
+    // not answered with the other range's figures -- a scan asked for a range the code does not
+    // have would otherwise report a scan it never did.
+    static constexpr Range kTitleRange{"data", "the title's .data and .bss", kStart, kEnd};
+    static constexpr Range kGpuUniformRange{"gpu-uniform-blocks", "GX2 uniform block memory",
+                                            kGpuStart, kGpuEnd};
+    static constexpr Range kNoSuchRange{"no-such-range", "no such range", 0, 0};
+
     std::string json() const;
 
   private:
