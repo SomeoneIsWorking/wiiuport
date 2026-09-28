@@ -1,5 +1,7 @@
 #pragma once
 
+#include "wiiuport/title/JsonBody.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -89,6 +91,11 @@ class PoseByShader {
     // Both refusals are in `refused()` with the counts beside them.
     std::string refused(const Entry& entry) const;
 
+    // **The body as this class sees it**, so a caller that reports two owners in one document
+    // composes it out of two `writeTo` calls rather than out of two rendered strings. Splicing
+    // rendered documents is how a report grows a second one, and this project has paid for that
+    // once; `json()` is `writeTo` and `finish()`, so there is one implementation of each field.
+    void writeTo(JsonBody& body) const;
     std::string json() const;
 
     // **What a census hands over.** The same numbers, as the structure, so the table is fed from

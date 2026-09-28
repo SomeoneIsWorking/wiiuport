@@ -149,7 +149,7 @@ ControlChannel::ControlChannel(const Sources& sources)
     : m_recorder(sources.recorder), m_input(sources.input), m_capture(sources.capture),
       m_shapeLog(sources.shapeLog), m_writers(sources.writers), m_callers(sources.callers),
       m_paint(sources.paint), m_blocks(sources.blocks), m_poses(sources.poses),
-      m_poseByShader(sources.poseByShader), m_logic(sources.logic),
+      m_poseByShader(sources.poseByShader), m_poseBlend(sources.poseBlend), m_logic(sources.logic),
       m_globalPose(sources.globalPose), m_guestBytes(sources.guestBytes),
       m_snapshot(sources.snapshot), m_pacing(sources.pacing), m_scanOut(sources.scanOut),
       m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
@@ -244,6 +244,21 @@ std::string ControlChannel::countersJson() const {
 
 std::string ControlChannel::pacingJson() const {
     return control::pacingJson(m_pacing.summary());
+}
+
+// The pose table and the blend, as **one document with two named sections**, composed from the two
+// owners' own `writeTo` rather than from their rendered text. Splicing rendered documents is how a
+// report grows a second one, and this project has paid for that once; the composition is done by
+// the classes that own the fields and this one only names them.
+std::string ControlChannel::poseReport() const {
+    title::JsonBody body;
+    title::JsonBody table;
+    m_poseByShader.writeTo(table);
+    title::JsonBody blend;
+    m_poseBlend.writeTo(blend);
+    body.object("table", table.finish());
+    body.object("blend", blend.finish());
+    return body.finish();
 }
 
 namespace {} // namespace
@@ -705,13 +720,14 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
         }
         return lucent::http::Response::json(200, "OK", m_globalPose.json());
     }
-    // **Where a draw's pose is, per shader.** `POST /pose` feeds the table from the census's own
-    // report -- the offsets the measurement gave, with the counts that decided them -- and `GET
-    // /pose` reads it. **Two routes and not one, because filling a table on a read is a mutation a
-    // reader of the report would not expect**: a `GET` here answers what the table holds and
-    // nothing else, and the census is the only thing that can change it.
+    // **Where a draw's pose is, per shader, and whether any draw was blended.** `POST /pose` feeds
+    // the table from the census's own candidates -- the offsets the measurement gave, with the
+    // counts that decided them -- and `GET /pose` reads the table and the blend beside it. **Two
+    // routes and not one, because filling a table on a read is a mutation a reader of the report
+    // would not expect**: a `GET` here answers what the table holds and nothing else, and the
+    // census is the only thing that can change it.
     if (request.path() == "/pose" && request.method == "GET") {
-        return lucent::http::Response::json(200, "OK", m_poseByShader.json());
+        return lucent::http::Response::json(200, "OK", poseReport());
     }
     if (request.path() == "/pose" && request.method == "POST") {
         // **Fed from the census's own candidates, as the structure.** Reading its rendered report
@@ -726,11 +742,9 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
                 one.otherObjectsSame, one.moved, one.compared});
         }
         m_poseByShader.feed(offered.data(), offered.size());
-        // **The feed's counts are in the table's own report**, written by the class that counted
-        // them. They used to be spliced onto the end of its JSON from here, which is how a report
-        // stops being one document -- and this project has a check for that, added because a report
-        // once grew two of them.
-        return lucent::http::Response::json(200, "OK", m_poseByShader.json());
+        // The blend's counts are in the same document, so a caller that armed the table sees in one
+        // read what it armed and what has happened since.
+        return lucent::http::Response::json(200, "OK", poseReport());
     }
     if (request.method == "POST" && request.path() == "/input") {
         auto accepted = false;

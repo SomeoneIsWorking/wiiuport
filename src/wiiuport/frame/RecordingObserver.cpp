@@ -85,6 +85,16 @@ void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly
         m_blockAddress->observe(recorded.objectAddress, recorded.blockSources,
                                 recorded.blockGuestAddresses, recorded.blockSizes);
     }
+    // **Before the copy, and with the guest's own buffer.** A listener that changes what the title
+    // is about to transform with has to be here: after this line the words live in a vector this
+    // class owns, and a write to that is a write to a copy the draw never reads.
+    if (!m_beforeDrawListeners.empty()) {
+        const size_t wordCount = assembly.sizeInBytes / sizeof(float);
+        for (AssemblyBeforeDrawListener* listener : m_beforeDrawListeners) {
+            listener->onAssemblyBeforeDraw(assembly.data, wordCount, recorded.shaderBaseHash,
+                                           recorded.shaderAuxHash, recorded.objectAddress);
+        }
+    }
     std::span<const float> values(assembly.data, assembly.sizeInBytes / sizeof(float));
     recorded.data.assign(values.begin(), values.end());
     if (!m_inFlight.addUniformAssembly(recorded)) {

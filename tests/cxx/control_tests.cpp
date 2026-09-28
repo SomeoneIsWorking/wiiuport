@@ -80,6 +80,9 @@ struct Fixture {
     wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord, &noReadWords};
     wiiuport::title::ObjectPoseLocator poses;
     wiiuport::title::PoseByShader poseByShader;
+    // Armed with the table it reads, because a blend with no table leaves every draw alone
+    // and the route test would be reporting a blend that cannot happen.
+    wiiuport::title::PoseBlend poseBlend{poseByShader};
     // The data-area scan, with readers that refuse: a channel built with readers that say no is how
     // every refusal in this file is exercised, and a scan wired with a reader that answers would
     // never reach the refusal it exists to report.
@@ -103,6 +106,7 @@ struct Fixture {
         .blocks = blocks,
         .poses = poses,
         .poseByShader = poseByShader,
+        .poseBlend = poseBlend,
         .globalPose = globalPose,
         .logic = logic,
         .guestBytes = &noGuestBytes,
@@ -501,6 +505,21 @@ void thePoseTableIsFedByAPostAndReadByAGet() {
                       after.body.substr(0, 200));
     check::isTrue(contains(after.body, "\"0x1557c18f92f3bcb9\""),
                   "and still holds the offset the feed gave it");
+    // **Two named sections in one document**, and the blend's counts beside the table's: the table
+    // says where a pose goes and the blend says whether any draw went there, and a caller that
+    // armed the table wants both in one read rather than two round trips to find out whether the
+    // thing it armed is doing anything.
+    check::isTrue(contains(after.body, "\"table\":{"), "the table is its own named section");
+    check::isTrue(contains(after.body, "\"blend\":{"), "and the blend is another");
+    check::isTrue(contains(after.body, "\"lerpsPerInBetween\":"),
+                  "and the blend's own ratio is in it, which is the field that says a blend is "
+                  "happening: " +
+                      after.body.substr(0, 200));
+    // The composition is done by the owners rather than by splicing their rendered text, so the
+    // one-document check above covers this route for the same reason it covers the rest.
+    check::isTrue(oneJsonDocument(after.body),
+                  "and the two sections together are still one JSON document: " +
+                      after.body.substr(0, 60));
 }
 
 void everyAdvertisedRouteIsReachableByItsOwnMethod() {

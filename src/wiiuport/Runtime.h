@@ -22,6 +22,7 @@
 #include "wiiuport/title/NodePoseLocator.h"
 #include "wiiuport/title/ObjectIdentityScope.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
+#include "wiiuport/title/PoseBlend.h"
 #include "wiiuport/title/PoseByShader.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
@@ -101,6 +102,11 @@ class Runtime {
     // `POST /pose` and read by a blend. It is here because the measurement that fills it is the
     // locator's, and a table fed by anything else is a table of guesses.
     title::PoseByShader m_poseByShader;
+    // The in-between frame, written at the title's own draw from the table above. It is armed here
+    // and only armed here: a blend that is not fed by `POST /pose` finds no offset for any shader
+    // and leaves every draw exactly as the title wrote it, so an unarmed blend is a no-op rather
+    // than a blend at a guess.
+    title::PoseBlend m_poseBlend{m_poseByShader};
     // Which field of a node holds its pose. Registered first of the three, because it is
     // the one two measurements point at.
     title::NodePoseLocator m_nodePose{&GuestCallProbes::Register, &GuestPatching::ReadWords};
@@ -162,6 +168,7 @@ class Runtime {
         .poses = m_poseLocator,
         .globalPose = m_globalPose,
         .poseByShader = m_poseByShader,
+        .poseBlend = m_poseBlend,
         .logic = m_logic,
         .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,

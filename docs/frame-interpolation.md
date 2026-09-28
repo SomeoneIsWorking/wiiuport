@@ -535,7 +535,59 @@ neighbour reads a different one -- and disagree for a value the title recomputes
 in a way that happens to repeat across neighbours. **That case is not excluded by this measurement and
 is named here rather than glossed.**
 
-**So the whole of condition 2 is answered with addresses:**
+### The blend, built: a per-shader lookup, and a write at the title's own draw
+
+Two units, and the window between them is the whole mechanism.
+
+**`PoseByShader` — the lookup.** One byte offset per shader, keyed on the base **and** aux hashes,
+fed from the census's own candidates by `POST /pose` and read by `GET /pose`. Three refusals, each
+with its counts beside it, because a blend that writes twelve words at a wrong offset corrupts a
+value that is not its own:
+
+| refusal | the measurement that triggers it |
+|---|---|
+| a pass's value, shared by 12 of 15 objects | moving it would move the light with the object |
+| a value that never moved | it is a basis matrix, not a pose |
+| a shader the table has never seen | the draw is left exactly as the title wrote it |
+
+**`PoseBlend` — the write.** On an in-between paint, for a draw whose shader the table knows, hold
+the title's own twelve words from the previous tick and write `held + 0.5 * (current - held)` into the
+assembled buffer, which the title is about to transform with. No native override, no patch to the
+title's code, nothing on the player's disc: the assembled buffer is the runtime's own memory.
+
+**Three faults, each found by a test and each shown its other answer:**
+
+- **Two overloads, and the compiler picked the wrong one.** `onAssembly(…, uint32_t offset, …)` and
+  `onAssembly(…, uint64_t shader, …)` differ in whether the third argument is an offset or a hash, and
+  a call with a 32-bit literal matched the offset form exactly while the 64-bit hash did not. A call
+  that meant a shader was read as an offset past the end of a buffer. **The two are one method and a
+  differently-named one now** (`onAssembly` and `onAssemblyAtOffset`): a rule about an argument's
+  width is not something to hand to overload resolution.
+- **The held copy was refreshed only when nothing was written**, so the held pose froze at the value
+  it was first given and every later lerp was measured from that: a midpoint between tick 0 and tick
+  N rather than between N-1 and N. **That is a wrong place which looks right** — the picture still
+  moves, at the wrong speed, and no counter says a fault. The test walks three in-between paints and
+  requires 5, 15 and 25; with the refresh removed it reads 5, 10 and 15.
+- **`held` counted assemblies, not pairs**, and the blend's hit rate was divided by it — so it was
+  lerps per *assembly*, and a frame with one object and a thousand draws read as a thousand pairs.
+  The pair count is the map's size and the counter is `refreshed`, under their own names, and the
+  rate is `lerped / inBetweenKnown`: of the in-between draws that **could** be blended, how many
+  were. A table full of held poses and no lerps is the exact shape of a blend that looks installed,
+  and this is the field that says it is not.
+
+**The window is the observer's own.** `AssemblyRecordedListener` is handed a *copy* — a
+`RecordedUniformAssembly` whose `data` is a vector the observer owns — so a listener wanting to
+change what the title is about to transform with would be changing a copy the draw never reads, and
+would report having blended. **`AssemblyBeforeDrawListener` is a separate seam, called with the
+guest's mutable buffer before the copy is taken**, and the blend is registered on it. The census stays
+on the recorded listener, so **the measurement never sees a value the blend wrote**: a census reading
+a lerp would be a census of this project's own arithmetic.
+
+**The two halves are one document with two named sections**, composed from the two owners' own
+`writeTo` rather than by splicing their rendered text — `body.substr(0, body.size() - 2)` is how a
+report grows a second one, and this project has paid for that once.
+
+### So the whole of condition 2 is answered with addresses
 
 - the identity is the **node** -- `0x027ff88c` and `0x027ff9c0`, 195,581 bindings over 590 objects;
 - the pose is **twelve words in the title's assembled uniforms**, not in the node's own 2,588-byte
@@ -545,10 +597,9 @@ is named here rather than glossed.**
   `0x8cecd19741c6c1c7`, 76 in `0xb7252004aba21c10` for the pass's value;
 - and **tick N-1's block is still present when tick N paints**, 16 of 16, so the lerp has both ends.
 
-**That is writable.** A blend does not need to search: for a draw, the pose is at the offset *that
-draw's own shader* puts it at, and every offset above is one of the title's own shader hashes. The
-lookup is the per-shader table this change built, the write is twelve words into the assembled
-buffer, and the title's own draw produces everything else.
+**And it is written.** `PoseByShader` and `PoseBlend` above, both built and tested, and **not yet
+measured on the title**: the table has to be fed from a live run's census and the blend's counters
+read back through `GET /pose` before anything can be said about a picture that moved.
 
 **And one more defect, found by the measurement rather than by reading:** the per-shader denominator
 was keyed on the **base hash alone**, so shaders differing only in their aux hash were summed --

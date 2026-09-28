@@ -15,6 +15,7 @@ void runObjectPoseHistoryTests();
 void runGlobalPoseCensusTests();
 void runObjectPoseLocatorTests();
 void runPoseByShaderTests();
+void runPoseBlendTests();
 void runNodePoseLocatorTests();
 void runJsonBodyTests();
 void runObjectIdentityScopeTests();

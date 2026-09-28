@@ -12,6 +12,7 @@ add_executable(wiiuport_tests
   json_body_tests.cpp
   node_pose_tests.cpp
   object_identity_scope_tests.cpp
+  pose_blend_tests.cpp
   pose_by_shader_tests.cpp
   pose_locator_tests.cpp
   paint_tests.cpp

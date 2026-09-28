@@ -17,6 +17,7 @@
 #include "wiiuport/title/GlobalPoseCensus.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
+#include "wiiuport/title/PoseBlend.h"
 #include "wiiuport/title/PoseByShader.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
@@ -81,6 +82,9 @@ class ControlChannel {
         // and read by the blend, so the offsets a draw is placed from are the ones the
         // measurement gave rather than a table written by hand.
         title::PoseByShader& poseByShader;
+        // The blend the table feeds, so a caller that armed the table can see whether any
+        // draw was actually blended rather than having to ask a second route.
+        const title::PoseBlend& poseBlend;
         title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
@@ -146,6 +150,11 @@ class ControlChannel {
     // and it carried the retired mechanism's frame counts as well; a route that keeps a name must
     // keep an answer, so what is left is the pacing's numbers and nothing else.
     std::string pacingJson() const;
+
+    // **The pose table and the blend, as one document with two named sections.** Composed from the
+    // two owners' own `writeTo`, never from their rendered text: splicing rendered documents is how
+    // a report grows a second one, and this project has paid for that once.
+    std::string poseReport() const;
 
     // What the transform search has found, with the denominators that say
     // whether it looked. `limit` caps the candidate list only; the totals
@@ -215,6 +224,7 @@ class ControlChannel {
     const title::ObjectPoseLocator& m_poses;
     title::GlobalPoseCensus& m_globalPose;
     title::PoseByShader& m_poseByShader;
+    const title::PoseBlend& m_poseBlend;
     title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;
