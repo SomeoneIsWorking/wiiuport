@@ -95,7 +95,65 @@ void putPose(std::vector<float>& words, size_t at, float spin, float scale = 1.0
 
 } // namespace
 
+// **One matrix is one candidate, however many alignments it is affine at.** This is the defect the
+// real title exposed: eight of the twelve held offsets were one flat array of seventeen words seen
+// at eight alignments, laid over each other with no contradiction, and each alignment had become a
+// candidate with its own counts -- so `bestOffset` was the maximum over a run of offsets that are
+// the same matrix, and it moved between runs for that reason alone.
+//
+// The fixture writes a 3x4 into a flat run of floats and asks for the count, and the negative is
+// beside it: a *second* matrix elsewhere in the same assembly is a second candidate, because the
+// collapse folds windows on one value and not two.
+void oneMatrixIsOneCandidateHoweverManyAlignmentsItIsAffineAt() {
+    const size_t at = 8;
+    std::vector<float> words(64, 0.0f);
+    putPose(words, at, 0.3f);
+    // A second matrix, far enough away that the collapse must not fold it in: a span is twelve
+    // words, so anything past one 3x4 apart is its own value.
+    putPose(words, 40, 0.9f, 2.0f);
+
+    ObjectPoseLocator locator;
+    for (int round = 0; round < 30; round++) {
+        locator.onAssemblyRecorded(assembly(words, {0x3e000000u}, 0x1000u));
+    }
+    const std::string body = locator.json();
+    // The two matrices, each once.
+    const size_t first = body.find("\"offset\":" + std::to_string(at * sizeof(float)));
+    const size_t second = body.find("\"offset\":" + std::to_string(40 * sizeof(float)));
+    check::isTrue(first != std::string::npos && second != std::string::npos,
+                  "both matrices are candidates: " + body.substr(0, 200));
+    // And no third: every affine window inside either matrix was folded into one of them, so the
+    // table's length is the number of matrices and not the number of alignments.
+    //
+    // **Counted in the affine table alone.** The report has a rigid table and an affine table, and
+    // an offset that is rigid in some assemblies and affine in others is in both -- so counting the
+    // whole body counts one matrix twice and reports three candidates for two. That is the same
+    // class of mistake as the one being tested: a count that is a property of the report's shape
+    // rather than of the data.
+    const size_t affineAt = body.find("\"affine\":");
+    check::isTrue(affineAt != std::string::npos, "the affine table is in the report");
+    size_t offsets = 0;
+    for (size_t at_ = body.find("\"offset\":", affineAt); at_ != std::string::npos;
+         at_ = body.find("\"offset\":", at_ + 1)) {
+        ++offsets;
+    }
+    check::isTrue(offsets == 2,
+                  "two matrices and no more, though each is affine at up to twelve offsets: " +
+                      std::to_string(offsets) + " candidates for 2 matrices");
+
+    // The first matrix's entry carries the over-count it absorbed, so a reader can see what the
+    // collapse removed rather than having to trust that something was.
+    const size_t next = body.find("\"offset\":", first + 1);
+    const std::string entry =
+        body.substr(first, (next == std::string::npos ? body.size() : next) - first);
+    check::isTrue(mentions(entry, "\"foldedFromAlignments\":"),
+                  "the entry says how many alignments were folded into it: " + entry);
+    check::isTrue(mentions(entry, "\"alignmentsSeen\":"),
+                  "and how many places the matrix was seen: " + entry);
+}
+
 void wiiuport::tests::runObjectPoseLocatorTests() {
+    oneMatrixIsOneCandidateHoweverManyAlignmentsItIsAffineAt();
     // A pose that recurs in most assemblies is named, with the count that named it. A
     // transform seen in one assembly of ten is not an offset.
     {

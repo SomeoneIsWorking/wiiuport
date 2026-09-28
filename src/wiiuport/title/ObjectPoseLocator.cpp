@@ -109,33 +109,51 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
     // Every 4-aligned offset, tested. A vector of candidates rather than a fixed-size
     // array, because a buffer's own length is what bounds the offsets and a fixed array
     // would either cap the scan below that or be sized for a guess.
-    std::vector<Candidate> found;
+    // Every 4-aligned offset, tested, and **collapsed before anything is counted.** A matrix
+    // written as a flat run of floats is affine at every alignment inside it, so this loop used to
+    // find one matrix eight times and each finding became a candidate with its own counts: eight
+    // candidates for one value, and a best offset that was the maximum over a run of offsets that
+    // are the same matrix. It moved between runs (60 in one, 104 in the next) for that reason
+    // alone.
+    //
+    // A vector rather than a fixed-size array, because a buffer's own length is what bounds the
+    // offsets and a fixed array would either cap the scan below that or be sized for a guess. Each
+    // entry is an offset this assembly saw a *matrix* at, and the ones folded away are reported
+    // beside the candidate they folded into.
+    std::vector<uint32_t> seenHere;
+    size_t foldedHere = 0;
     for (size_t offset = 0; offset + kPoseWords <= words; offset++) {
         if (!Shape::isAffine(assembly.data.data() + offset)) {
             continue;
         }
-        Candidate candidate;
-        candidate.offset = static_cast<uint32_t>(offset * sizeof(float));
-        candidate.assemblies = 1;
-        candidate.affineAssemblies = 1;
-        if (Shape::isRigid(assembly.data.data() + offset)) {
-            candidate.rigidAssemblies = 1;
-        } else {
-            candidate.biggestScale = Shape::scaleOf(assembly.data.data() + offset);
+        const uint32_t at = static_cast<uint32_t>(offset * sizeof(float));
+        if (Shape::sameShapeAs(seenHere, at)) {
+            // A window on a matrix this assembly has already reported, not a matrix of its own.
+            ++foldedHere;
+            continue;
         }
-        found.push_back(candidate);
+        seenHere.push_back(at);
     }
-    if (found.empty()) {
+    if (seenHere.empty()) {
         return;
     }
 
     std::scoped_lock lock(m_mutex);
-    for (Candidate& candidate : found) {
-        auto known = std::find_if(m_candidates.begin(), m_candidates.end(),
-                                  [&candidate](const Candidate& one) {
-                                      return one.offset == candidate.offset;
-                                  });
+    for (const uint32_t at : seenHere) {
+        auto known =
+            std::find_if(m_candidates.begin(), m_candidates.end(), [at](const Candidate& one) {
+                return one.offset == at;
+            });
         if (known == m_candidates.end()) {
+            Candidate candidate;
+            candidate.offset = at;
+            candidate.assemblies = 1;
+            candidate.affineAssemblies = 1;
+            if (Shape::isRigid(assembly.data.data() + at / sizeof(float))) {
+                candidate.rigidAssemblies = 1;
+            } else {
+                candidate.biggestScale = Shape::scaleOf(assembly.data.data() + at / sizeof(float));
+            }
             // `identities` is **derived** in `json()` from the pairs this class remembers, not
             // counted here: it was `= 1` here and never touched again, so every run reported one
             // identity at every offset and a reader sorting offsets by it sorted them by nothing.
@@ -145,18 +163,28 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
         } else {
             known->assemblies++;
             known->affineAssemblies++;
-            if (Shape::isRigid(assembly.data.data() + candidate.offset / sizeof(float))) {
+            if (Shape::isRigid(assembly.data.data() + at / sizeof(float))) {
                 known->rigidAssemblies++;
             } else {
-                known->biggestScale =
-                    std::max(known->biggestScale, Shape::scaleOf(assembly.data.data() +
-                                                                 candidate.offset / sizeof(float)));
+                known->biggestScale = std::max(
+                    known->biggestScale, Shape::scaleOf(assembly.data.data() + at / sizeof(float)));
             }
         }
-        // One unit throughout: the offset in bytes, as the candidates and the report keep
+        // The alignment this assembly saw the matrix at, and the over-count the collapse removed
+        // beside it. **The alignments are the fact the blend turns on: the same matrix at two
+        // offsets is two offsets to write, so a pose's offset in an assembly is not a constant.**
+        if (std::find(known->alignments.begin(), known->alignments.end(), at) ==
+            known->alignments.end()) {
+            if (known->alignments.size() >= kMaxAlignments) {
+                known->alignmentsCapped = true;
+            } else {
+                known->alignments.push_back(at);
+            }
+        }
+        known->folded += foldedHere;
+        // One unit throughout: the offset in bytes, as the candidates and the report both use
         // it, and the data indexed by it.
-        remember(identity, candidate.offset,
-                 assembly.data.data() + candidate.offset / sizeof(float));
+        remember(identity, at, assembly.data.data() + at / sizeof(float));
     }
 
     // The global-or-per-object question, over the candidates as a whole rather than the ones this
@@ -384,8 +412,8 @@ std::string ObjectPoseLocator::json() const {
             one.raw("biggestDelta", JsonBody::real(static_cast<double>(candidate.biggestDelta)));
             one.raw("scale", JsonBody::real(static_cast<double>(candidate.biggestScale)));
             // **Derived, not counted.** `identities` is how many distinct objects have held this
-            // offset, and the structure that knows is the per-(identity, offset) history -- so it is
-            // read from there. A counter maintained beside it was `= 1` on the candidate's first
+            // offset, and the structure that knows is the per-(identity, offset) history -- so it
+            // is read from there. A counter maintained beside it was `= 1` on the candidate's first
             // appearance and never moved, which is a report field that is a constant and reads like
             // a measurement. And this is a different number from `otherIdentities`, which is the
             // bounded sample the cross-object comparison used, and from `otherIdentitiesSameValue`,
@@ -397,6 +425,39 @@ std::string ObjectPoseLocator::json() const {
                 }
             }
             one.number("identities", holders);
+            // **The collapse, with both halves.** `alignmentsSeen` is how many places in the
+            // frame's assemblies this one matrix was found, `folded` is how many candidate offsets
+            // it would have been without the collapse, and `candidatesBefore` is what the class
+            // counted before it was folded. All three, because a count whose reader cannot see what
+            // it removed cannot be compared with a count from a class that has not folded.
+            one.number("alignmentsSeen", static_cast<uint64_t>(candidate.alignments.size()));
+            one.raw("alignmentsCapped", candidate.alignmentsCapped ? "true" : "false");
+            one.number("foldedFromAlignments", candidate.folded);
+            std::string at = "[";
+            for (size_t index = 0; index < candidate.alignments.size(); index++) {
+                at += (index == 0 ? "" : ",") + std::to_string(candidate.alignments[index]);
+            }
+            at += "]";
+            one.raw("alignments", at);
+            // **The value itself, as this class last read it.** The counts say how often an offset
+            // held a transform and how much of the frame shared it; they do not say *which* matrix
+            // it was. The title names its own camera -- `cWorldViewMatrix[0]` at 0x10163bb4 -- so
+            // with the words here a camera becomes a comparison against a named address rather than
+            // an inference from a movement pattern, and a value that matches nothing can be seen to
+            // match nothing.
+            //
+            // The last value this class saw, which for a per-tick matrix is the one from the most
+            // recent assembly at that offset -- not a tick N-1 value, and not averaged.
+            // `JsonBody::raw` names every value it writes, so an array is built here as the one
+            // string it is: a body whose elements are named is an object, and the reader would then
+            // be handed a map where a sequence is meant.
+            std::string words = "[";
+            for (size_t word = 0; word < kPoseWords; word++) {
+                words += (word == 0 ? "" : ",") +
+                         JsonBody::real(static_cast<double>(candidate.lastValue[word]));
+            }
+            words += "]";
+            one.raw("lastValue", words);
             // The global-or-per-object question, three numbers that answer it between them: a
             // candidate compared against two or more objects and never differing from the first is
             // a value every object shares, which is what a camera's view matrix is. Reported for

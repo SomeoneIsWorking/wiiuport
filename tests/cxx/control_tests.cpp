@@ -260,6 +260,25 @@ void aMemoryReadNamesItsRangeAndIsBounded() {
         return;
     }
     check::equal(read->address, uint32_t{0x01004f74}, "of that address");
+
+    // **A leading `0x` is optional, and it is optional because every address in this project is
+    // written with one.** It was refused, with a message naming `<hex>` as though the prefix were
+    // part of the form, to a reader holding `0x10163bb4` out of this project's own documents. The
+    // three spellings all name the same address, and a diagnostic that accepts one of them is a
+    // diagnostic that will be read as broken.
+    for (const std::string& spelled :
+         {"address=0x10163bb4&size=48", "address=10163bb4&size=48", "address=0X10163BB4&size=48"}) {
+        const auto named = GuestMemoryRead::parse(spelled, refusal);
+        check::isTrue(named.has_value(), spelled + " is a read, not a refusal: " + refusal);
+        if (named.has_value()) {
+            check::equal(named->address, uint32_t{0x10163bb4}, "and names the same address");
+            check::equal(named->size, uint32_t{48}, "and the size asked for");
+        }
+    }
+    // And the prefix is not accepted where it means nothing: a decimal size with `0x` in front is
+    // not a number this parser will guess at.
+    check::isTrue(!GuestMemoryRead::parse("address=0x10&size=0x40", refusal).has_value(),
+                  "a 0x on the decimal size is refused rather than read as hex");
     check::equal(read->size, uint32_t{64}, "and that many bytes");
     check::isTrue(!GuestMemoryRead::parse("size=64", refusal).has_value(), "no address, no read");
     check::isTrue(!GuestMemoryRead::parse("address=10&size=0", refusal).has_value(),

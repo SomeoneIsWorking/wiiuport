@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace wiiuport::title {
 
@@ -94,6 +95,24 @@ struct TransformShape {
 
     // Whether that difference is movement rather than rounding.
     static bool moved(const float* before, const float* after);
+
+    // **Whether `candidate` is another view of a pose already in `kept` rather than a pose of its
+    // own.** A matrix written as a flat run of floats satisfies the class at every 4-byte alignment
+    // inside it, so a scan that takes each alignment as a candidate finds one matrix eight times --
+    // and a report whose count is a property of the step size rather than of the data cannot be
+    // compared with anything. The rule is the address within one `kWords` of an address already
+    // kept, and the kept one is the one that moved most, so a real pose survives and its own
+    // shifted fragments do not.
+    //
+    // **This lives here because the shape is what is being collapsed, and two scans that keep their
+    // own copy of the rule will disagree by whatever the copies differ by.** `GlobalPoseCensus` and
+    // `ObjectPoseLocator` both ask it, and both answer with this.
+    static bool sameShapeAs(const std::vector<uint32_t>& kept, uint32_t candidate);
+
+    // The gap in bytes within which two addresses are windows on one value rather than two values.
+    static constexpr uint32_t spanBytes() {
+        return static_cast<uint32_t>(kWords) * sizeof(float);
+    }
 };
 
 } // namespace wiiuport::title
