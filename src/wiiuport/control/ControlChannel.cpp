@@ -675,8 +675,25 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
         // The range is named rather than fixed, because the first range was measured to hold
         // nothing that moves and a scan that cannot be pointed elsewhere cannot answer the next
         // question. A name the code does not have is a refusal, not a default.
-        const std::string wanted = requestedText(std::string(request.query()), "range", "data");
-        m_globalPose.scan(refusal, title::GlobalPoseCensus::rangeByName(wanted));
+        // **A range the caller names, or one of the two this class holds in a table.** The two
+        // named ranges have fixed addresses; the uniform block a draw sources does not, because it
+        // is wherever the title's binder put it, and the measurement that unblocked the blend needs
+        // exactly those. So `start=<hex>&bytes=<decimal>` scans a range the evidence named, bounded
+        // and refused by reason, and `range=<token>` scans one of the constants. A request that
+        // names neither scans nothing and says so, rather than scanning the module's data because
+        // that is what a missing parameter defaulted to once.
+        const std::string query(request.query());
+        title::GlobalPoseCensus::Range wanted =
+            title::GlobalPoseCensus::rangeByName(requestedText(query, "range", ""));
+        if (!wanted.end) {
+            const auto named = title::GlobalPoseCensus::namedRange(
+                requestedText(query, "start", ""), requestedText(query, "bytes", ""));
+            if (!named.refusal.empty()) {
+                return lucent::http::Response::text(409, "Conflict", named.refusal + "\n");
+            }
+            wanted = named.range;
+        }
+        m_globalPose.scan(refusal, wanted);
         if (!refusal.empty()) {
             return lucent::http::Response::text(409, "Conflict", refusal + "\n");
         }

@@ -42,6 +42,103 @@ GlobalPoseCensus::Range GlobalPoseCensus::gpuUniformBlocks() {
     return {"gpu-uniform-blocks", "GX2 uniform block memory", kGpuStart, kGpuEnd};
 }
 
+// A hexadecimal address as a caller writes it, and whether it was one at all: `0x` in front is
+// optional, digits are case-insensitive, and a byte count is decimal because a size is a size.
+namespace {
+
+bool parseHexWord(const std::string& text, uint32_t& out) {
+    std::string_view body = text;
+    if (body.size() > 2 && body[0] == '0' && (body[1] == 'x' || body[1] == 'X')) {
+        body.remove_prefix(2);
+    }
+    if (body.empty() || body.size() > 8) {
+        return false;
+    }
+    uint32_t value = 0;
+    for (const char digit : body) {
+        uint32_t nibble = 0;
+        if (digit >= '0' && digit <= '9') {
+            nibble = static_cast<uint32_t>(digit - '0');
+        } else if (digit >= 'a' && digit <= 'f') {
+            nibble = static_cast<uint32_t>(digit - 'a') + 10u;
+        } else if (digit >= 'A' && digit <= 'F') {
+            nibble = static_cast<uint32_t>(digit - 'A') + 10u;
+        } else {
+            return false;
+        }
+        value = (value << 4) | nibble;
+    }
+    out = value;
+    return true;
+}
+
+bool parseDecimal(const std::string& text, uint32_t& out) {
+    if (text.empty() || text.size() > 10) {
+        return false;
+    }
+    uint32_t value = 0;
+    for (const char digit : text) {
+        if (digit < '0' || digit > '9') {
+            return false;
+        }
+        value = (value * 10u) + static_cast<uint32_t>(digit - '0');
+    }
+    out = value;
+    return true;
+}
+
+} // namespace
+
+GlobalPoseCensus::NamedRange GlobalPoseCensus::namedRange(const std::string& start,
+                                                          const std::string& bytes) {
+    NamedRange answer;
+    uint32_t begin = 0;
+    if (!parseHexWord(start, begin)) {
+        answer.refusal = "start=" + start +
+                         " is not a hexadecimal guest address; a named range is asked for as "
+                         "start=<hex>&bytes=<decimal>";
+        return answer;
+    }
+    uint32_t size = 0;
+    if (!parseDecimal(bytes, size)) {
+        answer.refusal = "bytes=" + bytes + " is not a decimal count of bytes";
+        return answer;
+    }
+    // **Every refusal names the value that caused it.** A scan refused for an unaligned start and a
+    // scan refused for a size over the cap are different faults, and a single "bad request" would
+    // send a reader to look at the wrong half of the request.
+    if ((begin & 0x3u) != 0) {
+        answer.refusal = "start=" + start +
+                         " is not four-aligned, and a transform-shaped window "
+                         "can only begin on a four-byte boundary";
+        return answer;
+    }
+    if (size == 0) {
+        answer.refusal =
+            "bytes=0 scans nothing, and a scan of nothing reports a zero that reads as "
+            "a finding";
+        return answer;
+    }
+    if (size > kMaxRangeBytes) {
+        answer.refusal = "bytes=" + bytes + " is " + std::to_string(size) + ", over the " +
+                         std::to_string(kMaxRangeBytes) +
+                         " a named range may be; a wider range is "
+                         "a region rather than a block";
+        return answer;
+    }
+    const uint64_t end = static_cast<uint64_t>(begin) + size;
+    if (end > 0x100000000ull) {
+        answer.refusal = "start=" + start + " with bytes=" + bytes +
+                         " runs past the end of the "
+                         "guest's address space";
+        return answer;
+    }
+    answer.askedStart = begin;
+    answer.askedEnd = static_cast<uint32_t>(end);
+    answer.range = {"named", "the range the caller named", begin, answer.askedEnd};
+    return answer;
+}
+
 const GlobalPoseCensus::Range& GlobalPoseCensus::rangeByName(const std::string& name) {
     static const Range title = GlobalPoseCensus::data();
     static const Range gpu = gpuUniformBlocks();

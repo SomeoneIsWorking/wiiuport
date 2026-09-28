@@ -127,7 +127,67 @@ std::string hexOf(uint32_t value) {
 
 } // namespace
 
+// The one string test every file in this suite needs, written here rather than in a shared header:
+// two files that each carry their own is a helper this project has already had to fix twice.
+bool carries(const std::string& text, const char* needle) {
+    return text.find(needle) != std::string::npos;
+}
+
+// **A range the caller names, refused by reason rather than scanned anyway.** The two ranges this
+// class holds in a table have fixed addresses; the uniform block a draw sources does not, because
+// it is wherever the title's binder put it. The measurement that unblocked the blend needs exactly
+// those, so a caller may name one -- and every way of naming it badly has to be refused with the
+// value that caused it, because "bad request" sends a reader to look at the wrong half.
+void aNamedRangeIsAcceptedAsAskedAndRefusedByReasonOtherwise() {
+    // The positive, in the form the channel's own query carries it: `0x` in front is optional and
+    // the digits are case-insensitive, because a tool prints an address in whichever case it has.
+    for (const std::string& start : {"0x47eee100", "47EEE100", "47eee100"}) {
+        const auto range = GlobalPoseCensus::namedRange(start, "768");
+        check::isTrue(range.refusal.empty(), "start=" + start + " is accepted: " + range.refusal);
+        check::equal(range.askedStart, 0x47eee100u, "and names the address it asked for");
+        check::equal(range.askedEnd, 0x47eee400u, "and the end the size makes");
+        check::equal(range.range.end - range.range.start, 768u,
+                     "so the range is the size asked for");
+    }
+
+    // And the negative, each with its own reason. A refusal that named a different fault would be
+    // a refusal that sends the reader to the wrong field, so the reason is asserted, not the fact
+    // of refusal.
+    struct Case {
+        const char* start;
+        const char* bytes;
+        const char* because;
+    };
+
+    for (const Case& one : std::vector<Case>{
+             {"0x47eee101", "768", "not four-aligned"},
+             {"0x47eee100", "0", "scans nothing"},
+             {"0x47eee100", "8388608", "a named range may be"},
+             // Within the cap and still past the end, so this case reaches the wrap check rather
+             // than the cap that is tested on the line above. Two faults at once would be reported
+             // as one, and the reader would be sent to the wrong bound.
+             {"0xffffff00", "768", "past the end"},
+             {"nonsense", "768", "not a hexadecimal guest address"},
+             {"0x47eee100", "seven", "not a decimal count"},
+             {"", "768", "not a hexadecimal guest address"},
+         }) {
+        const auto range = GlobalPoseCensus::namedRange(one.start, one.bytes);
+        check::isTrue(!range.refusal.empty(),
+                      std::string("start=") + one.start + " bytes=" + one.bytes + " is refused");
+        check::isTrue(carries(range.refusal, one.because),
+                      std::string("and says why: ") + one.because + " -- got: " + range.refusal);
+        check::equal(range.askedEnd, 0u, "and names no range, so nothing is scanned");
+    }
+    // The cap itself, named rather than implied: a caller that asks for exactly the cap is served,
+    // and one more byte is refused. A bound nobody can state is a bound that moves.
+    check::isTrue(GlobalPoseCensus::namedRange("0x10000000", "4194304").refusal.empty(),
+                  "a range of exactly the cap is served");
+    check::isTrue(!GlobalPoseCensus::namedRange("0x10000000", "4194305").refusal.empty(),
+                  "and one byte more is refused");
+}
+
 void wiiuport::tests::runGlobalPoseCensusTests() {
+    aNamedRangeIsAcceptedAsAskedAndRefusedByReasonOtherwise();
     {
         // **A 3x4 that moved between the two readings is found, at its own address.** The
         // denominator is in the report and the address is the one the test wrote to -- a scan that
