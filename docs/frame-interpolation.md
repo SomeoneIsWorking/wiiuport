@@ -621,8 +621,47 @@ seed of play: `held` 0, `lerped` 0, `withoutShader` 29,440 of 29,440 — not one
 candidates in the first run and 56 in the second, so the table was nearly the same size both times
 and covered a disjoint set of the game's draws.
 
-**And a third run blended 17,673 times in eight seconds**, so the spread is from nothing to
-everything:
+### Why the game's most-drawn shaders have no candidate at all — measured, by name
+
+The run asked the census about the scene's four most-drawn shaders by name, and the answer is **not a
+refusal**:
+
+```
+0x6669a23d03806414:  0 candidates of 300 considered, 41,136 draws
+0x2802e519ac163806:  0 candidates of 300 considered, 23,700 draws
+0x5ae6d5fe34beb432:  0 candidates of 300 considered, 13,055 draws
+0x842a19b509f8b91a:  0 candidates of 300 considered,  6,381 draws
+```
+
+**The census does not find anything in the shaders the game draws with most.** Not a candidate that
+was refused, not one below the bar — none at all, out of 300 candidates over 162 shaders. And the
+reason is in the class's own entry condition: `onAssemblyRecorded` returns before scanning when
+`assembly.data.size() < kPoseWords`, so **an assembled buffer shorter than 12 floats — 48 bytes —
+cannot hold a 3x4 and is never examined.** The report's own `unscanned` count is the place that fact
+belongs and it is not a candidate at all: a buffer too short to hold the shape is not a buffer the
+scan looked at and found nothing in, and the two are different answers.
+
+**So the picture is two censuses, not one.** The shaders whose uniform buffers are long enough carry
+a per-object pose in those uniforms, and the blend writes it — **74 shaders accepted of 297 offered,
+1,415 lerps of 1,415 in-between draws, 16,980 words in eight seconds, and 1,404 tick's-own paints
+held unwritten beside them.** The shaders the game draws with most carry their transform somewhere
+this mechanism has not looked, and the one place left is the **vertex attribute stream**: the census
+this project already has, which reports `objectsOffered: 0`, `nodesTracked: 0` and
+`drawsWithoutPosition` equal to all 1,388,163 draws. That is a blind instrument reporting zeros, not
+an instrument that found nothing.
+
+**That is the honest gap and it is large.** This run: 134,786 assemblies, of which **131,918 were
+draws whose shader the table could not place — 98%.** Run three, whose table caught more of the
+scene, was 63%. The mechanism blends what it can place and leaves the rest exactly as the title drew
+it, which is the correct behaviour for a write it cannot justify, and it is **not** yet 60 Hz motion
+for the whole picture.
+
+**A fifth measurement in the same session: `POST /pose` took 74 of 297, refused 109 as a pass's value
+and 114 as a value that never moved, none for want of another object, and lerped 1,415 times at 100%
+of the in-between draws.** The stand-in-off arm wrote nothing across 70,152 assemblies, so the guard
+holds in the arm that found it broken.
+
+
 
 ```
 third run, armed, 8 s:   assemblies +53,681
@@ -638,12 +677,15 @@ the stand-in out the blend wrote nothing at all across 24,819 assemblies, and `i
 zero because `installed()` is false. Before the fix that same arm reported lerps on paints it had
 been told were the tick's own.
 
-**The refusal breakdown, which is where the 255 went:** of 295 candidates offered, 40 taken, 255
-refused — **202 as a pass's value (the same twelve words as 12 or more of 15 other objects) and 53 as
-a value that never moved, and none for want of another object to compare against.** So the census
-*is* finding the scene's shaders and the table is refusing them for the two rules it was written with,
-each of which has its own test. That is the answer to "why is my shader not in the table", and it is
-an answer about the two rules rather than about the census missing something.
+**The refusal breakdown, of the 255, says nothing about the scene — and that is the correction.** Of
+295 candidates offered, 40 taken and 255 refused: **202 as a pass's value (the same twelve words as
+12 or more of 15 other objects) and 53 as a value that never moved, none for want of another object
+to compare against.** I read that as "the census finds the scene's shaders and the table refuses
+them", and **that reading was wrong.** The per-shader query says the census has **no candidate at
+all** for the four shaders the game draws with most, out of 300 considered. So the 297 offered are
+candidates the census has for *other* shaders, and the refusal counts describe those. **A breakdown
+of the candidates a census does have cannot answer where the ones it lacks are**, and the two
+questions needed two different questions to the instrument.
 
 **And a correction to what the first run seemed to show.** That run reported "none of the scene's
 shaders is one the table holds". It should have read **none of the sixteen most-used of 162** — the
