@@ -156,6 +156,15 @@ class ControlChannel {
     // a report grows a second one, and this project has paid for that once.
     std::string poseReport() const;
 
+    // **What the census found for one shader, and why the table would refuse each of it.**
+    //
+    // The report's table lists eight candidates out of 285, so a reader cannot look up *its* shader
+    // and the reason it is not in the table. That was measured: two runs of the blend, one blending
+    // 1,240 times and one not at all, differing only in which of 56 to 64 admitted shaders the game
+    // happened to be drawing. **The question is answerable and the instrument could not answer
+    // it**, which is a worse position than a negative measurement.
+    std::string poseForShader(uint64_t shaderBaseHash, uint64_t shaderAuxHash) const;
+
     // What the transform search has found, with the denominators that say
     // whether it looked. `limit` caps the candidate list only; the totals
     // describe the whole search.

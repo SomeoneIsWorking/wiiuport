@@ -250,6 +250,44 @@ std::string ControlChannel::pacingJson() const {
 // owners' own `writeTo` rather than from their rendered text. Splicing rendered documents is how a
 // report grows a second one, and this project has paid for that once; the composition is done by
 // the classes that own the fields and this one only names them.
+std::string ControlChannel::poseForShader(uint64_t shaderBaseHash, uint64_t shaderAuxHash) const {
+    title::JsonBody body;
+    body.string("shaderBaseHash", title::JsonBody::hex(shaderBaseHash));
+    body.string("shaderAuxHash", title::JsonBody::hex(shaderAuxHash));
+    const auto found = m_poses.found();
+    title::JsonBody list;
+    size_t index = 0;
+    uint64_t considered = 0;
+    for (const title::ObjectPoseLocator::Found& one : found) {
+        ++considered;
+        if (one.shaderBaseHash != shaderBaseHash || one.shaderAuxHash != shaderAuxHash) {
+            continue;
+        }
+        title::PoseByShader::Entry entry;
+        entry.byteOffset = one.byteOffset;
+        entry.otherObjects = one.otherObjects;
+        entry.otherObjectsSame = one.otherObjectsSame;
+        entry.moved = one.moved;
+        entry.compared = one.compared;
+        // **The table's own refusal for this candidate, asked of the table.** Not a restatement of
+        // the counts: a reader wants to know what the blend would do with this offset, and the
+        // class that would do it is the one that says.
+        title::JsonBody one_body;
+        one_body.number("offset", one.byteOffset);
+        one_body.number("moved", one.moved);
+        one_body.number("compared", one.compared);
+        one_body.number("otherObjects", one.otherObjects);
+        one_body.number("otherObjectsSame", one.otherObjectsSame);
+        one_body.string("refusal", m_poseByShader.refused(entry));
+        list.object(std::to_string(index), one_body.text());
+        ++index;
+    }
+    body.number("candidatesForThisShader", index);
+    body.number("candidatesConsidered", considered);
+    body.object("offsets", list.text());
+    return body.finish();
+}
+
 std::string ControlChannel::poseReport() const {
     title::JsonBody body;
     title::JsonBody table;
@@ -367,6 +405,15 @@ bool ControlChannel::requestedHashes(const std::string& query, std::string_view 
         auto [key, value] = *parameter;
         if (key != name) {
             continue;
+        }
+        // **`0x` in front is optional, and it is optional because every hash in this project is
+        // written with it.** The length was the gate and it counted the prefix, so `?shader=0x…`
+        // was refused where `?shader=…` was accepted -- a diagnostic that accepts one spelling of a
+        // hash is read as broken, and `GET /memory` had the same fault and had it fixed there. The
+        // sixteen digits are still required: a hash of another length is a different number, not a
+        // spelling of this one.
+        if (value.size() > 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X')) {
+            value.remove_prefix(2);
         }
         uint64_t parsed = 0;
         auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed, 16);
@@ -727,6 +774,13 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
     // would not expect**: a `GET` here answers what the table holds and nothing else, and the
     // census is the only thing that can change it.
     if (request.path() == "/pose" && request.method == "GET") {
+        // **A named shader answers for itself and not for the table.** The report's table lists
+        // eight candidates out of 285, so "why is my shader not in it" was a question the
+        // instrument could not answer -- and that is worse than a negative measurement.
+        std::vector<uint64_t> wanted;
+        if (requestedHashes(std::string(request.query()), "shader", wanted) && !wanted.empty()) {
+            return lucent::http::Response::json(200, "OK", poseForShader(wanted.front(), 0));
+        }
         return lucent::http::Response::json(200, "OK", poseReport());
     }
     if (request.path() == "/pose" && request.method == "POST") {
