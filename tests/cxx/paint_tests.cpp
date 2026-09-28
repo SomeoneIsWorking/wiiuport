@@ -1,5 +1,7 @@
 #include "check.h"
 #include "suites.h"
+#include "wiiuport/title/PoseBlend.h"
+#include "wiiuport/title/PoseByShader.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
 #include <algorithm>
@@ -171,7 +173,122 @@ void thePacingIsReportedAsNotYetThereRatherThanAsANumber() {
 
 } // namespace
 
+// **The blend writes on the stand-in's in-between paint and on nothing else.** The stand-in's
+// `installed()` is the guard, and this is the arm that matters: **a parity is only "half the
+// paints" while the stand-in is doubling them.** With one paint per tick the counter still climbs
+// and the parity still alternates, so without the guard every second of the game's *own* frame read
+// as an in-between paint. That was measured on the title -- the falsifier arm of
+// `pose_blend_run.py` caught the blend writing on paints it had been told were the tick's own --
+// and this is the unit test for the fix, with the same fixture that installs the stand-in.
+//
+// The fixture lives here rather than beside the blend's own tests because installing a stand-in
+// needs a guest to install it into, and there is one here and none there.
+void theBlendWritesOnTheStandInsInBetweenPaintAndOnNothingElse() {
+    using wiiuport::title::PoseBlend;
+    using wiiuport::title::PoseByShader;
+    FakeGuest guest = loadedTitle();
+    // The display's interval field is the one thing the stand-in refuses to override, so a fixture
+    // that does not write one is refused for it -- the same refusal the other installing tests set
+    // up around, and the reason a stand-in that installed is not the same as one that is allowed
+    // to.
+    guest.writeWord(kDisplay + WindWakerPaint::kIntervalOffset, 2);
+    WindWakerPaint mod = makeMod(guest);
+    mod.install();
+    linked();
+    paintOnce(kDisplay);
+    const std::string refusal = mod.enable(WindWakerPaint::Mode::TwiceAtSixty);
+    check::isTrue(refusal.empty(), "the stand-in installs: " + refusal);
+    check::isTrue(mod.installed(), "and says so");
+
+    PoseByShader poses;
+    std::string offerRefusal;
+    PoseByShader::Entry entry;
+    entry.byteOffset = 12;
+    entry.moved = 100;
+    entry.compared = 100;
+    entry.otherObjects = 15;
+    entry.otherObjectsSame = 0;
+    poses.offer(0x1557c18f92f3bcb9, 0, entry, offerRefusal);
+    check::isTrue(offerRefusal.empty(), "the per-object pose is offered: " + offerRefusal);
+
+    PoseBlend blend(poses);
+    blend.setPaint(&mod);
+    // The pose at the table's offset, as the title's draw would leave it.
+    const auto assembly = [](float at) {
+        std::vector<float> words(64, 0.0f);
+        const float pose[PoseBlend::kWords] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+                                               0.0f, 0.0f, 1.0f, at,   0.0f, 0.0f};
+        for (size_t word = 0; word < PoseBlend::kWords; word++) {
+            words[3 + word] = pose[word];
+        }
+        return words;
+    };
+
+    // **The counter is the paint's, and the counter is what decides.** `inBetweenPaint()` reads the
+    // paint counter's parity, and the counter is incremented by the frame probe at the start of
+    // every paint -- so the test has to advance it with `paintOnce` between the blend's draws. A
+    // test that did not would read one parity three times and see three in-between paints where the
+    // stand-in makes one in three.
+    const auto draw = [&](float at, uint32_t node) {
+        paintOnce(kDisplay);
+        auto words = assembly(at);
+        blend.onAssemblyBeforeDraw(words.data(), words.size(), 0x1557c18f92f3bcb9, 0, node);
+        return words;
+    };
+
+    // **The parities from here are even, odd, even, odd.** The fixture painted once before the
+    // stand-in was installed, so the counter is at one and the blend's first draw makes it two. A
+    // parity read the other way round would make this test pass for the wrong reason, so the
+    // sequence is written out rather than assumed.
+
+    // Draw 1 -- even, so the tick's own paint. Held as N-1, and the title's value survives.
+    auto words = draw(0.0f, 0x027ff88c);
+    check::equal(blend.tally().firstSight, uint64_t{1}, "the first pose is held as tick N-1");
+    check::equal(words[3 + 9], 0.0f, "with the title's own value left exactly as it was");
+
+    // Draw 2 -- odd, so the in-between. There is an N-1 now, so this is the first midpoint: 5 of 0
+    // and 10.
+    words = draw(10.0f, 0x027ff88c);
+    check::equal(blend.tally().inBetweenKnown, uint64_t{1}, "one in-between draw over a held pair");
+    check::equal(blend.tally().lerped, uint64_t{1}, "and it was written");
+    check::equal(words[3 + 9], 5.0f, "as the midpoint of the two ticks, 5 of 0 and 10");
+
+    // Draw 3 -- even, the tick's own again, carrying N.
+    words = draw(10.0f, 0x027ff88c);
+    check::equal(blend.tally().notInBetween, uint64_t{1},
+                 "the tick's own paint is held, unwritten");
+    check::equal(words[3 + 9], 10.0f, "and carries the title's own value");
+
+    // Draw 4 -- odd again, and the held pose is the one from draw 3, so 15 of 10 and 20.
+    words = draw(20.0f, 0x027ff88c);
+    check::equal(blend.tally().lerped, uint64_t{2}, "two in-between draws over two ticks");
+    check::equal(words[3 + 9], 15.0f,
+                 "and the second is the midpoint of the last two ticks and not of the first lerp, "
+                 "15 rather than 12.5");
+
+    // **The stand-in out, which is the arm the title's run found.** The counter keeps climbing and
+    // the parity keeps alternating -- draws 5 and 6 read odd and even exactly as draws 2 and 3 did
+    // -- so without `installed()` as a guard, draw 5 would read as an in-between paint and the
+    // blend would write a midpoint into a frame the title drew. That is what the falsifier arm of
+    // `pose_blend_run.py` reported, and this is the unit test for the fix.
+    const std::string off = mod.disable();
+    check::isTrue(off.empty(), "the stand-in is taken out: " + off);
+    check::isTrue(!mod.installed(), "and says so");
+    for (int paint = 0; paint < 4; paint++) {
+        const float at = 30.0f + static_cast<float>(paint) * 10.0f;
+        words = draw(at, 0x027ff88c);
+        check::equal(words[3 + 9], at,
+                     "with the stand-in out, every paint is the tick's own and the title's value "
+                     "survives -- draw " +
+                         std::to_string(paint));
+    }
+    check::equal(blend.tally().lerped, uint64_t{2},
+                 "and the two lerps from while it was on are the only ones there are, across four "
+                 "draws of which two read an in-between parity");
+}
+
 void wiiuport::tests::runPaintTests() {
+    theBlendWritesOnTheStandInsInBetweenPaintAndOnNothingElse();
     thePacingIsReportedAsNotYetThereRatherThanAsANumber();
     // The words of the payload, checked against the title's own image: the
     // The payload, and the branch encoding its computed words depend on. The

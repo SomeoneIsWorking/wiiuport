@@ -120,6 +120,26 @@ class PoseBlend final : public frame::AssemblyBeforeDrawListener {
         m_paint = paint;
     }
 
+    // **The draws the table could not place, by shader, and how many of each.** This is the field
+    // that answers "why is nothing being blended", and it answers it in the only form a reader can
+    // act on: the shaders the scene actually draws with, ranked. Without it, a blend that writes
+    // nothing reports `withoutShader` equal to `assemblies` and no reason -- which is exactly what
+    // the first run on the real title reported, and the reason had to be found by hand.
+    //
+    // Bounded and reported as capped, because a frame has hundreds of shaders and an unbounded map
+    // of them is a leak with a JSON surface. The cap keeps the *most frequent*, which is the
+    // opposite of what a bounded-insertion map would keep and is the half that matters: a shader
+    // that draws twice a second is not what is stopping a blend.
+    static constexpr size_t kMaxUnplaced = 16;
+
+    struct Unplaced {
+        uint64_t shaderBaseHash = 0;
+        uint64_t shaderAuxHash = 0;
+        uint64_t draws = 0;
+    };
+
+    std::vector<Unplaced> unplacedShaders() const;
+
     Tally tally() const {
         std::scoped_lock lock(m_mutex);
         return m_tally;
@@ -137,6 +157,12 @@ class PoseBlend final : public frame::AssemblyBeforeDrawListener {
     // rendered documents is how a report grows a second one, and this project has paid for that
     // once; `json()` is `writeTo` and `finish()`, so there is one implementation of each field.
     void writeTo(JsonBody& body) const;
+
+    bool unplacedCapped() const {
+        std::scoped_lock lock(m_mutex);
+        return m_unplacedCapped;
+    }
+
     std::string json() const;
 
   private:
@@ -147,8 +173,13 @@ class PoseBlend final : public frame::AssemblyBeforeDrawListener {
     const WindWakerPaint* m_paint = nullptr;
     mutable std::mutex m_mutex;
     std::map<Key, std::array<float, kWords>> m_held;
+    std::map<std::pair<uint64_t, uint64_t>, uint64_t> m_unplaced;
     Tally m_tally;
     uint64_t m_fallbackHeld = 0;
+    // Whether the unplaced map hit its bound. **Counted as a fact rather than implied by a size**,
+    // because a map of exactly `kMaxUnplaced` entries is either at the bound or just under it and a
+    // reader cannot tell which from the count.
+    bool m_unplacedCapped = false;
 };
 
 } // namespace wiiuport::title

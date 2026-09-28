@@ -188,6 +188,19 @@ void aBlendThatCannotBeSafeWritesNothingAndSaysWhy() {
                  "object");
     check::equal(blend.tally().withoutShader, uint64_t{2},
                  "and it is counted as a draw the blend could not place, beside the unseen shader");
+
+    // **Which shaders, counted, most frequent first.** The first run on the real title reported
+    // `withoutShader` equal to `assemblies` and no reason at all, and the reason -- that the
+    // table's accepted shaders are not the ones the scene draws with -- had to be found by hand. A
+    // total says a blend is not happening; a ranked list of the shaders says why.
+    const auto unplaced = blend.unplacedShaders();
+    check::equal(unplaced.size(), size_t{2}, "two shaders could not place a pose");
+    check::equal(unplaced[0].draws, uint64_t{1}, "and both drew once, so the order is by count");
+    check::isTrue(unplaced[0].shaderBaseHash == 0xdeadbeef ||
+                      unplaced[0].shaderBaseHash == 0xb7252004aba21c10,
+                  "the first is one of the two the run refused: " +
+                      std::to_string(unplaced[0].shaderBaseHash));
+    check::isTrue(!blend.unplacedCapped(), "and the bound was not reached, so the list is whole");
 }
 
 // **The identity is the node, and a pair held without one is reported as such.** The title's binder
