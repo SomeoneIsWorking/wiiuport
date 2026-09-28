@@ -372,6 +372,41 @@ offset  72: 167965 assemblies,  5151 moved        5 same, 10 different
 matrix would read 15 of 15 the same, because every vertex draw in the scene pass would be holding the same
 matrix. **The per-object chain cannot carry a camera move.**
 
+> **This section's conclusion is withdrawn, and the reason is in the instrument rather than in the
+> title.** A later run, 1,685,585 assemblies with 12,090,138 identity comparisons, reports every one
+> of the eight offsets it holds as **`12 of 15` other objects reading the same value, with
+> `identities: 1` and `identitySamplesCapped: yes` at every offset.** The two runs disagree -- 6 of
+> 15 then, 12 of 15 now -- and the second has a far larger sample, so the second is the better
+> measurement and the first was a sample of a convenience.
+>
+> **The fault is that the census counts offsets pooled over every identity.** `ObjectPoseLocator`
+> keeps one value per *offset* and compares each new identity against it, so at each offset there is
+> exactly one tracked identity (`identities: 1`) and the "other objects" are fifteen others measured
+> against it. A value that belongs to **one object** is present in that object's draws and diluted
+> across every other object's, so it never reaches the 20% "held often" bar -- and a value that is
+> present in a quarter of the frame's draws, because it is a **pass's** view projection, reaches it
+> every time. **The bar selects pass values, not poses, and no corpus would have found a per-object
+> pose with an instrument that pools identities.**
+>
+> The fix is to count offsets *per identity*: hold an identity's offset on the identity, not on the
+> offset. The discriminator is already the right question -- does this value belong to this node --
+> and it is being asked of the wrong subject.
+
+### The vertex-attribute census offers nothing, and a zero that offers nothing is not a finding
+
+The same report carries it:
+
+```
+drawsSeen 1388163, drawsWithoutPosition 1388163, objectsOffered 0, nodesTracked 0,
+blendable 0, identical 0, unpairedShapes 0, schedule perFrame
+```
+
+**Every draw it saw had no position attribute, so it offered no object and tracked no node.** That
+is a blind instrument reporting zeros, and zeros beside a denominator are the shape of a finding
+without being one: the census ran (`schedule: perFrame`), it saw 1.4 million draws, and it found a
+position in none of them. It was the deleted vertex blend's falsifier, and it was not kept honest
+when the mechanism went.
+
 ### Three places the view matrix is not, each with a denominator
 
 A per-object census reads what each draw assembles, and it cannot answer where a *global* uniform is
