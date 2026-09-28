@@ -83,6 +83,32 @@ class GlobalPoseCensus {
     static Range data();
     static Range gpuUniformBlocks();
 
+    // **A range the caller names, for the ranges this class cannot hold in a table.**
+    //
+    // The two named ranges are the module's own data and GX2's uniform block memory: both have
+    // fixed addresses, so both are constants. The uniform block a draw sources does not -- it is
+    // wherever the title's binder put it, and it moves between runs, between frames and between
+    // objects. A table cannot hold those, and the measurement that unblocked the blend needs
+    // exactly them: the write location is `0x47eee100` to `0x47eee400` on one run and somewhere else
+    // on the next, from the title's own `GET /blocks` report.
+    //
+    // So the range is a parameter, bounded and parsed rather than trusted: a caller cannot make the
+    // scan walk the whole address space, and a range that wraps, is empty, is not four-aligned or
+    // is larger than `kMaxRangeBytes` is a refusal naming which. The one fact the parser must not
+    // lose is that this is a *range the evidence named*, and the report carries it back so a reader
+    // can see which range answered.
+    struct NamedRange {
+        Range range;
+        std::string refusal;
+        // The two as the caller wrote them, so a report names the request that produced it.
+        uint32_t askedStart = 0;
+        uint32_t askedEnd = 0;
+    };
+    static NamedRange namedRange(const std::string& start, const std::string& bytes);
+    // The widest a named range may be, and the reason: 4 MB is four thousand three-sided windows and
+    // two snapshots of it, and a range wider than that is a whole region rather than a block.
+    static constexpr uint32_t kMaxRangeBytes = 4u << 20;
+
     // One pass over `range`. Returns the number of poses named, or zero with `refusal` saying why
     // -- a scan that could not read its range has scanned nothing and must not report a zero as a
     // finding.
