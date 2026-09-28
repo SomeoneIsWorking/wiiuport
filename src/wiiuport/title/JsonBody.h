@@ -39,6 +39,17 @@ class JsonBody {
     //
     // This was two copies of a formatter with two precisions, one of which could emit `inf`,
     // in two locators that read the same kind of thing.
+    // **A number as `0x…`, and the one way this project spells a hash or an address in a report.**
+    // Three files wanted it and two of them had a copy -- `NodePoseLocator::hexValue` and
+    // `GlobalPoseCensus::hexValue` -- and a report whose addresses are hex in one section and
+    // decimal in the next is a report a reader has to check twice. Every one of these is a value
+    // that was written as hex by the thing that produced it, so it is written as hex here.
+    static std::string hex(uint64_t value) {
+        char text[24];
+        std::snprintf(text, sizeof(text), "0x%llx", static_cast<unsigned long long>(value));
+        return {text};
+    }
+
     static std::string real(double value, int significant = 9) {
         if (!std::isfinite(value)) {
             return value > 0.0 ? "\"inf\"" : (value < 0.0 ? "\"-inf\"" : "\"nan\"");

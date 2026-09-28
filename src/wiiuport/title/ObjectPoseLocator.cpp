@@ -38,15 +38,18 @@ std::string ObjectPoseLocator::identityOf(const frame::RecordedUniformAssembly& 
 // remember it. A transform that never moves is a colour triple that looked like one, so
 // the movement count is what separates them -- and it is reported beside the count of
 // comparisons, because a moving count with no denominator says nothing.
-bool ObjectPoseLocator::remember(const std::string& identity, uint32_t offset, const float* words) {
+bool ObjectPoseLocator::remember(const std::string& identity, uint64_t shaderBaseHash,
+                                 uint64_t shaderAuxHash, uint32_t offset, const float* words) {
     for (auto& entry : m_seen) {
         if (entry.second.first != offset || entry.first != identity) {
             continue;
         }
-        auto known =
-            std::find_if(m_candidates.begin(), m_candidates.end(), [offset](const Candidate& one) {
-                return one.offset == offset;
-            });
+        auto known = std::find_if(m_candidates.begin(), m_candidates.end(),
+                                  [offset, shaderBaseHash, shaderAuxHash](const Candidate& one) {
+                                      return one.offset == offset &&
+                                             one.shaderBaseHash == shaderBaseHash &&
+                                             one.shaderAuxHash == shaderAuxHash;
+                                  });
         if (known == m_candidates.end()) {
             // The candidate is created by the caller before this, so it cannot happen --
             // and dereferencing the end of a vector to find out is how a cannot-happen
@@ -140,12 +143,22 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
 
     std::scoped_lock lock(m_mutex);
     for (const uint32_t at : seenHere) {
-        auto known =
-            std::find_if(m_candidates.begin(), m_candidates.end(), [at](const Candidate& one) {
-                return one.offset == at;
+        // **Keyed on the shader as well as the offset.** An assembly is one shader's uniform
+        // buffer, and a uniform block's layout is fixed: two draws of one shader put the same
+        // uniform at the same slot every frame, and two *different* shaders may put the same
+        // uniform at different slots. The table was keyed on the offset alone, which pooled every
+        // shader's layout together and read one matrix as eight candidates -- the same class of
+        // fault as pooling offsets over identities, and for the same reason: the instrument was
+        // keyed on the wrong subject.
+        auto known = std::find_if(
+            m_candidates.begin(), m_candidates.end(), [at, &assembly](const Candidate& one) {
+                return one.offset == at && one.shaderBaseHash == assembly.shaderBaseHash &&
+                       one.shaderAuxHash == assembly.shaderAuxHash;
             });
         if (known == m_candidates.end()) {
             Candidate candidate;
+            candidate.shaderBaseHash = assembly.shaderBaseHash;
+            candidate.shaderAuxHash = assembly.shaderAuxHash;
             candidate.offset = at;
             candidate.assemblies = 1;
             candidate.affineAssemblies = 1;
@@ -184,7 +197,8 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
         known->folded += foldedHere;
         // One unit throughout: the offset in bytes, as the candidates and the report both use
         // it, and the data indexed by it.
-        remember(identity, at, assembly.data.data() + at / sizeof(float));
+        remember(identity, assembly.shaderBaseHash, assembly.shaderAuxHash, at,
+                 assembly.data.data() + at / sizeof(float));
     }
 
     // The global-or-per-object question, over the candidates as a whole rather than the ones this
@@ -338,6 +352,26 @@ std::string ObjectPoseLocator::json() const {
     // Which key was in use, so a number is never silently from the weaker of two.
     body.string("identitySource", m_sawObjectAddress ? "objectAddress" : "blockSources");
     body.number("identitiesRefusedForTracking", m_identitiesRefused);
+    // **How many distinct shaders the assemblies were, and how many distinct offsets the moving
+    // matrices were at.** The pair is the measurement, and it is new: a candidate is one shader's
+    // layout, so the same matrix lands at a different offset in each shader that reads it. An
+    // offset that is a camera is therefore *one per shader*, and the ratio of the two counts says
+    // which of those an offset is -- one count each is a single shader, equal counts is a value
+    // every shader shares at its own offset, and more offsets than shaders is neither.
+    //
+    // It replaces a single "best offset" that was a maximum over offsets belonging to different
+    // shaders, so it named whichever shader happened to place its matrix lowest and moved between
+    // runs for that reason alone.
+    std::unordered_set<uint64_t> shaders;
+    std::unordered_set<uint32_t> movingAt;
+    for (const Candidate& candidate : m_candidates) {
+        shaders.insert(candidate.shaderBaseHash);
+        if (candidate.moved > 0) {
+            movingAt.insert(candidate.offset);
+        }
+    }
+    body.number("distinctShaders", static_cast<uint64_t>(shaders.size()));
+    body.number("distinctMovingOffsets", static_cast<uint64_t>(movingAt.size()));
     // Two bars over two classes, and the answer to where to look next is which of them
     // fired. `rigid` alone means the value is a pose; `affine` alone means it is a transform
     // carrying scale, which the strict bar would never have counted; neither means the pose
@@ -404,6 +438,12 @@ std::string ObjectPoseLocator::json() const {
             const Candidate& candidate = held[index];
             JsonBody one;
             one.number("offset", candidate.offset);
+            // The shader whose layout this is. **Two shaders may hold a matrix at the same
+            // offset**, and the count of distinct shaders a moving matrix appears in is the
+            // measurement the blend turns on: a camera is in every shader, a per-object pose in
+            // one.
+            one.string("shaderBaseHash", JsonBody::hex(candidate.shaderBaseHash));
+            one.string("shaderAuxHash", JsonBody::hex(candidate.shaderAuxHash));
             one.number("assemblies", inClass(candidate));
             one.number("compared", candidate.compared);
             one.number("moved", candidate.moved);
