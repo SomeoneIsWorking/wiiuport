@@ -88,4 +88,14 @@ bool TransformShape::moved(const float* before, const float* after) {
     return deltaOf(before, after) > kMotionEpsilon;
 }
 
+bool TransformShape::sameShapeAs(const std::vector<uint32_t>& kept, uint32_t candidate) {
+    for (const uint32_t other : kept) {
+        const uint32_t gap = candidate > other ? candidate - other : other - candidate;
+        if (gap < spanBytes()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace wiiuport::title

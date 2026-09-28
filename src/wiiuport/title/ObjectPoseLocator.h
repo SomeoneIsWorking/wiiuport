@@ -54,6 +54,14 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     static constexpr uint32_t kMaxScanBytes = 4096;
     // How many candidate offsets the report names, most assemblies first.
     static constexpr size_t kExamples = 8;
+    // How many distinct alignments one matrix's offsets are kept for. A matrix in a flat run is
+    // affine at up to twelve of them, so twelve is the whole of it and the bound is never the
+    // thing that decides -- but it is a bound, and the report says when it was reached.
+    static constexpr size_t kMaxAlignments = 12;
+    // How many distinct (identity, candidate) pairs are remembered. A candidate is a matrix and a
+    // matrix is seen at up to `kMaxAlignments` offsets, so the pairs are fewer than the old
+    // per-offset pairs were and the bound is unchanged on purpose: it was never the thing that
+    // decided, and `m_identitiesRefused` counts what it turned away.
     // How many distinct block-source identities are followed, so "does it move" is asked
     // of a bounded set of objects rather than of every draw the title has ever made.
     static constexpr size_t kIdentities = 16;
@@ -103,6 +111,28 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
         // truth, from an instrument that looked right. What is asked is "does this object hold the
         // same value as the one before it", which is a question about *consecutive* assemblies, and
         // the consecutive assembly is the last one.
+        // **The alignments this matrix was seen at, and how many were observed.**
+        //
+        // A matrix written as a flat run of floats satisfies the class at every 4-byte alignment
+        // inside it, so one matrix produces up to twelve candidates. Measured on the real title,
+        // eight of this class's twelve held offsets were one array seen at eight alignments: laid
+        // over each other their words agreed at every shared position and there was no
+        // contradiction in seventeen words. **So a candidate is a matrix, not an alignment, and an
+        // assembly counts once for it however many of its alignments were affine.** Without this,
+        // `bestOffset` was the maximum over a run of offsets that are the same matrix, and it moved
+        // between runs (60 in one, 104 in the next) for a reason that had nothing to do with the
+        // title.
+        //
+        // **And the alignments are the fact the blend turns on: a pose's offset in an assembly is
+        // not a constant, so no fixed offset can be written.** The report carries how many were
+        // seen and whether the list was capped.
+        std::vector<uint32_t> alignments;
+        bool alignmentsCapped = false;
+        // The alignments that came in this assembly but were folded into this candidate rather than
+        // counted as a candidate of their own. Every folded alignment is a window on this matrix,
+        // so this is the over-count the collapse removed, with its size beside it.
+        uint64_t folded = 0;
+
         uint32_t otherIdentities = 0;
         uint32_t otherIdentitiesSame = 0;
         uint32_t otherIdentitiesDifferent = 0;

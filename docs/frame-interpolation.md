@@ -409,6 +409,65 @@ matrix. **The per-object chain cannot carry a camera move.**
 > offset on the identity, and answer "does this value track this node" over that node's own
 > consecutive assemblies.
 
+### The eight offsets are one array, and that is why the best offset moved between runs
+
+The report now carries the **values**, not only the counts, because a count says how often and the
+title names its own camera, so a camera is a comparison and not an inference. One run, gameplay
+reached, camera moving:
+
+```
+offset 104:  0.19981, 319777, -0.638178, 0.010258,  0.76982,  -364194,  ...
+offset  96: -0.253329, 0.946519, 0.19981, 319777,  -0.638178, 0.010258, ...
+offset  92: 3537.66, -0.253329, 0.946519, 0.19981,  319777,  -0.638178, ...
+offset  76: -194559, -0.955708, -0.212888, -0.203222, 3537.66, -0.253329, ...
+```
+
+**Laying the eight windows over each other, by (offset - lowest) / 4, they are one flat array of
+seventeen words with no contradiction at any shared position.** That is re-runnable arithmetic: the
+windows' overlaps agree, and the array is
+
+```
+-194559  -0.955708  -0.212888  -0.203222  3537.66  -0.253329  0.946519
+0.19981  319777  -0.638178  0.010258  0.76982  -364194  -0.586921  0.64063
+-0.495092  20791.9
+```
+
+A matrix written as a flat run of floats is affine at every 4-byte alignment inside it, so **one
+matrix was being counted as eight candidates**, each with its own counts. That is why `bestOffset`
+moved between runs -- 60 in one, 104 in the next -- for a reason that had nothing to do with the
+title: it was the maximum over a run of offsets that are the same matrix.
+
+**The fix is the collapse this repository already had.** `GlobalPoseCensus` had it; `ObjectPoseLocator`
+did not, and two scans keeping their own copy of a rule that decides how many poses a report claims
+are two numbers a reader cannot compare. The rule now has one owner, `TransformShape::sameShapeAs`,
+and both ask it. The candidate is a matrix; the **alignments it was seen at are recorded beside it,
+because they are the fact the blend turns on**:
+
+- `assemblies` counts an assembly once for the matrix, however many of its alignments were affine;
+- `alignmentsSeen` and `foldedFromAlignments` say how many places it was found and how much the
+  collapse removed, so a reader can see what was folded rather than trust that something was;
+- the test writes two matrices and requires two candidates, and is shown its other answer: **with
+  the fold off, 8 candidates for 2 matrices.**
+
+**And the consequence for the blend, which is the opposite of what the block route assumed.** A
+pose's offset in an assembly is **not a constant** -- the same matrix is at up to twelve offsets
+depending on the draw that read it. So no fixed offset can be written, and the offset has to be
+*computed per draw*. The title's own answer to that is its shader's remapped uniform table: each
+entry carries a `mappedIndexOffset`, which is where that uniform lands in the assembled buffer, so
+the offset is derived from the draw rather than searched for.
+
+### And the named address is the name, not the matrix
+
+The comparison against `0x10163bb4` came back with 48 bytes that are not a matrix in either byte
+order: `4.74064e+30, 1.6199e+25, 2.36887e+20, ...` little-endian, and no better big-endian. **That
+address holds the string `cWorldViewMatrix[0]`, not the matrix it names.** The name is how the
+uniform is *looked up*; the matrix is wherever the registration writes it, which is exactly what
+the per-draw uniform table gives. The earlier reading of that address -- "91 of 96 words non-zero" --
+was the name's own bytes, and the withdrawal of the "running guest's memory is not the disc image's"
+blocker stands, because the name coming out of the image's own module and being read at the same
+address in the running guest is the identity that was missing. **What the address does not give is
+the matrix, and that is a correction rather than a new blocker.**
+
 ### The vertex-attribute census offers nothing, and a zero that offers nothing is not a finding
 
 The same report carries it:
