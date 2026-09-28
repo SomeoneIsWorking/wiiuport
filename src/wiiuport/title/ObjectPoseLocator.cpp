@@ -108,6 +108,13 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
         m_sawObjectAddress = true;
     }
     const std::string identity = identityOf(assembly);
+    {
+        // **The per-shader denominator, counted where the assemblies are counted.** It is the
+        // number the belief bar is measured against, and without it a per-shader candidate is
+        // compared against the whole frame -- which no single shader's layout can reach.
+        std::scoped_lock lock(m_mutex);
+        ++m_byShader[assembly.shaderBaseHash];
+    }
 
     // Every 4-aligned offset, tested. A vector of candidates rather than a fixed-size
     // array, because a buffer's own length is what bounds the offsets and a fixed array
@@ -261,19 +268,15 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
 
 uint32_t ObjectPoseLocator::bestOffset() const {
     std::scoped_lock lock(m_mutex);
-    const uint64_t assemblies = m_assemblies.load();
-    if (assemblies == 0) {
-        return 0;
-    }
-    const uint64_t needed = assemblies * kBeliefPercent / 100;
     uint32_t best = 0;
-    uint64_t bestAssemblies = 0;
+    uint64_t bestShare = 0;
     for (const Candidate& candidate : m_candidates) {
-        if (candidate.rigidAssemblies < needed || candidate.moved == 0) {
+        if (!clearsBarLocked(candidate, candidate.rigidAssemblies)) {
             continue;
         }
-        if (candidate.rigidAssemblies > bestAssemblies) {
-            bestAssemblies = candidate.rigidAssemblies;
+        const uint64_t share = shareOfShaderLocked(candidate, candidate.rigidAssemblies);
+        if (share > bestShare) {
+            bestShare = share;
             best = candidate.offset;
         }
     }
@@ -284,23 +287,41 @@ uint32_t ObjectPoseLocator::bestOffset() const {
 // a basis matrix: the strict bar above says nothing for both.
 uint32_t ObjectPoseLocator::bestAffineOffset() const {
     std::scoped_lock lock(m_mutex);
-    const uint64_t assemblies = m_assemblies.load();
-    if (assemblies == 0) {
-        return 0;
-    }
-    const uint64_t needed = assemblies * kBeliefPercent / 100;
     uint32_t best = 0;
-    uint64_t bestAssemblies = 0;
+    uint64_t bestShare = 0;
     for (const Candidate& candidate : m_candidates) {
-        if (candidate.affineAssemblies < needed || candidate.moved == 0) {
+        if (candidate.moved == 0 || !clearsBarLocked(candidate, candidate.affineAssemblies)) {
             continue;
         }
-        if (candidate.affineAssemblies > bestAssemblies) {
-            bestAssemblies = candidate.affineAssemblies;
+        const uint64_t share = shareOfShaderLocked(candidate, candidate.affineAssemblies);
+        if (share > bestShare) {
+            bestShare = share;
             best = candidate.offset;
         }
     }
     return best;
+}
+
+// How many of one shader's own assemblies a candidate held a transform in, and whether that
+// cleared the bar. **Both are per shader**, because a candidate is one shader's layout: a
+// whole-frame denominator compared against a per-shader count is a property of the window rather
+// than of the title, and it cleared one candidate of 298 in the run that found it.
+uint64_t ObjectPoseLocator::shaderAssembliesLocked(const Candidate& candidate) const {
+    const auto held = m_byShader.find(candidate.shaderBaseHash);
+    return held == m_byShader.end() ? 0 : held->second;
+}
+
+uint64_t ObjectPoseLocator::shareOfShaderLocked(const Candidate& candidate,
+                                                uint64_t inClass) const {
+    const auto held = m_byShader.find(candidate.shaderBaseHash);
+    if (held == m_byShader.end() || held->second == 0) {
+        return 0;
+    }
+    return inClass * 100 / held->second;
+}
+
+bool ObjectPoseLocator::clearsBarLocked(const Candidate& candidate, uint64_t inClass) const {
+    return shareOfShaderLocked(candidate, inClass) >= kBeliefPercent;
 }
 
 std::string ObjectPoseLocator::json() const {
@@ -362,15 +383,18 @@ std::string ObjectPoseLocator::json() const {
     // It replaces a single "best offset" that was a maximum over offsets belonging to different
     // shaders, so it named whichever shader happened to place its matrix lowest and moved between
     // runs for that reason alone.
-    std::unordered_set<uint64_t> shaders;
+    // **The shaders *seen*, not the shaders that happened to produce a candidate.** These were
+    // counted from `m_candidates`, so a shader whose layout held nothing in the class was missing
+    // from the count -- and this is the number the belief bar divides by, so a shader missing from
+    // it makes every candidate of that shader look like it was measured against too little.
+    const uint64_t shaders = static_cast<uint64_t>(m_byShader.size());
     std::unordered_set<uint32_t> movingAt;
     for (const Candidate& candidate : m_candidates) {
-        shaders.insert(candidate.shaderBaseHash);
         if (candidate.moved > 0) {
             movingAt.insert(candidate.offset);
         }
     }
-    body.number("distinctShaders", static_cast<uint64_t>(shaders.size()));
+    body.number("distinctShaders", shaders);
     body.number("distinctMovingOffsets", static_cast<uint64_t>(movingAt.size()));
     // Two bars over two classes, and the answer to where to look next is which of them
     // fired. `rigid` alone means the value is a pose; `affine` alone means it is a transform
@@ -378,9 +402,12 @@ std::string ObjectPoseLocator::json() const {
     // is not in the assembled buffers either. An offset is named only if it also cleared the
     // assemblies bar *and* was seen to move -- a value that holds a shape in every assembly
     // and never changes is a basis.
-    const uint64_t needed = m_assemblies.load() * kBeliefPercent / 100;
-    auto clears = [needed](uint64_t inClass) {
-        return inClass >= needed;
+    // The bar, per shader, and the denominator that cleared it, per candidate. **The report
+    // carries the count the share was taken of**, because a share without its denominator is a
+    // number a reader cannot check and this report has named a best offset on a whole-frame
+    // denominator before.
+    auto clears = [this](const Candidate& candidate, uint64_t inClass) {
+        return clearsBarLocked(candidate, inClass);
     };
     // Every offset that cleared the assemblies bar is listed, and each says whether it moved.
     // Only the moving ones are named. Filtering the immovable ones out of the table leaves the
@@ -388,7 +415,7 @@ std::string ObjectPoseLocator::json() const {
     // as an empty list, which is indistinguishable from a scan that found nothing at all. That
     // emptiness is what the first version of this did, and it is the case a reader most needs
     // the counts for.
-    auto tableFor = [this, &clears, needed](bool affine) {
+    auto tableFor = [this, &clears](bool affine) {
         auto inClass = [affine](const Candidate& candidate) {
             return affine ? candidate.affineAssemblies : candidate.rigidAssemblies;
         };
@@ -399,7 +426,7 @@ std::string ObjectPoseLocator::json() const {
             if (inClass(candidate) > 0) {
                 ever++;
             }
-            if (clears(inClass(candidate))) {
+            if (clears(candidate, inClass(candidate))) {
                 held.push_back(candidate);
             }
         }
@@ -430,20 +457,32 @@ std::string ObjectPoseLocator::json() const {
         table.number("candidates", ever);
         table.number("heldOften", held.size());
         table.number("believedOffsets", moving);
+        // **The denominator is per shader now, so a single number for it would be a
+        // contradiction.** What is reported is the share the bar was applied to and the count it
+        // was taken of, per entry, and the bar itself -- and a reader who wants the whole frame
+        // has `assemblies` above to divide by.
         table.raw("beliefPercent", std::to_string(kBeliefPercent));
-        table.raw("assembliesNeeded", std::to_string(needed));
         table.raw("bestOffset", best);
         JsonBody entries;
         for (size_t index = 0; index < held.size() && index < kExamples; index++) {
             const Candidate& candidate = held[index];
             JsonBody one;
-            one.number("offset", candidate.offset);
-            // The shader whose layout this is. **Two shaders may hold a matrix at the same
-            // offset**, and the count of distinct shaders a moving matrix appears in is the
-            // measurement the blend turns on: a camera is in every shader, a per-object pose in
-            // one.
+            // **The shader first, then its own counts.** A reader looks an entry up by the shader
+            // it belongs to, and the counts after it are that shader's -- so the shader is named
+            // before them, and a search from the name forward finds this entry's own numbers
+            // rather than the next entry's.
+            //
+            // **Two shaders may hold a matrix at the same offset**, and the count of distinct
+            // shaders a moving matrix appears in is the measurement the blend turns on: a camera is
+            // in every shader, a per-object pose in one.
             one.string("shaderBaseHash", JsonBody::hex(candidate.shaderBaseHash));
             one.string("shaderAuxHash", JsonBody::hex(candidate.shaderAuxHash));
+            one.number("offset", candidate.offset);
+            // The share of its own shader's assemblies, and the count the share was taken of.
+            // Both, because the belief bar is per shader and a share without its denominator is a
+            // number a reader cannot check.
+            one.number("assembliesInShader", shaderAssembliesLocked(candidate));
+            one.number("shareOfItsShader", shareOfShaderLocked(candidate, inClass(candidate)));
             one.number("assemblies", inClass(candidate));
             one.number("compared", candidate.compared);
             one.number("moved", candidate.moved);
