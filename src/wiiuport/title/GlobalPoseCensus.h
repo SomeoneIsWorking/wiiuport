@@ -105,8 +105,10 @@ class GlobalPoseCensus {
         uint32_t askedEnd = 0;
     };
     static NamedRange namedRange(const std::string& start, const std::string& bytes);
-    // The widest a named range may be, and the reason: 4 MB is four thousand three-sided windows and
-    // two snapshots of it, and a range wider than that is a whole region rather than a block.
+    // The widest a named range may be, and the reason. Two snapshots of the range are held while it
+    // is compared, so 4 MB is 8 MB of host memory on the channel thread and about 350,000
+    // twelve-word windows to test; a range wider than that is a whole region rather than a block,
+    // and the two ranges that *are* whole regions have fixed addresses and are named constants.
     static constexpr uint32_t kMaxRangeBytes = 4u << 20;
 
     // One pass over `range`. Returns the number of poses named, or zero with `refusal` saying why

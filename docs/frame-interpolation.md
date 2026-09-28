@@ -476,6 +476,61 @@ leading written guest address `0x47eee100` with the record's own size 768 gives 
 those ranges for a transform-shaped twelve-word window that moves between two frames a frame apart
 -- a range, not a search, and not a guess about where the title keeps things.
 
+## The blend, now that the block is a range the title names
+
+The mechanism follows from what is measured, and it is not the mechanism that was deleted.
+
+**Write the block.** Between tick N-1 and tick N the host lerps the twelve words of the pose in the
+uniform block the draw sources, the second paint reads the lerped block, and the tick's own frame
+reads the block the title wrote for it. Every draw, every skinning pass, every attribute fetch and
+every display list is produced by the title's own code at the lerped pose, because the title's own
+draw is what reads the block. Identity is the node, so the write is per node and the twelve words
+are that node's.
+
+**Why this and not the assembly site.** The deleted mechanism wrote into the *host's* assembled
+uniform buffer and re-issued a recorded draw stream -- which is why it had to match identity by
+block address and occurrence index, plan partners, and guard every render target. Writing the block
+needs none of that: the title already says which block belongs to which object, in a record the
+binder writes from the object, and the objective's own chain says so.
+
+**The four things it needs, and the state of each.**
+
+1. *The block's guest address, per node.* **Measured.** The fork hands it over; the record's word 1
+   or word 2 names it, and a record repeats the value so the two words cannot be told apart by value
+   -- which does not matter, because a blend writes the block and the block's address is the same
+   number either way.
+2. *The pose's offset within the block.* **Being measured** by the range scan. The block is 768
+   bytes, which holds a 3x4 twelve times over; the offset is what says which twelve.
+3. *Tick N-1's words still present when tick N paints.* **Measured: 16 of 16**, with 8 consecutive
+   pairs on different addresses -- the title's double buffering, so N-1's block is a different
+   address from N's and both are readable.
+4. *A place to put the in-between frame in order.* **The paint path already has it:** the stand-in
+   runs the title's own frame body twice, and the second call is where the lerped block must be in
+   place and the first is where the title's own is. So the in-between frame is the tick's own frame
+   at the lerped pose, presented before the tick's own -- the order condition 3 asks for, and a
+   half-tick of latency rather than a whole one.
+
+**What it needs that is not free, said plainly.**
+
+- **The title's own block has to be put back.** A lerped block that stays lerped is the next tick's
+  problem. This is twelve words per object, saved and restored around the second paint, and it is
+  *not* the `GuestStateGuard` that was deleted: that shadowed every texture subresource the runtime
+  wrote, because a replay re-issued the whole frame. A blend writes twelve words into one block and
+  reads them back.
+- **A block the title reuses between objects.** The binder hands a pool out as objects come and go.
+  A block one object owned at N-1 may be another's at N, and a write keyed on the node's record
+  would then be writing into the wrong object. The node's own record names the block *for that
+  node*, and the measurement says a draw sources the block it is in the middle of -- so the write
+  is keyed on the node, and the case to measure is a node whose block changed between N-1 and N.
+- **Per-tick failure is not a crash.** A block the host cannot write, or a pose offset it does not
+  have, is one object drawn at N for that one frame, counted by reason. The deleted mechanism's
+  skips and their reasons are the pattern; the numbers are the reason the mechanism needed them.
+
+**Native overrides are authorised, and the honest use of that here is narrow.** The blend needs no
+override of the title's code: the title reads its own block, and a block is memory. What an override
+*is* good for is the one thing a memory write cannot do -- see a block that is bound but not written
+this frame, which is a title behaviour rather than a value. That stays a measurement, not a design.
+
 ### What the next read is: a range, not a search
 
 The view matrix is a global, so it is in none of the three regions above -- that is the answer, not the
