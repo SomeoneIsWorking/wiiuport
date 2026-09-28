@@ -231,7 +231,67 @@ void oneMatrixInTwoShadersIsTwoCandidatesAndTwiceInOneShaderIsOne() {
     }
 }
 
+// **The denominator is keyed on the shader's base *and* aux hashes.** Keyed on the base alone it
+// summed several shaders into one, and the run that found it reported 45,475 assemblies for a
+// "shader" that is three -- a denominator three times too large is a bar nothing clears honestly.
+// The test is two shaders sharing a base hash and differing in aux: with the base alone the second
+// one's assemblies count against the first one's candidate, so its share is wrong; with the pair
+// each is its own denominator.
+void theDenominatorIsKeyedOnTheShaderAndNotOnItsBaseHashAlone() {
+    const size_t at = 8;
+    auto wordsWithPose = [](float spin) {
+        std::vector<float> words(64, 0.0f);
+        putPose(words, at, spin);
+        return words;
+    };
+    ObjectPoseLocator locator;
+    // One base hash, two aux hashes: the first drawn 200 times holding the matrix in every
+    // assembly, the second 40 times holding it in 10. With the base alone the second's 10 are
+    // counted against a 240-assembly denominator -- 4%, under the bar, and the candidate vanishes.
+    // With the pair they are 10 of 40 -- 25%, on the bar, and the candidate is listed.
+    for (int round = 0; round < 200; round++) {
+        auto first =
+            assembly(wordsWithPose(0.1f * static_cast<float>(round)), {0x3e000000u}, 0x1000u);
+        first.shaderBaseHash = 0xdddd;
+        first.shaderAuxHash = 0x1;
+        locator.onAssemblyRecorded(first);
+    }
+    for (int round = 0; round < 40; round++) {
+        auto second = assembly(round < 10 ? wordsWithPose(0.2f * static_cast<float>(round))
+                                          : std::vector<float>(64, 0.0f),
+                               {0x3e000000u}, 0x2000u);
+        second.shaderBaseHash = 0xdddd;
+        second.shaderAuxHash = 0x2;
+        locator.onAssemblyRecorded(second);
+    }
+    const std::string body = locator.json();
+    const size_t affineAt = body.find("\"affine\":");
+    const std::string inAffine = body.substr(affineAt);
+    // The aux hash is in the report as a hex string, so both candidates are findable by it and
+    // neither by the base hash they share.
+    check::isTrue(inAffine.find("\"0x1\"") != std::string::npos,
+                  "the first shader's candidate is listed");
+    check::isTrue(
+        inAffine.find("\"0x2\"") != std::string::npos,
+        "and so is the second's, which shares its base hash and holds the matrix in 10 of "
+        "its own 40 -- a share of 25, on the bar where 10 of 240 is not: " +
+            inAffine.substr(0, 200));
+    // And the denominators are its own: 200 and 40, not 240 for both.
+    const size_t second = inAffine.find("\"0x2\"");
+    const size_t count = inAffine.find("\"assembliesInShader\":", second);
+    check::isTrue(count != std::string::npos,
+                  "the second candidate reports the assemblies its own shader contributed");
+    if (count != std::string::npos) {
+        const std::string text = inAffine.substr(count, inAffine.find(',', count) - count);
+        check::isTrue(text == "\"assembliesInShader\":40",
+                      "which is 40, its own shader's assemblies and not the 240 both share a base "
+                      "hash with: " +
+                          text);
+    }
+}
+
 void wiiuport::tests::runObjectPoseLocatorTests() {
+    theDenominatorIsKeyedOnTheShaderAndNotOnItsBaseHashAlone();
     oneMatrixIsOneCandidateHoweverManyAlignmentsItIsAffineAt();
     oneMatrixInTwoShadersIsTwoCandidatesAndTwiceInOneShaderIsOne();
     // A pose that recurs in most assemblies is named, with the count that named it. A
