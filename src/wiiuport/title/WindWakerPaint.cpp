@@ -667,6 +667,11 @@ void WindWakerPaint::Frame::OnCall(std::span<const uint32_t, 32> gpr, uint32_t /
     }
 }
 
+bool WindWakerPaint::installed() const {
+    std::scoped_lock lock(m_frame.mutex);
+    return m_installed;
+}
+
 std::string WindWakerPaint::enable(Mode mode) {
     std::scoped_lock lock(m_mutex);
     if (m_installed) {

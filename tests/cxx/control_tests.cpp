@@ -4,32 +4,18 @@
 #include "wiiuport/control/ControlChannel.h"
 #include "wiiuport/control/GuestMemoryRead.h"
 #include "wiiuport/frame/FrameCapture.h"
-#include "wiiuport/frame/FramePresenter.h"
-#include "wiiuport/frame/FrameReplayer.h"
-#include "wiiuport/frame/GuestStateGuard.h"
-#include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/input/InputDriver.h"
-#include "wiiuport/interp/TransformSearch.h"
 
 #include <array>
 #include <string>
 #include <vector>
 
 using wiiuport::control::ControlChannel;
-using wiiuport::frame::FrameReplayer;
 using wiiuport::frame::RecordingObserver;
 
 namespace {
 
-bool acceptEverySubmission(const void*, uint32_t) {
-    return true;
-}
-
 bool refuseCapture(LatteFrameHooks::CaptureCallback&&, int) {
-    return false;
-}
-
-bool refusePresent(const LatteFrameHooks::PresentArguments&) {
     return false;
 }
 
@@ -79,7 +65,10 @@ LatteFrameHooks::GuestStateRestore noRestore() {
     return {};
 }
 
-wiiuport::interp::ContinuousInterpolator::Clock::time_point neverNow() {
+// The clock the channel's pacing and frame gate are constructed with. It was the retired
+// interpolator's clock first; it is kept here as a seam rather than replaced, because the channel
+// still takes one and a test wiring a different one would be testing a different channel.
+std::chrono::steady_clock::time_point neverNow() {
     return {};
 }
 
@@ -88,17 +77,9 @@ wiiuport::interp::ContinuousInterpolator::Clock::time_point neverNow() {
 // tests at once; here it widens in one.
 struct Fixture {
     RecordingObserver recorder;
-    FrameReplayer replayer{&acceptEverySubmission};
-    wiiuport::interp::TransformSearch search;
     wiiuport::input::InputDriver input;
     wiiuport::frame::FrameCapture capture{&refuseCapture};
-    wiiuport::frame::FramePresenter presenter{&refusePresent};
-    wiiuport::frame::ReplayScheduler scheduler{replayer, presenter, capture};
-    wiiuport::interp::TransformSubstitution substitution;
-    wiiuport::interp::FrameInterpolator interpolator{search, substitution, scheduler};
     wiiuport::frame::FrameShapeLog shapeLog;
-    wiiuport::interp::ViewTracker viewTracker{search};
-    wiiuport::interp::ObjectBlend objects{wiiuport::interp::ContinuousInterpolator::kBlendPoint};
     wiiuport::guest::BufferWriters writers;
     wiiuport::guest::CallerCensus callers{&noRegistration};
     wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord, &noReadWords};
@@ -110,46 +91,15 @@ struct Fixture {
                                      &noReadWord};
     wiiuport::title::WindWakerPaint paint{&noRegistration, &noCodeSpace,    &noWriteWord,
                                           &noReadWord,     &noPacingChange, &noPacing};
-    wiiuport::interp::VertexBlend vertices{objects, writers,
-                                           wiiuport::interp::ContinuousInterpolator::kBlendPoint};
-    wiiuport::frame::GuestStateGuard guard{&noGuard, &noRestore};
-    wiiuport::interp::RestoreCheck restoreCheck{presenter, capture};
-    wiiuport::interp::NeighbourCheck neighbourCheck{capture};
-    wiiuport::interp::ContinuousInterpolator continuous{viewTracker, substitution, objects,
-                                                        replayer,    presenter,    guard,
-                                                        scheduler,   restoreCheck, &neverNow};
     wiiuport::frame::RecordingSnapshot snapshot;
     wiiuport::frame::PresentPacing pacing{&neverNow};
     wiiuport::frame::PresentPacing scanOut{&neverNow};
     wiiuport::frame::FrameGate gate;
-    wiiuport::interp::ShadowCheck shadowCheck{
-        [] {
-            return std::vector<wiiuport::frame::GuestMemorySnapshot::Region>{};
-        },
-        [](const wiiuport::frame::FrameRecording&) {
-            return false;
-        },
-        [] {
-            return wiiuport::interp::ShadowCheck::Clock::time_point{};
-        },
-        [](wiiuport::interp::ShadowCheck::Clock::duration) {
-        }};
     ControlChannel channel{ControlChannel::Sources{
         .recorder = recorder,
-        .replayer = replayer,
-        .search = search,
         .input = input,
         .capture = capture,
-        .presenter = presenter,
-        .scheduler = scheduler,
-        .interpolator = interpolator,
         .shapeLog = shapeLog,
-        .viewTracker = viewTracker,
-        .continuous = continuous,
-        .restoreCheck = restoreCheck,
-        .neighbourCheck = neighbourCheck,
-        .objects = objects,
-        .vertices = vertices,
         .writers = writers,
         .callers = callers,
         .paint = paint,
@@ -162,7 +112,6 @@ struct Fixture {
         .scanOut = scanOut,
         .vertexChanges = recorder.vertexChanges(),
         .gate = gate,
-        .shadowCheck = shadowCheck,
     }};
 };
 
@@ -199,34 +148,6 @@ void theCountersFollowTheRecorder() {
     check::isTrue(contains(body, "\"framesObserved\":1"), "the ended frame is counted");
     check::isTrue(contains(body, "\"displayListsSeen\":1"), "and so is its list");
     check::isTrue(contains(body, "\"lastFrameBytes\":16"), "with the bytes it held");
-}
-
-void aSearchThatFoundNothingStillSaysWhatItLookedAt() {
-    // A bare "candidates: []" cannot be told from a search that never ran.
-    // The denominators are the part that distinguishes them, so they are
-    // asserted here rather than the empty list.
-    Fixture fixture;
-    auto body = fixture.channel.transformsJson(ControlChannel::kDefaultTransformLimit);
-    check::isTrue(contains(body, "\"candidatesFound\":0"), "nothing was found");
-    check::isTrue(contains(body, "\"framesObserved\":0"), "because no frame was watched");
-    check::isTrue(contains(body, "\"spansExamined\":0"), "and nothing was examined");
-    check::isTrue(contains(body, "\"shadersTracked\":0"), "across no shaders");
-}
-
-void aFoundTransformIsReportedWithItsValues() {
-    Fixture fixture;
-    for (auto x : {1.0f, 4.0f}) {
-        wiiuport::frame::FrameRecording frame;
-        wiiuport::frame::RecordedUniformAssembly assembly;
-        assembly.shaderBaseHash = 0x1234;
-        assembly.data = {1.0f, 0.0f, 0.0f, x, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
-        frame.addUniformAssembly(assembly);
-        fixture.search.observe(frame);
-    }
-    auto body = fixture.channel.transformsJson(ControlChannel::kDefaultTransformLimit);
-    check::isTrue(contains(body, "\"candidatesFound\":1"), "the moving transform is reported");
-    check::isTrue(contains(body, "\"meanTranslationStep\":3"), "with how far it moved");
-    check::isTrue(contains(body, "\"values\":[1,0,0,4,"), "and the values themselves");
 }
 
 // A setup screen as the channel sees one.
@@ -369,17 +290,22 @@ void aMemoryReadNamesItsRangeAndIsBounded() {
 void everyAdvertisedRouteIsReachableByItsOwnMethod() {
     Fixture fixture;
     const std::string list{ControlChannel::routeList()};
-    size_t advertised = 0;
+    size_t advertised_count = 0;
     std::vector<std::string> missing;
     std::string rest = list;
     while (!rest.empty()) {
         const size_t comma = rest.find(',');
         std::string entry = rest.substr(0, comma);
         rest = comma == std::string::npos ? std::string{} : rest.substr(comma + 1);
-        // The last entry is written "X and Y".
+        // The last entry is written "X and Y", so it is **two** advertised routes and both are
+        // checked. It used to keep only the second of the two, which meant `POST /input` was
+        // advertised and never reached a handler in this test -- the test passed while one of the
+        // routes it claimed to cover was untested, and it read as coverage.
         const size_t conjunction = entry.rfind(" and ");
+        std::string second;
         if (conjunction != std::string::npos) {
-            entry = entry.substr(conjunction + 5);
+            second = entry.substr(conjunction + 5);
+            entry = entry.substr(0, conjunction);
         }
         while (!entry.empty() && entry.front() == ' ') {
             entry.erase(entry.begin());
@@ -391,20 +317,35 @@ void everyAdvertisedRouteIsReachableByItsOwnMethod() {
         if (space == std::string::npos) {
             continue;
         }
-        ++advertised;
-        lucent::http::Request request;
-        request.method = entry.substr(0, space);
-        request.target = entry.substr(space + 1);
-        auto answer = fixture.channel.dispatch(request);
-        if (answer.body.rfind("unknown route. This channel serves", 0) == 0) {
-            // The status and the route's own name as the test built it, because "missing" with no
-            // detail is a report that has to be re-run with a debugger in it. A route table test
-            // that names the request it built and the answer it got can be read.
-            missing.push_back(request.method + " " + request.target + " -> " +
-                              std::to_string(answer.status) + ", " + answer.body.substr(0, 40));
+
+        for (const std::string& advertised : {entry, second}) {
+            if (advertised.empty()) {
+                continue;
+            }
+            ++advertised_count;
+            lucent::http::Request one;
+            one.method = advertised.substr(0, advertised.find(' '));
+            one.target = advertised.substr(advertised.find(' ') + 1);
+            auto answered = fixture.channel.dispatch(one);
+            if (answered.body.rfind("unknown route. This channel serves", 0) == 0) {
+                // The status and the route's own name as the test built it, because "missing" with
+                // no detail is a report that has to be re-run with a debugger in it. A route table
+                // test that names the request it built and the answer it got can be read.
+                missing.push_back(one.method + " " + one.target + " -> " +
+                                  std::to_string(answered.status) + ", " +
+                                  answered.body.substr(0, 40));
+            }
         }
     }
-    check::isTrue(advertised > 20, "the list this checked is the whole list");
+    // The guard against a vacuous pass, stated as what it protects rather than as a number that
+    // happens to be current. Every route the product serves is named here, so the loop above reads
+    // a list that cannot silently shrink to nothing: the retired mechanism took fifteen routes with
+    // it, and a floor that was set against the larger list failed on the smaller one for a reason
+    // that had nothing to do with the routes.
+    check::isTrue(
+        advertised_count == 21,
+        "every route the channel serves is in the list, so this test reads all of them: " +
+            std::to_string(advertised_count) + " of 21");
     check::isTrue(
         missing.empty(), "every advertised route reaches a handler; these answer that they "
                          "do not exist: " +
@@ -433,14 +374,32 @@ void aGetReportsAndDoesNotChangeAnything() {
     check::isTrue(contains(state.body, "\"installed\":false"),
                   "and the mod is not installed by asking about it");
 
+    // `/present` rather than a route that is gone: the point is a route that *exists* under one
+    // method only, and the retired ones no longer answer for anything -- so testing the method
+    // discipline on one of them would pass whether the discipline works or the route is simply
+    // absent.
     lucent::http::Request postOnly;
     postOnly.method = "GET";
-    postOnly.target = "/replay";
+    postOnly.target = "/global-pose";
     auto refused = fixture.channel.dispatch(postOnly);
     check::isTrue(refused.body.rfind("unknown route. This channel serves", 0) == 0,
                   "a GET of a POST-only route is refused as unknown, not answered");
-    check::isTrue(contains(refused.body, "POST /replay"),
+    check::isTrue(contains(refused.body, "POST /global-pose"),
                   "and the refusal still says the route exists for POST");
+
+    // **And a route that was deleted stays deleted.** The host-side interpolation's routes are
+    // gone, and a refusal that still advertised them would send a reader to a channel that does not
+    // serve them -- so the refusal's own list is asserted not to name them.
+    lucent::http::Request gone;
+    gone.method = "GET";
+    gone.target = "/transforms";
+    auto retired = fixture.channel.dispatch(gone);
+    check::isTrue(retired.body.rfind("unknown route. This channel serves", 0) == 0,
+                  "a route the retired mechanism served is refused as unknown");
+    check::isTrue(
+        !contains(retired.body, "/transforms") && !contains(retired.body, "/replay") &&
+            !contains(retired.body, "/substitution") && !contains(retired.body, "/blends"),
+        "and the refusal's own list does not advertise it: " + retired.body.substr(0, 90));
 }
 
 } // namespace
@@ -450,8 +409,6 @@ namespace wiiuport::tests {
 void runControlTests() {
     anIdleRuntimeReportsZerosRatherThanNothing();
     theCountersFollowTheRecorder();
-    aSearchThatFoundNothingStillSaysWhatItLookedAt();
-    aFoundTransformIsReportedWithItsValues();
     aChannelWithNoSetupScreenSaysSoRatherThanReportingAClosedOne();
     aShownSetupScreenReportsWhatItIsWaitingFor();
     aQuitWithNoHostRunningIsRefusedAndAQuitWithOneReachesIt();

@@ -6,26 +6,14 @@
 #include "wiiuport/control/SetupStatus.h"
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FrameGate.h"
-#include "wiiuport/frame/FramePresenter.h"
-#include "wiiuport/frame/FrameReplayer.h"
 #include "wiiuport/frame/FrameShapeLog.h"
 #include "wiiuport/frame/PresentPacing.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/RecordingSnapshot.h"
-#include "wiiuport/frame/ReplayScheduler.h"
 #include "wiiuport/frame/VertexChanges.h"
 #include "wiiuport/guest/BufferWriters.h"
 #include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/input/InputDriver.h"
-#include "wiiuport/interp/ContinuousInterpolator.h"
-#include "wiiuport/interp/FrameInterpolator.h"
-#include "wiiuport/interp/NeighbourCheck.h"
-#include "wiiuport/interp/ObjectBlend.h"
-#include "wiiuport/interp/RestoreCheck.h"
-#include "wiiuport/interp/ShadowCheck.h"
-#include "wiiuport/interp/TransformSearch.h"
-#include "wiiuport/interp/VertexBlend.h"
-#include "wiiuport/interp/ViewTracker.h"
 #include "wiiuport/title/GlobalPoseCensus.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/UniformBlockCensus.h"
@@ -58,7 +46,6 @@ class ControlChannel {
   public:
     // How many candidates GET /transforms lists. The totals beside them
     // are never capped, so a cut list still reports how many there were.
-    static constexpr size_t kDefaultTransformLimit = 20;
     // The product always listens, on loopback only, so a player's own session
     // can be asked what it is doing; WIIUPORT_CONTROL_PORT only moves it.
     static constexpr long long kDefaultPort = 21337;
@@ -75,20 +62,9 @@ class ControlChannel {
     // interchangeable-looking types.
     struct Sources {
         const frame::RecordingObserver& recorder;
-        frame::FrameReplayer& replayer;
-        const interp::TransformSearch& search;
         input::InputDriver& input;
         frame::FrameCapture& capture;
-        frame::FramePresenter& presenter;
-        frame::ReplayScheduler& scheduler;
-        interp::FrameInterpolator& interpolator;
         const frame::FrameShapeLog& shapeLog;
-        const interp::ViewTracker& viewTracker;
-        interp::ContinuousInterpolator& continuous;
-        interp::RestoreCheck& restoreCheck;
-        interp::NeighbourCheck& neighbourCheck;
-        interp::ObjectBlend& objects;
-        interp::VertexBlend& vertices;
         const guest::BufferWriters& writers;
         const guest::CallerCensus& callers;
         title::WindWakerPaint& paint;
@@ -104,7 +80,6 @@ class ControlChannel {
         frame::PresentPacing& scanOut;
         frame::VertexChanges& vertexChanges;
         frame::FrameGate& gate;
-        interp::ShadowCheck& shadowCheck;
     };
 
     explicit ControlChannel(const Sources& sources);
@@ -158,17 +133,19 @@ class ControlChannel {
     // The bodies of the two GET routes. Pure, so a test reads exactly what a
     // client would without opening a socket.
     std::string countersJson() const;
+    // The pacing route's answer, which is the pacing's own summary. It was `interpolationJson`,
+    // and it carried the retired mechanism's frame counts as well; a route that keeps a name must
+    // keep an answer, so what is left is the pacing's numbers and nothing else.
+    std::string pacingJson() const;
 
     // What the transform search has found, with the denominators that say
     // whether it looked. `limit` caps the candidate list only; the totals
     // describe the whole search.
-    std::string transformsJson(size_t limit) const;
 
     // The two shader key sets an interpolated frame depends on agreeing:
     // what the blend was armed for, and what the replay actually offered.
     // Reported together because "none of them carried the view" is a
     // statement about both and neither alone can show it.
-    std::string substitutionJson() const;
 
     // What the last few published frames held, oldest first. One frame's
     // totals cannot show whether the recorder publishes whole frames or
@@ -182,13 +159,10 @@ class ControlChannel {
     // Whether every frame is being interpolated, and for every tick that was
     // not, why -- with the tracker, phase-time and withheld-packet counts beside
     // it, so a run that never interpolated says so in numbers.
-    std::string interpolationJson() const;
     // interpolationJson's fields for the replayed draws whose vertices the
     // title rewrote: by what blending them came to, over the runtime's draws
     // that could take new vertices, with what keeping and blending cost.
-    std::string verticesJson() const;
     // GET /vertices: each vertex shader's replayed draws by outcome.
-    std::string vertexShadersJson() const;
 
     // Which capture slot a query names, defaulting to the first.
     static size_t requestedSlot(const std::string& query);
@@ -219,23 +193,12 @@ class ControlChannel {
 
   private:
     const frame::RecordingObserver& m_recorder;
-    frame::FrameReplayer& m_replayer;
-    const interp::TransformSearch& m_search;
     input::InputDriver& m_input;
     frame::FrameCapture& m_capture;
-    frame::FramePresenter& m_presenter;
     const ControllerStatusSource* m_controllerStatus{nullptr};
     const SetupStatusSource* m_setupStatus{nullptr};
     std::atomic<HostStopTarget*> m_hostStop{nullptr};
-    frame::ReplayScheduler& m_scheduler;
-    interp::FrameInterpolator& m_interpolator;
     const frame::FrameShapeLog& m_shapeLog;
-    const interp::ViewTracker& m_viewTracker;
-    interp::ContinuousInterpolator& m_continuous;
-    interp::RestoreCheck& m_restoreCheck;
-    interp::NeighbourCheck& m_neighbourCheck;
-    interp::ObjectBlend& m_objects;
-    interp::VertexBlend& m_vertices;
     const guest::BufferWriters& m_writers;
     const guest::CallerCensus& m_callers;
     title::WindWakerPaint& m_paint;
@@ -248,7 +211,6 @@ class ControlChannel {
     frame::PresentPacing& m_scanOut;
     frame::VertexChanges& m_vertexChanges;
     frame::FrameGate& m_gate;
-    interp::ShadowCheck& m_shadowCheck;
     std::unique_ptr<lucent::http::Server> m_server;
 };
 

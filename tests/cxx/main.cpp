@@ -35,10 +35,10 @@ int main(int argc, char** argv) {
         std::printf("usage: wiiuport_tests [--seed N]\n");
         return 2;
     }
-    wiiuport::tests::runTransformTests();
     wiiuport::tests::runFrameTests();
     wiiuport::tests::runControlTests();
     wiiuport::tests::runPaintTests();
+    wiiuport::tests::runBufferWritersTests();
     wiiuport::tests::runBlockCensusTests();
     wiiuport::tests::runLogicGateTests();
     wiiuport::tests::runObjectPoseHistoryTests();
@@ -51,26 +51,11 @@ int main(int argc, char** argv) {
     wiiuport::tests::runUniformBlockAddressTests();
     wiiuport::tests::runUniformBlockRingTests();
     wiiuport::tests::runVertexPoseHistoryTests();
-    wiiuport::tests::runReplayTests();
-    wiiuport::tests::runSearchTests();
     wiiuport::tests::runInputTests();
     wiiuport::tests::runCaptureTests();
-    wiiuport::tests::runPresentTests();
     wiiuport::tests::runSelectionTests();
     wiiuport::tests::runProductTests();
-    wiiuport::tests::runSubstitutionTests();
-    wiiuport::tests::runContinuousTests();
-    wiiuport::tests::runObjectBlendTests();
-    wiiuport::tests::runObjectBlendSharedValueTests();
-    wiiuport::tests::runVertexBlendTests();
-    wiiuport::tests::runSharedVertexReadsTests();
-    wiiuport::tests::runSlotPoolTests();
-    wiiuport::tests::runDrawTreeTests(seed);
     wiiuport::tests::runGateTests();
-    wiiuport::tests::runShadowTests();
-    wiiuport::tests::runMapPassTests();
-    wiiuport::tests::runLightLookUpTests();
-    wiiuport::tests::runBufferWritersTests();
     std::printf("draw tree seed %u\n", seed);
     std::printf("%d checks, %d failures\n", check::g_checks, check::g_failures);
     if (check::g_checks == 0) {

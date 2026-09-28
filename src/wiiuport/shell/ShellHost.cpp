@@ -188,10 +188,13 @@ bool ShellHost::bringUpRenderer() {
         m_failure = "the Vulkan loader would not initialise: no usable Vulkan driver was found";
         return false;
     }
-    // Interpolation presents twice per title frame and leaves the spacing to
-    // the display: FIFO puts each present on its own vblank. Immediate or
-    // mailbox presentation would show the two back to back and drop one.
-    if (Runtime::instance().continuous().enabled()) {
+    // **A title that presents more than once per frame needs each present on its own vblank**, and
+    // the thing that does that is now the display paint mod rather than the continuous interpolator
+    // this used to read. FIFO puts each present on its own vblank; immediate or mailbox would show
+    // them back to back and drop one. The reason did not change, only which unit it is read from --
+    // **and a route that keeps a name must keep an answer, so the shell asks the mod that is
+    // installed rather than a setting that no longer exists.**
+    if (Runtime::instance().paint().installed()) {
         GetConfig().vsync = static_cast<int>(SwapchainInfoVk::VSync::FIFO);
     }
     try {

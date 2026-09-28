@@ -23,7 +23,6 @@ from wiiuport.control import (
     DEFAULT_PORT,
     ControlUnavailable,
     read_counters,
-    read_transforms,
     runtime_env,
     wait_for_channel,
 )
@@ -94,8 +93,7 @@ def main(argv: list[str] | None = None) -> int:
             while time.monotonic() < deadline and running.poll() is None:
                 time.sleep(10)
                 try:
-                    counters = read_counters(args.port)
-                    report = read_transforms(args.port)
+                    read_counters(args.port)
                 except ControlUnavailable:
                     continue
             try:

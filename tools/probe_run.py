@@ -233,7 +233,6 @@ def main(argv: list[str] | None = None) -> int:
 
     runtime_env = {
         "WIIUPORT_CONTROL_PORT": str(args.port),
-        "WIIUPORT_INTERPOLATION": "0",
     }
     if args.census:
         runtime_env["WIIUPORT_CALLER_CENSUS"] = args.census

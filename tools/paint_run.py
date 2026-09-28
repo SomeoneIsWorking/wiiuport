@@ -333,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"refused: no runtime at {layout.shell_binary}. Build it first.", file=sys.stderr)
         return 2
 
-    env = runtime_env(args.port, continuous=False)
+    env = runtime_env(args.port)
     env["WIIUPORT_CALLER_CENSUS"] = LOGIC_TARGET
     logflag = log_flags(LogType.RECOMPILER) if args.log_recompiler else 0
     session = HeadlessSession(
