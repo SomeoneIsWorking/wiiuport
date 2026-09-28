@@ -506,10 +506,49 @@ lands is a property of the shader that read it. It is at **offset 12 in shader `
 21,950). The other three offsets named are the same array at other alignments, or matrices that
 never moved.
 
+**And the same run separates the per-object pose from the shared ones, which is what condition 2
+asks for.** The report's `otherIdentitiesSameValue` is the discriminator, and with the per-shader
+key the numbers separate cleanly:
+
+```
+shader 0x8cecd19741c6c1c7  offset  4   0 of 15 other objects read the same value   202/21950 moved
+shader 0x1557c18f92f3bcb9  offset 12   0 of 15                                     21730/21879 moved
+shader 0x1557c18f92f3bcb9  offset 60   3 of 15                                     21708/21857 moved
+shader 0x8cecd19741c6c1c7  offset 84   8 of 15                                        80/21864 moved
+shader 0xb7252004aba21c10  offset 76  12 of 15                                         98/235 moved
+```
+
+**A camera's view matrix reads 15 of 15.** These read **0 of 15** -- every object at that offset holds
+its own twelve words, and two different shaders hold *the same* twelve words at offsets 4 and 12.
+**That is the per-object pose, measured, with the addresses**: twelve words at **offset 12 in shader
+`0x1557c18f92f3bcb9`** (21,730 movements of 21,879 comparisons, in every one of that shader's
+assemblies) and at **offset 4 in shader `0x8cecd19741c6c1c7`** (202 of 21,950). The offset is 76 for
+a value 12 of 15 objects share, which is a pass's, not an object's.
+
+**What the discriminator is, stated precisely, because its limit is part of the answer.** It compares
+an offset's value **against the value at the same offset in the immediately preceding assembly**, not
+against the same object's earlier value. So "0 of 15" is exactly *consecutive objects read different
+twelve words at this offset*, which is the per-object signature; and it is not a per-object *temporal*
+test, which would ask whether one object's own value changes with that object. The two agree for a
+value that belongs to one object -- a prop standing still reads the same value every time and its
+neighbour reads a different one -- and disagree for a value the title recomputes per object per tick
+in a way that happens to repeat across neighbours. **That case is not excluded by this measurement and
+is named here rather than glossed.**
+
+**So the whole of condition 2 is answered with addresses:**
+
+- the identity is the **node** -- `0x027ff88c` and `0x027ff9c0`, 195,581 bindings over 590 objects;
+- the pose is **twelve words in the title's assembled uniforms**, not in the node's own 2,588-byte
+  window (0 of 23,210 transform-shaped windows there move) and not in the uniform block the draw
+  sources (23, 14 and 0 in the class across the three most-used blocks, 0 moving);
+- **at an offset that is a property of the shader that read it** -- 12 in `0x1557c18f92f3bcb9`, 4 in
+  `0x8cecd19741c6c1c7`, 76 in `0xb7252004aba21c10` for the pass's value;
+- and **tick N-1's block is still present when tick N paints**, 16 of 16, so the lerp has both ends.
+
 **That is writable.** A blend does not need to search: for a draw, the pose is at the offset *that
-draw's own shader* puts it at, and both offsets are the title's own shader hashes. The lookup is the
-per-shader table this change built, the write is twelve words into the assembled buffer, and the
-title's own draw produces everything else.
+draw's own shader* puts it at, and every offset above is one of the title's own shader hashes. The
+lookup is the per-shader table this change built, the write is twelve words into the assembled
+buffer, and the title's own draw produces everything else.
 
 **And one more defect, found by the measurement rather than by reading:** the per-shader denominator
 was keyed on the **base hash alone**, so shaders differing only in their aux hash were summed --
