@@ -27,7 +27,15 @@ std::string field(const std::string& body, const std::string& name) {
     while (end < body.size() && body[end] != ',' && body[end] != '}') {
         end++;
     }
-    return body.substr(start, end - start);
+    std::string value = body.substr(start, end - start);
+    // **A JSON string's value comes back with its quotes**, and a comparison against a C++ literal
+    // that forgets them fails for a reason no message shows. The same reader in
+    // `global_pose_tests.cpp` strips them; this is the same fix in the second place it was needed,
+    // which is a duplication worth naming rather than a coincidence.
+    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+        value = value.substr(1, value.size() - 2);
+    }
+    return value;
 }
 
 // One nested object out of the report. Both shape tables carry `bestOffset` and
@@ -51,6 +59,16 @@ std::string section(const std::string& body, const std::string& name) {
         }
     }
     return "";
+}
+
+// A field's value out of a JSON object, braces counted so a nested object's field of the same name
+// is not mistaken for this one's.
+std::string nested(const std::string& body, const std::string& name) {
+    return field(body, name);
+}
+
+bool mentions(const std::string& haystack, const std::string& needle) {
+    return haystack.find(needle) != std::string::npos;
 }
 
 RecordedUniformAssembly assembly(std::vector<float> data, std::vector<uint32_t> sources,
@@ -165,7 +183,7 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
                       "with the same block source every time, the fallback also yields one "
                       "identity -- which is why the real run matched one: " +
                           body);
-        check::isTrue(field(body, "identitySource") == "\"blockSources\"",
+        check::isTrue(field(body, "identitySource") == "blockSources",
                       "and the report names the source it used, so a number is never silently "
                       "from the weaker of two keys");
     }
@@ -371,5 +389,163 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
         check::isTrue(field(section(body, "rigid"), "bestOffset") == "null" &&
                           field(section(body, "affine"), "bestOffset") == "null",
                       "and with no assemblies at all both believed offsets are null, not zero");
+    }
+    {
+        // **A value every object shares is a global, and a value each object has is not.** This is
+        // the question the blend turns on: a camera's view matrix is written once a frame and read
+        // by every shader, so two objects hold the *same* twelve floats at the same offset, while a
+        // static prop's world matrix is that object's own and two objects hold different ones. The
+        // share of assemblies an offset appears in cannot tell those apart -- a quarter of the
+        // frame's draws being objects fits a per-object pose exactly as well as it fits a global --
+        // so the discriminator is the value, compared across identities.
+        //
+        // Both halves in one place, because a test with only the agreeing case would pass against
+        // a counter that never counted.
+        // **A frame's worth of objects sharing one value, and that value advancing per frame** --
+        // which is the shape of a camera's view matrix and the only shape the question can be asked
+        // of. A single frame of six identical assemblies cannot tell a global from a per-object
+        // value, because there is nothing for the value to differ from; and the first version of
+        // this fixture was exactly that, and passed with the instrument's retained value never
+        // advancing. **A test that cannot fail is not a test**, and this one had a mutation in it
+        // that nothing noticed.
+        auto globalFrame = [](uint32_t object, float spin) {
+            std::vector<float> words(64, 0.0f);
+            putPose(words, 8, spin);
+            return assembly(words, {0x3e000000u}, object);
+        };
+        auto perObjectValue = [](uint32_t object) {
+            std::vector<float> words(64, 0.0f);
+            // A different spin per object, which is what two props at different places hold.
+            putPose(words, 8, 0.4f + static_cast<float>(object) * 0.37f);
+            return assembly(words, {0x3e000000u}, object);
+        };
+        const size_t offsetBytes = 8 * sizeof(float);
+
+        auto countsFor = [](const std::string& body, uint32_t offset, const char* other,
+                            const char* same, const char* different) {
+            // The offset's own entry in the report, found by its offset rather than by its
+            // position: the table is ordered by how many assemblies held each offset, so a test
+            // that read the first entry would be testing the fixture's luck.
+            const std::string marker = "\"offset\":" + std::to_string(offset);
+            const size_t at = body.find(marker);
+            if (at == std::string::npos) {
+                return std::string("no entry at offset ") + std::to_string(offset);
+            }
+            const size_t brace = body.find('{', at);
+            const size_t end = body.find('}', brace);
+            const std::string entry = body.substr(brace, end - brace);
+            return std::string(other) + "=" + nested(entry, other) + " " + same + "=" +
+                   nested(entry, same) + " " + different + "=" + nested(entry, different);
+        };
+
+        {
+            ObjectPoseLocator locator;
+            for (int frame = 0; frame < 3; frame++) {
+                for (uint32_t object = 1; object <= 6; object++) {
+                    // The same twelve floats for every object in a frame, and a different set each
+                    // frame: shared across objects, moving over time, which is the whole of it.
+                    locator.onAssemblyRecorded(
+                        globalFrame(object, 0.61f + 0.2f * static_cast<float>(frame)));
+                }
+            }
+            const std::string body = locator.json();
+            const std::string counts =
+                countsFor(body, offsetBytes, "otherIdentities", "otherIdentitiesSameValue",
+                          "otherIdentitiesDifferentValue");
+            // **The offset the test wrote is the offset the report carries, found by its offset and
+            // not by its position.** The table is ordered by how many assemblies held each offset,
+            // so a test that read the first entry would be testing its own luck rather than the
+            // locator. `countsFor` returns empty when no entry sits at that offset, and every
+            // assertion below reads through it, so this is the check that they are about the right
+            // one rather than about a mixture of offsets.
+            check::isTrue(mentions(counts, "otherIdentities="),
+                          "and the report carries an entry at the offset the test wrote to: " +
+                              counts);
+            // **Five, not fifteen**: six distinct objects over three frames, and a repeat of an
+            // object is not a new object -- so five comparisons, all agreeing. The three frames are
+            // what make the value move; the six objects are what make it shared, and it is the
+            // sharing the question is about.
+            check::isTrue(mentions(counts, "otherIdentities=5") &&
+                              mentions(counts, "otherIdentitiesSameValue=5") &&
+                              mentions(counts, "otherIdentitiesDifferentValue=0"),
+                          "six objects over three frames, and the same value in every comparison, "
+                          "which is what a camera's view matrix looks like -- " +
+                              counts);
+            check::isTrue(nested(body, "identitySamplesCapped") == "no",
+                          "and six identities is under the bound, so nothing was capped and the "
+                          "five is all of them: " +
+                              nested(body, "identitySamplesCapped"));
+        }
+        {
+            // The per-object case over the same frame loop, so the two fixtures differ only in
+            // whether the value is shared: a pair that differed in shape as well as in value
+            // would let a counter that only noticed the shape pass both.
+            ObjectPoseLocator locator;
+            for (int frame = 0; frame < 3; frame++) {
+                for (uint32_t object = 1; object <= 6; object++) {
+                    locator.onAssemblyRecorded(
+                        perObjectValue(object + static_cast<uint32_t>(frame) * 10));
+                }
+            }
+            const std::string body = locator.json();
+            const std::string counts =
+                countsFor(body, offsetBytes, "otherIdentities", "otherIdentitiesSameValue",
+                          "otherIdentitiesDifferentValue");
+            // Fifteen, not five: the frame loop makes eighteen distinct objects and the identity
+            // sample is capped at sixteen, so fifteen comparisons is every one the cap allows.
+            // **And the cap is reported**, so "compared against fifteen of eighteen" is visible
+            // rather than reading as "compared against all of them".
+            check::isTrue(mentions(counts, "otherIdentities=15") &&
+                              mentions(counts, "otherIdentitiesSameValue=0") &&
+                              mentions(counts, "otherIdentitiesDifferentValue=15"),
+                          "and the same frame loop with a different value in every one of fifteen "
+                          "comparisons, which is what a prop's world matrix looks like -- " +
+                              counts);
+            check::isTrue(nested(body, "identitySamplesCapped") == "yes",
+                          "and the identity sample says it was capped, so the fifteen is the bound "
+                          "and not the field's opinion: " +
+                              nested(body, "identitySamplesCapped"));
+        }
+        {
+            // **The case that tells "compared against the last value" from "compared against the
+            // first".** Three objects in a row holding A, B, B. Compared against the value just
+            // seen, the second differs and the third agrees -- one difference and one agreement.
+            // Compared against the first value ever, both differ, and the answer is a different
+            // count of the same data.
+            //
+            // **This is the only fixture that can tell them apart**, and the two above cannot: they
+            // compare every object against a value that is either always equal or never equal, so
+            // advancing the retained value or not gives the same number either way. A mutation that
+            // stopped the retained value advancing passed both of them, which is how this one was
+            // found.
+            ObjectPoseLocator locator;
+            locator.onAssemblyRecorded(globalFrame(1, 0.31f)); // A
+            locator.onAssemblyRecorded(globalFrame(2, 0.52f)); // B, differs from A
+            locator.onAssemblyRecorded(globalFrame(3, 0.52f)); // B, agrees with the one before
+            locator.onAssemblyRecorded(globalFrame(4, 0.73f)); // C, differs again
+            const std::string counts =
+                countsFor(locator.json(), offsetBytes, "otherIdentities",
+                          "otherIdentitiesSameValue", "otherIdentitiesDifferentValue");
+            check::isTrue(mentions(counts, "otherIdentities=3") &&
+                              mentions(counts, "otherIdentitiesSameValue=1") &&
+                              mentions(counts, "otherIdentitiesDifferentValue=2"),
+                          "A, B, B, C against the value just seen is one agreement and two "
+                          "differences, which is the count the last-value rule gives and the "
+                          "first-value rule does not -- " +
+                              counts);
+        }
+        {
+            // **A repeat of one object is not a second object.** Without this, a per-object pose
+            // would be counted as differing from itself on every frame after the first, and the
+            // "different" column would be a frame count wearing a disguise.
+            ObjectPoseLocator locator;
+            for (int repeat = 0; repeat < 20; repeat++) {
+                locator.onAssemblyRecorded(perObjectValue(1));
+            }
+            const std::string counts = countsFor(locator.json(), offsetBytes, "otherIdentities",
+                                                 "sameValue", "differentValue");
+            check::isTrue(mentions(counts, "otherIdentities=0"),
+                          "twenty assemblies of one object compare it against nobody: " + counts);
+        }
     }
 }

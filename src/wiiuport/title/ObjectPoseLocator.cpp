@@ -155,6 +155,63 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
         remember(identity, candidate.offset,
                  assembly.data.data() + candidate.offset / sizeof(float));
     }
+
+    // The global-or-per-object question, over the candidates as a whole rather than the ones this
+    // assembly happened to produce: a candidate created by an earlier assembly is still a candidate
+    // this assembly can say something about, and the best offset is very often one of those.
+    //
+    // **Inside the lock already held above, and that is not a style note.** This first took the
+    // lock a second time -- the same non-recursive mutex, one scope apart -- and the test binary
+    // hung rather than failing, which is the worst way for a lock mistake to announce itself: a
+    // suite that stops reporting is a suite whose green is the last result anyone remembers.
+    for (Candidate& candidate : m_candidates) {
+        const size_t at = candidate.offset / sizeof(float);
+        if (at + kPoseWords > words) {
+            continue;
+        }
+        const float* value = assembly.data.data() + at;
+        if (!candidate.hasLastValue) {
+            candidate.identitiesSeen.push_back(identity);
+            candidate.lastValue = std::array<float, kPoseWords>{};
+            for (size_t word = 0; word < kPoseWords; word++) {
+                candidate.lastValue[word] = value[word];
+            }
+            candidate.hasLastValue = true;
+            continue;
+        }
+        // A repeat of an identity already compared is not a new identity, and counting it would
+        // say a per-object pose differs from itself -- which is what it would do, every frame.
+        if (candidate.identitiesSeen.size() >= kIdentitySamples) {
+            candidate.identitySamplesCapped = true;
+            continue;
+        }
+        if (std::find(candidate.identitiesSeen.begin(), candidate.identitiesSeen.end(), identity) !=
+            candidate.identitiesSeen.end()) {
+            continue;
+        }
+        // Compared against the assembly immediately before this one, which is the comparison the
+        // question is actually about -- and then the retained value moves on, so the next object
+        // is compared against *this* one. A value held by every object in a frame therefore reads
+        // as shared however fast it changes, and a value each object owns reads as different on
+        // every object after the first.
+        bool same = true;
+        for (size_t word = 0; word < kPoseWords; word++) {
+            if (candidate.lastValue[word] != value[word]) {
+                same = false;
+                break;
+            }
+        }
+        for (size_t word = 0; word < kPoseWords; word++) {
+            candidate.lastValue[word] = value[word];
+        }
+        candidate.identitiesSeen.push_back(identity);
+        candidate.otherIdentities++;
+        if (same) {
+            candidate.otherIdentitiesSame++;
+        } else {
+            candidate.otherIdentitiesDifferent++;
+        }
+    }
 }
 
 uint32_t ObjectPoseLocator::bestOffset() const {
@@ -324,6 +381,15 @@ std::string ObjectPoseLocator::json() const {
             one.raw("biggestDelta", JsonBody::real(static_cast<double>(candidate.biggestDelta)));
             one.raw("scale", JsonBody::real(static_cast<double>(candidate.biggestScale)));
             one.number("identities", candidate.identities);
+            // The global-or-per-object question, three numbers that answer it between them: a
+            // candidate compared against two or more objects and never differing from the first is
+            // a value every object shares, which is what a camera's view matrix is. Reported for
+            // every offset, because an offset that is per-object and one that is global are both
+            // answers and only one of them is what a blend wants.
+            one.number("otherIdentities", candidate.otherIdentities);
+            one.number("otherIdentitiesSameValue", candidate.otherIdentitiesSame);
+            one.number("otherIdentitiesDifferentValue", candidate.otherIdentitiesDifferent);
+            one.string("identitySamplesCapped", candidate.identitySamplesCapped ? "yes" : "no");
             entries.object(std::to_string(index), one.text());
         }
         table.object("offsets", entries.text());

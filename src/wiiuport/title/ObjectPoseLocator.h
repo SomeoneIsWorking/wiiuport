@@ -74,6 +74,42 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
         uint64_t rigidAssemblies = 0;
         // How far the row lengths are from 1, as a deviation. Zero is rigid.
         float biggestScale = 0.0f;
+
+        // **Is the value the same in every object, or does it differ between them?** This is the
+        // question that says whether an offset holds a *global* or a *per-object* pose, and it is
+        // the question the blend turns on.
+        //
+        // A camera's view matrix is written once a frame and read by every shader, so two different
+        // objects at the same offset hold the *same* twelve floats. A static prop's world matrix is
+        // that object's own, so two objects at the same offset hold *different* ones. The share of
+        // assemblies an offset appears in cannot tell those apart -- a quarter of the frame's draws
+        // being objects fits a per-object pose exactly as well as it fits a global -- so the
+        // discriminator is the value itself, compared across identities.
+        //
+        // **Compared only across different identities, and against the value seen most recently.**
+        // Two rules, and the second one was got wrong first.
+        //
+        // Within one object the value is expected to move between ticks, so comparing an object
+        // against itself would count every per-object pose as one that differs from itself. Hence
+        // the identity set.
+        //
+        // **The value compared against is the last one seen, not the first ever.** A camera's view
+        // matrix changes every frame, so retaining the first value would make every object from
+        // the second frame onwards "differ" from it -- and the answer would be the opposite of the
+        // truth, from an instrument that looked right. What is asked is "does this object hold the
+        // same value as the one before it", which is a question about *consecutive* assemblies, and
+        // the consecutive assembly is the last one.
+        uint32_t otherIdentities = 0;
+        uint32_t otherIdentitiesSame = 0;
+        uint32_t otherIdentitiesDifferent = 0;
+        std::array<float, kPoseWords> lastValue{};
+        bool hasLastValue = false;
+        // The identities already compared against the value most recently seen, so a repeat of one
+        // of them is not counted again. Bounded, and the bound is reported: past it the count stops
+        // rather than growing with the frame, and a report that said "compared against 4 objects"
+        // would be true while "compared against every object" would not be.
+        std::vector<std::string> identitiesSeen;
+        bool identitySamplesCapped = false;
     };
 
     void onAssemblyRecorded(const frame::RecordedUniformAssembly& assembly) override;
@@ -92,6 +128,12 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     // one that can tell a scaled pose from a basis matrix, where the strict bar says nothing
     // for both.
     uint32_t bestAffineOffset() const;
+    // How many distinct identities one offset's global-or-per-object question is compared over.
+    // Sixteen is enough to tell a global from a per-object value and small enough that the storage
+    // is a rounding error on a display thread; the report carries the count and whether it was
+    // capped, so a reader knows which of the two it is looking at.
+    static constexpr size_t kIdentitySamples = 16;
+
     // The share of assemblies an offset must hold a transform in to be named.
     static constexpr uint32_t kBeliefPercent = 20;
 
