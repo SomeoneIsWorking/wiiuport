@@ -276,17 +276,19 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
     // **The node is the identity, and this is the measurement that says so.** The fallback --
     // the guest addresses the draw sourced its uniforms from -- was measured to match exactly
     // one identity across 438,872 assemblies, because the uniform block is re-uploaded at a new
-    // address each frame. So here the *same object* is given a *different* block source on every
-    // assembly, exactly as the title does, and the pose moves between them. A locator that keys
-    // on the block source sees ten sightings of ten different objects and no comparisons at
-    // all; a locator that keys on the node sees one object, nine comparisons, nine movements.
-    // That difference is the whole reason `objectAddress` exists, and this is the test for it.
+    // address each frame. So here the *same object* is given a *different* block source on
+    // every assembly, exactly as the title does, and the pose moves between them. A locator
+    // that keys on the block source sees ten sightings of ten different objects and no
+    // comparisons at all; a locator that keys on the node sees one object, nine comparisons,
+    // nine movements. That difference is the whole reason `objectAddress` exists, and this is
+    // the test for it.
     {
         ObjectPoseLocator locator;
         for (int seen = 0; seen < 10; seen++) {
             std::vector<float> words(64, 0.0f);
             putPose(words, 16, 0.1f * static_cast<float>(seen));
-            // A new address every assembly, as the title produces: the same object, re-uploaded.
+            // A new address every assembly, as the title produces: the same object,
+            // re-uploaded.
             locator.onAssemblyRecorded(assembly(
                 words, {0x3e000000u + static_cast<uint32_t>(seen) * 0x1000u}, 0x43e01000u));
         }
@@ -529,23 +531,24 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
                       "and with no assemblies at all both believed offsets are null, not zero");
     }
     {
-        // **A value every object shares is a global, and a value each object has is not.** This is
-        // the question the blend turns on: a camera's view matrix is written once a frame and read
-        // by every shader, so two objects hold the *same* twelve floats at the same offset, while a
-        // static prop's world matrix is that object's own and two objects hold different ones. The
-        // share of assemblies an offset appears in cannot tell those apart -- a quarter of the
-        // frame's draws being objects fits a per-object pose exactly as well as it fits a global --
-        // so the discriminator is the value, compared across identities.
+        // **A value every object shares is a global, and a value each object has is not.** This
+        // is the question the blend turns on: a camera's view matrix is written once a frame
+        // and read by every shader, so two objects hold the *same* twelve floats at the same
+        // offset, while a static prop's world matrix is that object's own and two objects hold
+        // different ones. The share of assemblies an offset appears in cannot tell those apart
+        // -- a quarter of the frame's draws being objects fits a per-object pose exactly as
+        // well as it fits a global -- so the discriminator is the value, compared across
+        // identities.
         //
-        // Both halves in one place, because a test with only the agreeing case would pass against
-        // a counter that never counted.
-        // **A frame's worth of objects sharing one value, and that value advancing per frame** --
-        // which is the shape of a camera's view matrix and the only shape the question can be asked
-        // of. A single frame of six identical assemblies cannot tell a global from a per-object
-        // value, because there is nothing for the value to differ from; and the first version of
-        // this fixture was exactly that, and passed with the instrument's retained value never
-        // advancing. **A test that cannot fail is not a test**, and this one had a mutation in it
-        // that nothing noticed.
+        // Both halves in one place, because a test with only the agreeing case would pass
+        // against a counter that never counted.
+        // **A frame's worth of objects sharing one value, and that value advancing per frame**
+        // -- which is the shape of a camera's view matrix and the only shape the question can
+        // be asked of. A single frame of six identical assemblies cannot tell a global from a
+        // per-object value, because there is nothing for the value to differ from; and the
+        // first version of this fixture was exactly that, and passed with the instrument's
+        // retained value never advancing. **A test that cannot fail is not a test**, and this
+        // one had a mutation in it that nothing noticed.
         auto globalFrame = [](uint32_t object, float spin) {
             std::vector<float> words(64, 0.0f);
             putPose(words, 8, spin);
@@ -580,8 +583,9 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
             ObjectPoseLocator locator;
             for (int frame = 0; frame < 3; frame++) {
                 for (uint32_t object = 1; object <= 6; object++) {
-                    // The same twelve floats for every object in a frame, and a different set each
-                    // frame: shared across objects, moving over time, which is the whole of it.
+                    // The same twelve floats for every object in a frame, and a different set
+                    // each frame: shared across objects, moving over time, which is the whole
+                    // of it.
                     locator.onAssemblyRecorded(
                         globalFrame(object, 0.61f + 0.2f * static_cast<float>(frame)));
                 }
@@ -590,19 +594,19 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
             const std::string counts =
                 countsFor(body, offsetBytes, "otherIdentities", "otherIdentitiesSameValue",
                           "otherIdentitiesDifferentValue");
-            // **The offset the test wrote is the offset the report carries, found by its offset and
-            // not by its position.** The table is ordered by how many assemblies held each offset,
-            // so a test that read the first entry would be testing its own luck rather than the
-            // locator. `countsFor` returns empty when no entry sits at that offset, and every
-            // assertion below reads through it, so this is the check that they are about the right
-            // one rather than about a mixture of offsets.
+            // **The offset the test wrote is the offset the report carries, found by its offset
+            // and not by its position.** The table is ordered by how many assemblies held each
+            // offset, so a test that read the first entry would be testing its own luck rather
+            // than the locator. `countsFor` returns empty when no entry sits at that offset,
+            // and every assertion below reads through it, so this is the check that they are
+            // about the right one rather than about a mixture of offsets.
             check::isTrue(mentions(counts, "otherIdentities="),
                           "and the report carries an entry at the offset the test wrote to: " +
                               counts);
             // **Five, not fifteen**: six distinct objects over three frames, and a repeat of an
-            // object is not a new object -- so five comparisons, all agreeing. The three frames are
-            // what make the value move; the six objects are what make it shared, and it is the
-            // sharing the question is about.
+            // object is not a new object -- so five comparisons, all agreeing. The three frames
+            // are what make the value move; the six objects are what make it shared, and it is
+            // the sharing the question is about.
             check::isTrue(mentions(counts, "otherIdentities=5") &&
                               mentions(counts, "otherIdentitiesSameValue=5") &&
                               mentions(counts, "otherIdentitiesDifferentValue=0"),
@@ -629,8 +633,9 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
             const std::string counts =
                 countsFor(body, offsetBytes, "otherIdentities", "otherIdentitiesSameValue",
                           "otherIdentitiesDifferentValue");
-            // Fifteen, not five: the frame loop makes eighteen distinct objects and the identity
-            // sample is capped at sixteen, so fifteen comparisons is every one the cap allows.
+            // Fifteen, not five: the frame loop makes eighteen distinct objects and the
+            // identity sample is capped at sixteen, so fifteen comparisons is every one the cap
+            // allows.
             // **And the cap is reported**, so "compared against fifteen of eighteen" is visible
             // rather than reading as "compared against all of them".
             check::isTrue(mentions(counts, "otherIdentities=15") &&
@@ -646,10 +651,11 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
         }
         {
             // **The distinct-identity count is a measurement.** It was `= 1` on the candidate's
-            // first appearance and never touched again, so every run reported `identities: 1` at
-            // every offset and a reader sorting offsets by it sorted them by nothing. A field that
-            // is a constant cannot be told from a field that is telling the truth by reading it --
-            // only by looking at two offsets in the same report and seeing whether they differ.
+            // first appearance and never touched again, so every run reported `identities: 1`
+            // at every offset and a reader sorting offsets by it sorted them by nothing. A
+            // field that is a constant cannot be told from a field that is telling the truth by
+            // reading it -- only by looking at two offsets in the same report and seeing
+            // whether they differ.
             auto twoObjects = [](uint32_t object, float spin) {
                 std::vector<float> words(64, 0.0f);
                 putPose(words, 8, spin);
@@ -664,9 +670,10 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
             const std::string marker = "\"offset\":" + std::to_string(8 * sizeof(float));
             const size_t at = body.find(marker);
             check::isTrue(at != std::string::npos, "the offset is in the report: " + body);
-            // The entry is read up to the next offset's marker rather than to a brace: the report
-            // nests, and a window closed on the wrong brace reads a field that is not there as one
-            // that is absent -- which is a different failure with the same symptom.
+            // The entry is read up to the next offset's marker rather than to a brace: the
+            // report nests, and a window closed on the wrong brace reads a field that is not
+            // there as one that is absent -- which is a different failure with the same
+            // symptom.
             const size_t next = body.find("\"offset\":", at + 1);
             const std::string entry =
                 body.substr(at, (next == std::string::npos ? body.size() : next) - at);
@@ -677,17 +684,17 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
                               entry);
         }
         {
-            // **The case that tells "compared against the last value" from "compared against the
-            // first".** Three objects in a row holding A, B, B. Compared against the value just
-            // seen, the second differs and the third agrees -- one difference and one agreement.
-            // Compared against the first value ever, both differ, and the answer is a different
-            // count of the same data.
+            // **The case that tells "compared against the last value" from "compared against
+            // the first".** Three objects in a row holding A, B, B. Compared against the value
+            // just seen, the second differs and the third agrees -- one difference and one
+            // agreement. Compared against the first value ever, both differ, and the answer is
+            // a different count of the same data.
             //
-            // **This is the only fixture that can tell them apart**, and the two above cannot: they
-            // compare every object against a value that is either always equal or never equal, so
-            // advancing the retained value or not gives the same number either way. A mutation that
-            // stopped the retained value advancing passed both of them, which is how this one was
-            // found.
+            // **This is the only fixture that can tell them apart**, and the two above cannot:
+            // they compare every object against a value that is either always equal or never
+            // equal, so advancing the retained value or not gives the same number either way. A
+            // mutation that stopped the retained value advancing passed both of them, which is
+            // how this one was found.
             ObjectPoseLocator locator;
             locator.onAssemblyRecorded(globalFrame(1, 0.31f)); // A
             locator.onAssemblyRecorded(globalFrame(2, 0.52f)); // B, differs from A
@@ -705,9 +712,9 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
                               counts);
         }
         {
-            // **A repeat of one object is not a second object.** Without this, a per-object pose
-            // would be counted as differing from itself on every frame after the first, and the
-            // "different" column would be a frame count wearing a disguise.
+            // **A repeat of one object is not a second object.** Without this, a per-object
+            // pose would be counted as differing from itself on every frame after the first,
+            // and the "different" column would be a frame count wearing a disguise.
             ObjectPoseLocator locator;
             for (int repeat = 0; repeat < 20; repeat++) {
                 locator.onAssemblyRecorded(perObjectValue(1));

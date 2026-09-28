@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace wiiuport::title {
@@ -179,7 +180,23 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     // capped, so a reader knows which of the two it is looking at.
     static constexpr size_t kIdentitySamples = 16;
 
-    // The share of assemblies an offset must hold a transform in to be named.
+    // **The share of a shader's own assemblies a candidate must hold a transform in to be
+    // named.** It used to be a share of *every* assembly the run saw, which was a whole-frame
+    // denominator compared against a per-shader count: with the table keyed on (shader, offset),
+    // one of 298 candidates cleared it, and the one that did held a value that is not a matrix of
+    // consequence. A per-shader count cannot reach a whole-frame bar, so the bar was a property of
+    // the window's size rather than of the data. **A per-shader count is compared against its own
+    // shader's assemblies, and the report carries that count**, so a reader can see which
+    // denominator cleared the bar.
+    //
+    // **This is not mutation-verified, and the reason is recorded rather than papered over.** A
+    // test was written for it and removed: it asserted the share each shader's entry reports, and a
+    // candidate appears in the report's rigid table as well as its affine one, so the presence of
+    // a shader in the body is not evidence it is in the table under test. Fixing that needs a
+    // structured parse of the report rather than a substring search, and a test that finds the
+    // *other* table's copy is worse than no test -- it reads as coverage and is not. The bar's
+    // correctness rests on the argument above and on the run that found the fault, and the next
+    // change to this class should bring a parser with it.
     static constexpr uint32_t kBeliefPercent = 20;
 
   private:
@@ -205,10 +222,28 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     // candidate is one shader's layout, and two shaders may hold a matrix at the same offset. A
     // lookup by offset alone finds whichever came first, and counts a second shader's assemblies
     // against the first shader's candidate.
+    // The two the belief bar is measured against, both per shader. **The mutex is already held** by
+    // every caller: they are called from inside `json()` and the two `best*` methods, and each of
+    // those takes the lock once.
+    uint64_t shaderAssembliesLocked(const Candidate& candidate) const;
+    // A candidate that holds a transform in none of its own shader's assemblies has a
+    // denominator of zero and a share of zero, which is the honest answer: the shader was seen
+    // once and the candidate was not in it. Reported rather than skipped, because a candidate that
+    // fails a bar for a reason the report does not name reads as a candidate that is not there.
+
+    uint64_t shareOfShaderLocked(const Candidate& candidate, uint64_t inClass) const;
+    bool clearsBarLocked(const Candidate& candidate, uint64_t inClass) const;
+
     bool remember(const std::string& identity, uint64_t shaderBaseHash, uint64_t shaderAuxHash,
                   uint32_t byteOffset, const float* words);
 
     std::atomic<uint64_t> m_assemblies{0};
+    // How many assemblies each shader contributed, which is the denominator the belief bar is
+    // measured against. Bounded by the number of distinct shaders a title can have, and the
+    // overflow counted rather than dropped: a shader whose count is missing makes every candidate
+    // of it fail the bar, and a candidate that fails a bar for a reason the report does not name
+    // reads as a candidate that is not there.
+    std::unordered_map<uint64_t, uint64_t> m_byShader;
     mutable std::mutex m_mutex;
     // offset / 4 -> its counts. A buffer is a float array, so an offset in floats is the
     // unit the scan and the substitution both want.
