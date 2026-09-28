@@ -434,10 +434,47 @@ test now compares the guest address, which is the only form that can hit, and th
 pass whether the comparison was across spaces or within one. **The test is shown its other answer:
 5 of 837 checks fail with the comparison broken, 0 with it in place.**
 
-**Measured on the title, this is not yet done.** The fork change is pinned at `7980661` and the first
-run against it is the next measurement, so "the record word is the address" is fixed in the code and
-unmeasured on the title, and every downstream statement that rested on "no word at all" is suspended
-rather than withdrawn. The arithmetic that produced it was sound; its input was in the wrong space.
+### Measured on the title: the test fires, and it cannot yet name the word
+
+One driven run, gameplay reached, the camera moving, 1,685,585 assemblies and 1,106,045 bindings
+(`GET /blocks`, the `blockAddress` section; the raw report is kept beside the harness):
+
+```
+bindings 1106045, records held 2553, evicted 0
+assemblies 1685585, of which with a record 1552183 (92.1%)
+addresses 4456584, distinct 4028, refused 0
+size words 4456584, slots the guest wrote 1121588, distinct written addresses 3409
+expected size 768; the leading written guest address 0x47eee100, seen 390161 times
+wordHits: word 1 (offset 4)  229631 hits, share 0.1479
+          word 2 (offset 8)  229631 hits, share 0.1479
+          no other word hit at all
+addressWord: null, refused "severalWordsReadSoNoneIsDistinguished"
+bestWordShare 0.1479 against a bar of 0.5
+```
+
+**So the test fires: from no word at all to 229,631 hits.** The comparison was the fault and the
+comparison is fixed. Three things are still true of the answer, and none of them is the code's fault:
+
+1. **Two words tie exactly** -- 229,631 each, to the hit -- so the route refuses to name one. And
+   looking at a record explains why: `words: [0x3e634210, 0x3e634300, 0x3e634300, 0x40, 0x40, ...]`.
+   **Words 1 and 2 hold the same value**, so a value comparison cannot separate them by anything.
+   Words 3 and 4 are both the size. The record repeats itself, and the two repeats are equally the
+   address. Naming one of them would be a coin toss with a number attached.
+2. **14.8% is a share, not a hit rate.** A record is held per object (2,553 held) and compared
+   against every draw that names that object, while a draw usually sources a block some *other*
+   object bound -- the sea's per-frame blocks, a pass's shared values. So the share says how often
+   the block a draw sources is the one this object bound, and it is not a measure of the address
+   being wrong.
+3. **The block is 768 bytes, not 64.** `expectedSize: 768` is the record's own size word, and a
+   768-byte block holds a 3x4 with room to spare -- which is the answer to the arithmetic slip this
+   document once repeated, that "a 64-byte block cannot hold twelve floats". Twelve floats are 48
+   bytes, 48 <= 64, and 64 is exactly one 4x4.
+
+**What this unblocks, precisely.** The write location is a *range* and the title names it: the
+leading written guest address `0x47eee100` with the record's own size 768 gives `0x47eee100` to
+`0x47eee400`, and the leading address overall is `0x47ef6c00`. The next measurement is a scan of
+those ranges for a transform-shaped twelve-word window that moves between two frames a frame apart
+-- a range, not a search, and not a guess about where the title keeps things.
 
 ### What the next read is: a range, not a search
 

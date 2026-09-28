@@ -226,7 +226,7 @@ std::string ControlChannel::countersJson() const {
     body += ",\"capturesRequested\":" + std::to_string(m_capture.capturesRequested());
     body += ",\"capturesRefused\":" + std::to_string(m_capture.capturesRefused());
     body += ",\"imagesReceived\":" + std::to_string(m_capture.imagesReceived());
-    body += body += ",\"nestedListsSeen\":" + std::to_string(m_recorder.nestedListsSeen());
+    body += ",\"nestedListsSeen\":" + std::to_string(m_recorder.nestedListsSeen());
     body += ",\"guestDrawsFromCommandBuffers\":" +
             std::to_string(m_recorder.guestDrawsFromCommandBuffers());
     body += ",\"guestDrawsFromRing\":" + std::to_string(m_recorder.guestDrawsFromRing());

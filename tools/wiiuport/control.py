@@ -51,9 +51,6 @@ class Counters:
     lastFrameDisplayLists: int
     lastFrameUniformAssemblies: int
     lastFrameBytes: int
-    replaysRun: int
-    replayListsSubmitted: int
-    replayListsRefused: int
     inputPollsSeen: int
     inputPollsAnswered: int
     inputPressesQueued: int
@@ -62,13 +59,6 @@ class Counters:
     imagesReceived: int
     displayListsFromRuntime: int
     uniformAssembliesFromRuntime: int
-    presentsObserved: int
-    presentsObservedTv: int
-    presentsObservedDrc: int
-    presentsSubmitted: int
-    presentsRefusedUnobserved: int
-    presentsRefusedBySubmit: int
-    nullDiffsCompleted: int
     nestedListsSeen: int
     guestDrawsFromCommandBuffers: int
     guestDrawsFromRing: int
@@ -77,46 +67,27 @@ class Counters:
     runtimeSubmissions: int
     runtimePacketsProcessed: int
     runtimeDrawsIssued: int
-    interpolatedFramesArmed: int
-    interpolatedFramesRefused: int
-    assembliesOffered: int
-    assembliesSubstituted: int
-    assembliesUnarmed: int
-    assembliesUnknownShader: int
-    assembliesTooShort: int
 
     @property
     def recorded_anything(self) -> bool:
         return self.framesObserved > 0 and self.displayListsSeen > 0
 
     def render(self) -> str:
+        # **The counters the retired mechanism reported are gone, and so are their sentences.** The
+        # replay's lists, the runtime's own submissions, the presents it drove, the null diffs and
+        # the substituted assemblies all belonged to a host that re-issued a recorded frame. What
+        # is left is the title's own draw stream, and the numbers here are all about that.
         return (
             f"frames {self.framesObserved} (refused incomplete "
             f"{self.framesRefusedIncomplete}), display lists {self.displayListsSeen}, "
-            f"uniform assemblies {self.uniformAssembliesSeen} (of which the runtime's own "
-            f"replays: {self.displayListsFromRuntime} lists, "
-            f"{self.uniformAssembliesFromRuntime} assemblies); last frame held "
+            f"uniform assemblies {self.uniformAssembliesSeen}; last frame held "
             f"{self.lastFrameDisplayLists} lists and "
             f"{self.lastFrameUniformAssemblies} assemblies in {self.lastFrameBytes} bytes; "
             f"nested lists {self.nestedListsSeen}; the title drew "
             f"{self.guestDrawsFromCommandBuffers} times from command buffers and "
-            f"{self.guestDrawsFromRing} straight from the ring, "
-            f"{self.guestDrawsWithoutVertexUniforms} of {self.guestDrawsPrepared} drawn "
-            "with no vertex uniforms, which no blend moves; "
-            f"replays {self.replaysRun} submitting {self.replayListsSubmitted} lists "
-            f"({self.replayListsRefused} refused) in {self.runtimeSubmissions} submissions "
-            f"the command processor walked {self.runtimePacketsProcessed} packets of, "
-            f"issuing {self.runtimeDrawsIssued} draws; presents observed "
-            f"{self.presentsObserved} ({self.presentsObservedTv} TV, "
-            f"{self.presentsObservedDrc} GamePad), submitted {self.presentsSubmitted} "
-            f"({self.presentsRefusedUnobserved} with nothing to send, "
-            f"{self.presentsRefusedBySubmit} refused); null diffs "
-            f"{self.nullDiffsCompleted}; interpolated frames "
-            f"{self.interpolatedFramesArmed} armed ({self.interpolatedFramesRefused} refused) "
-            f"substituting the view into {self.assembliesSubstituted} of "
-            f"{self.assembliesOffered} replayed assemblies ({self.assembliesUnarmed} with "
-            f"nothing armed, {self.assembliesUnknownShader} not carrying it, "
-            f"{self.assembliesTooShort} too short)"
+            f"{self.guestDrawsFromRing} straight from the ring; "
+            f"{self.guestDrawsWithoutVertexUniforms} of {self.guestDrawsPrepared} draws prepared "
+            "with no vertex uniforms"
         )
 
 
@@ -312,8 +283,6 @@ class Substitution:
 
     armed: bool
     blendPoint: float
-    assembliesOffered: int
-    assembliesSubstituted: int
     slots: tuple[OfferedShader, ...]
     offered: tuple[OfferedShader, ...]
 

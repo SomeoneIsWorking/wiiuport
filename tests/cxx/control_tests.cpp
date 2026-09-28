@@ -8,6 +8,7 @@
 
 #include <array>
 #include <string>
+#include <utility>
 #include <vector>
 
 using wiiuport::control::ControlChannel;
@@ -57,8 +58,6 @@ uint32_t noPacing() {
 const void* noGuestBytes(uint32_t /*address*/, uint32_t /*size*/) {
     return nullptr;
 }
-
-
 
 // The clock the channel's pacing and frame gate are constructed with. It was the retired
 // interpolator's clock first; it is kept here as a seam rather than replaced, because the channel
@@ -282,6 +281,118 @@ void aMemoryReadNamesItsRangeAndIsBounded() {
 // that is a different answer, told apart by the refusal's own text rather than
 // by its status, because a legitimate 404 (a range that is not guest memory) is
 // not a missing route.
+// **A report that does not parse is not a report, and nothing else here would notice.** A doubled
+// `body += body +=` in `countersJson` wrote the whole object twice into itself, so `/counters`
+// answered a body that began validly and then restarted: every client refused it, and every
+// refusal read as "the channel never opened" rather than as a body that is not JSON. The route
+// table test cannot see it -- a route can be served and still answer nonsense -- and a test that
+// counts field names cannot either, because the doubled body names every field once and then
+// again. So the body is parsed here, by the same shape a client parses it with.
+namespace {
+
+// Braces and brackets balanced, in string literals and escapes ignored, and the body a single JSON
+// value rather than a value followed by another. Deliberately small: it answers "is this one
+// document", which is the question the doubling asked, and a full parser here would be a second
+// implementation of a rule the client already owns.
+bool oneJsonDocument(const std::string& body) {
+    int depth = 0;
+    bool inString = false;
+    bool escaped = false;
+    size_t seen = 0;
+    for (const char character : body) {
+        ++seen;
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (character == '\\') {
+                escaped = true;
+            } else if (character == '"') {
+                inString = false;
+            }
+            continue;
+        }
+        if (character == '"') {
+            inString = true;
+        } else if (character == '{' || character == '[') {
+            ++depth;
+        } else if (character == '}' || character == ']') {
+            --depth;
+            if (depth == 0) {
+                // The document ends here; anything but whitespace after it is a second value.
+                for (size_t rest = seen; rest < body.size(); ++rest) {
+                    const char trailing = body[rest];
+                    if (trailing != ' ' && trailing != '\n' && trailing != '\r' &&
+                        trailing != '\t') {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+std::string eachReport(Fixture& fixture) {
+    std::string all;
+    for (const char* path : {"/counters", "/paint", "/logic", "/gate", "/recordings", "/draws",
+                             "/pacing", "/memory", "/callers", "/blocks"}) {
+        lucent::http::Request read;
+        read.method = "GET";
+        read.target = path;
+        auto answer = fixture.channel.dispatch(read);
+        if (answer.status == 200) {
+            all += answer.body;
+        }
+    }
+    return all;
+}
+
+} // namespace
+
+// **The negative first.** A body that is one document twice, and one that is truncated, are both
+// refused -- and so is a body that is not a document at all. A check that only ever sees a good
+// body has not been shown it can fail.
+void aReportThatIsNotOneDocumentIsRecognisedAsSuch() {
+    check::isTrue(oneJsonDocument("{\"a\":1}"), "one object is one document");
+    check::isTrue(oneJsonDocument("{\"a\":\"}\"}"), "a brace inside a string does not close it");
+    check::isTrue(oneJsonDocument("{\"a\":\"\\\\\"}"), "an escaped quote does not open a string");
+    check::isTrue(oneJsonDocument("{\"a\":[1,{\"b\":2}]}  \n"),
+                  "trailing whitespace is still one document");
+    check::isTrue(!oneJsonDocument("{\"a\":1}{\"a\":1}"),
+                  "the same object twice is two documents, and is what a doubled append writes");
+    check::isTrue(!oneJsonDocument("{\"a\":1"), "a truncated body is not a document");
+    check::isTrue(!oneJsonDocument("not json at all"), "prose is not a document");
+    check::isTrue(!oneJsonDocument(""), "nothing is not a document");
+}
+
+// And the real thing: every report the channel serves, parsed.
+void everyReportIsOneJsonDocument() {
+    Fixture fixture;
+    fixture.recorder.OnDisplayList(LatteFrameHooks::DisplayList{0, nullptr, 0});
+    fixture.recorder.OnFrameComplete();
+    // Each report with the method it answers under: `/pacing` restarts the pacing, so it is a POST
+    // and asking it under GET is a refusal about a method rather than about the body.
+    for (const auto& [method, path] :
+         std::vector<std::pair<std::string, std::string>>{{"GET", "/counters"},
+                                                          {"GET", "/paint"},
+                                                          {"GET", "/logic"},
+                                                          {"GET", "/gate"},
+                                                          {"GET", "/blocks"},
+                                                          {"POST", "/pacing"}}) {
+        lucent::http::Request read;
+        read.method = method;
+        read.target = path;
+        auto answer = fixture.channel.dispatch(read);
+        check::isTrue(answer.status == 200, method + " " + path + " answers");
+        check::isTrue(oneJsonDocument(answer.body),
+                      std::string(path) +
+                          " answers one JSON document, not a body with a second "
+                          "one inside it: " +
+                          answer.body.substr(0, 60));
+    }
+}
+
 void everyAdvertisedRouteIsReachableByItsOwnMethod() {
     Fixture fixture;
     const std::string list{ControlChannel::routeList()};
@@ -403,6 +514,8 @@ namespace wiiuport::tests {
 
 void runControlTests() {
     anIdleRuntimeReportsZerosRatherThanNothing();
+    aReportThatIsNotOneDocumentIsRecognisedAsSuch();
+    everyReportIsOneJsonDocument();
     theCountersFollowTheRecorder();
     aChannelWithNoSetupScreenSaysSoRatherThanReportingAClosedOne();
     aShownSetupScreenReportsWhatItIsWaitingFor();
