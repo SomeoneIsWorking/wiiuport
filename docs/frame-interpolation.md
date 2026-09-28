@@ -1583,6 +1583,67 @@ uniform block at offset 60, not the node's own field.** Which node field holds t
 answered *negatively* with denominators, and the pose is located in the draw's uniforms with the node
 as its identity -- which is the chain the objective named.
 
+### Condition 5's seven named items are one mechanism, and the compiler says so
+
+The guest path is proven -- 59.99 paints a second with the logic held at 30.00 by the gate -- so
+condition 5 is no longer gated and the deletion can start. It was attempted, and the first thing the
+attempt established is that **the seven named items are not seven things.**
+
+`interp/TransformSearch.h` was deleted with `SearchFeed`, `ViewTracker`, `TransformSubstitution` and
+`FrameInterpolator`, and the build's first error was not in the runtime or the channel:
+
+```
+interp/SharedTransforms.h:3:10: fatal error: 'wiiuport/interp/TransformSearch.h' file not found
+interp/AssemblyKey.h:4:10:      fatal error: 'wiiuport/interp/TransformSearch.h' file not found
+```
+
+**Both of those are named in condition 5 as well.** Walking the include closure of the five deleted
+units gives **30 first-party files**, and every one of the seven named items is in it:
+
+| named item | where it sits |
+|---|---|
+| `TransformSearch` | the root of the closure |
+| `AssemblyKey` | includes `TransformSearch.h` |
+| `ObjectPlanner` | reached through `AssemblyKey` |
+| `VertexBlend` | includes the same search types |
+| `CutDetector` | only `ContinuousInterpolator` uses it |
+| `NeighbourCheck` | only `ContinuousInterpolator` uses it |
+| `GuestStateGuard` | only `ContinuousInterpolator` uses it |
+
+and the other ten are `ObjectCensus`, `KeyedFrame`, `ObjectBlend`, `PlanReplay`, `ReplayBlend`,
+`SharedTransforms`, `FrameInterpolator`, `TransformSubstitution`, `ViewTracker` and `SearchFeed`.
+
+**So there is no independent slice: every named item is interior to the mechanism, and deleting any
+one of them alone breaks the build.** The attempt was reverted rather than landed half-applied, because
+a tree that does not compile is worse than a tree that still carries a mechanism the document says is
+being retired.
+
+**And the mechanism's own words are in the objective's first two sentences, not spread across seven
+places.** `FrameInterpolator`'s class comment is the whole of it in three clauses:
+
+> It is the only place that knows an interpolated frame is three things at once: **the view the search
+> found**, **a blend of that view's last two values**, and **a replay of the last frame's geometry
+> drawn with it**.
+
+which is "identifies the camera by searching shaders for a 3x4 that moves like one", "a blend", and
+"re-issues a recorded frame" -- the objective's own three complaints, in the order it makes them.
+`SharedTransforms` is the middle clause again from the other side: it learns the change the camera
+makes to a shader's own 4x4 from the draws that were blended, which is the statistical lerp stated as
+a recovery for objects that could not be blended.
+
+**What the next pass has to determine, and what this turn did not.** Include-reachability is an upper
+bound, not a boundary: a file that includes `TransformSearch.h` for one shared type is not thereby part
+of the mechanism, and the pass has to say what each of the 30 files *is* rather than what it includes.
+The likely boundary is the twenty-odd files above plus the three routes `/transforms`, `/substitution`
+and `/frames`, the `viewFramesTracked` / `viewFramesLost` / `viewReseedsRun` / `viewReseedsFound`
+counter fields, the Python side (`tools/continuous_run.py`, `tools/wiiuport/neighbour_check.py`,
+`transform_substitution` in the client) and the test files. **And the consequence has to be stated
+plainly rather than discovered later: until the blend of conditions 2 and 3 is built, this leaves the
+product with the guest path presenting at sixty and no host-side interpolation at all.** That is what
+"delete rather than leaving both" asks for, and the reason it asks for it is in the runtime's own
+comment on its environment: a one-shot replay or interpolated frame "would otherwise compete with it
+for every boundary". The two mechanisms cannot both own the frame boundary, so they cannot both stand.
+
 ### Is the pose at offset 60 a global or a per-object value? Measured: per-object, and that
 ### closes the per-object chain for a camera move
 
