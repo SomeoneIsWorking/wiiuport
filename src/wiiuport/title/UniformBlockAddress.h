@@ -56,11 +56,16 @@ class UniformBlockAddress {
     // route is getting what it needs, because a route fed nothing reports nothing and looks idle.
     uint32_t expectedSize() const;
 
-    // The draw's real block addresses, as `(bufferId, physicalAddress)` pairs, with the object the
-    // draw is in the middle of. Called on the assembly, so the pair is the record of *that* object.
-    // `blockSizes` is word 1 of the same slots -- `size - 1` as the guest wrote it -- and is what
-    // says the guest wrote the slot at all.
+    // The draw's real block addresses, with the object the draw is in the middle of. Called on the
+    // assembly, so the pair is the record of *that* object.
+    //
+    // **`blockSources` is `(bufferId, physicalAddress)` pairs and `blockGuestAddresses` is the
+    // guest address for the same slots, and only the second can be compared against a record
+    // word.** The register holds `memory_virtualToPhysical` of the address the title passed, and
+    // the record names its block by the address it passed. `blockSizes` is word 1 of the same slots
+    // -- `size - 1` as the guest wrote it -- and is what says the guest wrote the slot at all.
     void observe(uint32_t object, const std::vector<uint32_t>& blockSources,
+                 const std::vector<uint32_t>& blockGuestAddresses,
                  const std::vector<uint32_t>& blockSizes);
 
     std::string json() const;

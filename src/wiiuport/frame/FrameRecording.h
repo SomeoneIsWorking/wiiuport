@@ -41,20 +41,33 @@ struct RecordedUniformAssembly {
     // Whether the stage compares against a depth texture: it looks up a map,
     // such as the light's, that the frame drew before it.
     bool looksUpDepthMap{false};
+    // **The guest address the title passed for the same slots, one per pair.** The fork's
+    // `blockAddresses` is what the register holds, which is `memory_virtualToPhysical` of this,
+    // and the title's own descriptor record names its block by the address it passed to
+    // `GX2Set*UniformBlock`. A record word and a register word are two addresses for one block in
+    // two different address spaces, and comparing them is how a membership test that should have
+    // hit in every draw reported no word at all. This vector is what a record word is compared
+    // against, and it is also the only form of the address a block's bytes are readable and
+    // writable at.
+    std::vector<uint32_t> blockGuestAddresses;
     // Word 0 of the uniform-block register banks this draw's *shader* names, as
     // (bufferId, value) pairs.
     //
-    // **Measured not to be the block this draw sourced, and not an identity.** This was
-    // documented here as "the engine's own storage for the object, and the only identity a
-    // recorded draw carries". Two measurements killed both halves. Over 836,990 assembled
-    // buffers it matched exactly one identity across the 438,872 that had sources. And the
-    // reader picks each bank by the shader's own group while the guest writes each bank by the
-    // index it passes to `GX2Set*UniformBlock`, so the value is whatever last wrote that
-    // register slot: 1,555 distinct values over 382,575 sourced addresses, none of which any
-    // word of the title's descriptor record matches over 142,682 exact per-object pairs.
+    // **Not an identity, and not to be compared with a descriptor record -- both halves stand, and
+    // the second for a different reason than it first appeared.**
     //
-    // Kept because it is a faithful reading of the register bank, and no longer called the
-    // block's address or an identity. See LatteFrameHooks.h.
+    // As an identity it is out: the reader picks each slot by the shader's own group while the
+    // title writes each slot by the index it passes to `GX2Set*UniformBlock`, and the 1,555
+    // distinct values over 382,575 sourced addresses are whatever last wrote each register slot.
+    // 1,555 values over 382,575 addresses is a register bank, not a set of objects.
+    //
+    // As an address it was withdrawn for a measurement that was sound and an input that was in
+    // the wrong address space: this vector is what the *register* holds, which is
+    // `memory_virtualToPhysical` of the address the title passed, and the title's descriptor
+    // record names its block by the guest address it passed. The two are different numbers for one
+    // block, and a record word compared against this one cannot hit however large the corpus.
+    // `blockGuestAddresses` beside it is the same block in the form a record word is comparable
+    // with, and the form its bytes are readable and writable at.
     std::vector<uint32_t> blockSources;
     // Word 1 of the same register slots -- `size - 1` as the guest wrote it, one word per pair in
     // `blockSources`. **The half that says the slot was written**: word 0 is whatever last held the

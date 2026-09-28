@@ -53,13 +53,9 @@ void UniformBlockAddress::publish(uint32_t object, std::span<const uint32_t> rec
     held->quoted.assign(record.begin(), record.end());
 }
 
-bool UniformBlockAddress::holdsAddress(const std::vector<uint32_t>& pairs, uint32_t value) {
-    for (size_t index = 1; index < pairs.size(); index += 2) {
-        if (pairs[index] == value) {
-            return true;
-        }
-    }
-    return false;
+bool UniformBlockAddress::holdsAddress(const std::vector<uint32_t>& guestAddresses,
+                                       uint32_t value) {
+    return std::find(guestAddresses.begin(), guestAddresses.end(), value) != guestAddresses.end();
 }
 
 void UniformBlockAddress::countKey(Candidate key) {
@@ -92,6 +88,7 @@ void UniformBlockAddress::countKey(Candidate key) {
 }
 
 void UniformBlockAddress::observe(uint32_t object, const std::vector<uint32_t>& blockSources,
+                                  const std::vector<uint32_t>& blockGuestAddresses,
                                   const std::vector<uint32_t>& blockSizes) {
     m_assemblies.fetch_add(1, std::memory_order_relaxed);
     std::array<uint32_t, kMaxWords> record{};
@@ -102,20 +99,20 @@ void UniformBlockAddress::observe(uint32_t object, const std::vector<uint32_t>& 
             std::find_if(m_records.begin(), m_records.end(), [object](const Held& seen) {
                 return seen.object == object;
             });
-        if (held == m_records.end() || blockSources.size() < 2) {
+        if (held == m_records.end() || blockGuestAddresses.empty()) {
             return;
         }
         record = held->words;
         words = held->count;
     }
     m_assembliesWithARecord.fetch_add(1, std::memory_order_relaxed);
-    m_addressCount.fetch_add(blockSources.size() / 2, std::memory_order_relaxed);
+    m_addressCount.fetch_add(blockGuestAddresses.size(), std::memory_order_relaxed);
     m_wordComparisons.fetch_add(words, std::memory_order_relaxed);
     m_sizeWords.fetch_add(blockSizes.size(), std::memory_order_relaxed);
 
     std::scoped_lock lock(m_mutex);
-    for (size_t index = 1; index < blockSources.size(); index += 2) {
-        const uint32_t address = blockSources[index];
+    for (const uint32_t guest : blockGuestAddresses) {
+        const uint32_t address = guest;
         auto found = m_addresses.find(address);
         if (found == m_addresses.end()) {
             if (m_addresses.size() >= kMaxAddresses) {
@@ -135,7 +132,7 @@ void UniformBlockAddress::observe(uint32_t object, const std::vector<uint32_t>& 
         // of noise. The alternative -- a plain bounded map -- threw the whole tail away and could
         // not have named a base however real it was.
         for (size_t word = 0; word < words; word++) {
-            countKey({word, address - record[word]});
+            countKey({word, guest - record[word]});
         }
     }
     // The slots the guest wrote. Word 1 of a uniform block register is `size - 1` as the guest
@@ -150,8 +147,11 @@ void UniformBlockAddress::observe(uint32_t object, const std::vector<uint32_t>& 
             if (blockSizes[index] != wanted) {
                 continue;
             }
+            if (index >= blockGuestAddresses.size()) {
+                continue;
+            }
             m_writtenSlots++;
-            const uint32_t address = blockSources[2 * index + 1];
+            const uint32_t address = blockGuestAddresses[index];
             auto found = m_writtenAddresses.find(address);
             if (found == m_writtenAddresses.end()) {
                 if (m_writtenAddresses.size() >= kMaxAddresses) {
@@ -169,7 +169,7 @@ void UniformBlockAddress::observe(uint32_t object, const std::vector<uint32_t>& 
     // hits in a majority of the paired draws is the one carrying it and a word that hits
     // occasionally is a coincidence with a name on it.
     for (size_t word = 0; word < words; word++) {
-        if (holdsAddress(blockSources, record[word])) {
+        if (holdsAddress(blockGuestAddresses, record[word])) {
             m_wordHits[word]++;
         }
     }

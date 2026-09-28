@@ -32,6 +32,14 @@ std::span<const uint32_t> sourceWordsOf(const LatteFrameHooks::UniformAssembly& 
     return {assembly.blockAddresses, static_cast<size_t>(pairs) * 2};
 }
 
+std::span<const uint32_t> guestSourceWordsOf(const LatteFrameHooks::UniformAssembly& assembly) {
+    if (assembly.blockGuestAddresses == nullptr) {
+        return {};
+    }
+    uint32_t pairs = std::min(assembly.blockAddressCount, LatteFrameHooks::kMaxUniformBlockSources);
+    return {assembly.blockGuestAddresses, static_cast<size_t>(pairs)};
+}
+
 std::span<const uint32_t> sourceSizeWordsOf(const LatteFrameHooks::UniformAssembly& assembly) {
     if (assembly.blockSizes == nullptr) {
         return {};
@@ -67,12 +75,15 @@ void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly
     recorded.blockSources.assign(sources.begin(), sources.end());
     std::span<const uint32_t> sizes = sourceSizeWordsOf(assembly);
     recorded.blockSizes.assign(sizes.begin(), sizes.end());
+    auto guestAddresses = guestSourceWordsOf(assembly);
+    recorded.blockGuestAddresses.assign(guestAddresses.begin(), guestAddresses.end());
     // The same words, for the address measurement: `(bufferId, physicalAddress)` pairs, which
     // are the draw's real block addresses and the only ones the runtime has. Handed over here
     // because the observer is the one place that sees both the descriptor record and the draw
     // that followed it, in that order.
     if (m_blockAddress != nullptr) {
-        m_blockAddress->observe(recorded.objectAddress, recorded.blockSources, recorded.blockSizes);
+        m_blockAddress->observe(recorded.objectAddress, recorded.blockSources,
+                                recorded.blockGuestAddresses, recorded.blockSizes);
     }
     std::span<const float> values(assembly.data, assembly.sizeInBytes / sizeof(float));
     recorded.data.assign(values.begin(), values.end());
