@@ -167,6 +167,22 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
         return m_assemblies;
     }
 
+    // **Every candidate it found, as the structure**, so a consumer can be fed from what the
+    // measurement holds rather than by parsing this class's own rendered report. Bounded by the
+    // candidates the class keeps, and the count comes with it: a consumer fed a number with no
+    // count beside it cannot tell a small table from a truncated one.
+    struct Found {
+        uint64_t shaderBaseHash = 0;
+        uint64_t shaderAuxHash = 0;
+        uint32_t byteOffset = 0;
+        uint32_t otherObjects = 0;
+        uint32_t otherObjectsSame = 0;
+        uint64_t moved = 0;
+        uint64_t compared = 0;
+    };
+
+    std::vector<Found> found() const;
+
     // The offset the report believes, or 0 when no offset cleared the bar. Zero is a
     // real answer here: it means "no offset was a pose often enough to name", and the
     // report says which bar.

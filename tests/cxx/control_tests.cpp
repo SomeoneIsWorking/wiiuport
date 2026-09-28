@@ -6,6 +6,7 @@
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/input/InputDriver.h"
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <utility>
@@ -77,6 +78,8 @@ struct Fixture {
     wiiuport::guest::BufferWriters writers;
     wiiuport::guest::CallerCensus callers{&noRegistration};
     wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord, &noReadWords};
+    wiiuport::title::ObjectPoseLocator poses;
+    wiiuport::title::PoseByShader poseByShader;
     // The data-area scan, with readers that refuse: a channel built with readers that say no is how
     // every refusal in this file is exercised, and a scan wired with a reader that answers would
     // never reach the refusal it exists to report.
@@ -98,6 +101,8 @@ struct Fixture {
         .callers = callers,
         .paint = paint,
         .blocks = blocks,
+        .poses = poses,
+        .poseByShader = poseByShader,
         .globalPose = globalPose,
         .logic = logic,
         .guestBytes = &noGuestBytes,
@@ -398,7 +403,8 @@ void everyReportIsOneJsonDocument() {
                                                           {"GET", "/logic"},
                                                           {"GET", "/gate"},
                                                           {"GET", "/blocks"},
-                                                          {"POST", "/pacing"}}) {
+                                                          {"POST", "/pacing"},
+                                                          {"POST", "/pose"}}) {
         lucent::http::Request read;
         read.method = method;
         read.target = path;
@@ -412,10 +418,111 @@ void everyReportIsOneJsonDocument() {
     }
 }
 
+// **The pose table is fed by a POST and read by a GET, and neither mutates the other's answer.**
+// Two routes rather than one, because filling a table on a read is a mutation a reader of the
+// report would not expect, and a report that changes because it was read is a report a reader stops
+// trusting.
+void thePoseTableIsFedByAPostAndReadByAGet() {
+    Fixture fixture;
+
+    // **The census is given candidates first, because a table that starts empty cannot tell a read
+    // that fills from a read that does not.** With nothing to offer, a GET that fed the table would
+    // produce exactly the report a GET that did not would, and the assertions at the end of this
+    // test would pass either way -- a test that cannot fail is not coverage.
+    //
+    // The candidate is the title's measured per-object pose: twelve words at **offset 12 in shader
+    // `0x1557c18f92f3bcb9`**, read by no other object, moved in 21,730 of 21,879 comparisons. The
+    // twelve words are a 3x4 read as three rows of three and a translation, which is how
+    // `TransformShape` reads them, and the translation moves each round so the class records a
+    // movement -- the thing that separates a pose from a basis matrix.
+    for (int round = 0; round < 80; round++) {
+        wiiuport::frame::RecordedUniformAssembly assembly;
+        assembly.shaderBaseHash = 0x1557c18f92f3bcb9;
+        assembly.objectAddress = 0x027ff88c + static_cast<uint32_t>(round % 2) * 4;
+        // The block sources are the fallback identity, and they are two so the class has *another*
+        // object to compare against: the table refuses a candidate nothing was compared with, and a
+        // fixture with one object would be refused for that reason rather than for the one under
+        // test.
+        assembly.blockSources = {0x3e000000u + static_cast<uint32_t>(round % 2) * 4};
+        assembly.data.assign(24, 0.0f);
+        const float step = static_cast<float>(round) * 0.25f;
+        const float pose[wiiuport::title::PoseByShader::kWords] = {
+            1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, step, 0.0f, 0.0f};
+        for (size_t word = 0; word < wiiuport::title::PoseByShader::kWords; word++) {
+            assembly.data[3 + word] = pose[word];
+        }
+        fixture.poses.onAssemblyRecorded(assembly);
+    }
+
+    // Read first: the table is empty and says so with a denominator, rather than answering an empty
+    // object that reads as "there is nothing" instead of "nothing has been offered yet".
+    lucent::http::Request read;
+    read.method = "GET";
+    read.target = "/pose";
+    auto before = fixture.channel.dispatch(read);
+    check::isTrue(before.status == 200, "GET /pose answers");
+    check::isTrue(oneJsonDocument(before.body),
+                  "as one JSON document: " + before.body.substr(0, 60));
+    check::isTrue(contains(before.body, "\"shaders\":{}"),
+                  "with an empty table said as empty, not omitted: " + before.body.substr(0, 120));
+    check::isTrue(contains(before.body, "\"offered\":0"),
+                  "and with what it has been offered, which is zero and is written down: " +
+                      before.body.substr(0, 120));
+
+    // **The feed is accepted, offers the census's candidate, and takes it.** A feed
+    // that reported nothing would not say whether it had refused anything, and a
+    // refusal with no count is a refusal a caller cannot act on.
+    lucent::http::Request feed;
+    feed.method = "POST";
+    feed.target = "/pose";
+    auto fed = fixture.channel.dispatch(feed);
+    check::isTrue(fed.status == 200, "POST /pose answers");
+    check::isTrue(oneJsonDocument(fed.body), "as one JSON document too: " + fed.body.substr(0, 60));
+    check::isTrue(
+        contains(fed.body, "\"offeredLastFeed\":1"),
+        "reporting what that call offered, which is the one candidate the census found: " +
+            fed.body.substr(0, 200));
+    check::isTrue(contains(fed.body, "\"acceptedLastFeed\":1"),
+                  "and that it took it: " + fed.body.substr(0, 200));
+    check::isTrue(contains(fed.body, "\"0x1557c18f92f3bcb9\""),
+                  "and which shader it took it for, in hex like every other hash in a report: " +
+                      fed.body.substr(0, 240));
+
+    // **The read now differs from the one taken before the feed, by the feed and nothing else.**
+    auto after = fixture.channel.dispatch(read);
+    check::isTrue(after.body != before.body,
+                  "the read changes because the POST filled the table, so neither answer is a "
+                  "decoration of the other");
+    // And it is the *same* feed reported again. A GET that filled the table would reset the feed's
+    // counts to zero, and this is the check that tells the two apart.
+    check::isTrue(contains(after.body, "\"offeredLastFeed\":1"),
+                  "and a GET reports the last feed's own counts rather than resetting them, which "
+                  "is how it is known not to have filled it: " +
+                      after.body.substr(0, 200));
+    check::isTrue(contains(after.body, "\"0x1557c18f92f3bcb9\""),
+                  "and still holds the offset the feed gave it");
+}
+
 void everyAdvertisedRouteIsReachableByItsOwnMethod() {
     Fixture fixture;
     const std::string list{ControlChannel::routeList()};
     size_t advertised_count = 0;
+    // **The number of entries the list's own words carry, counted from them rather than written
+    // down.** A literal here fails when an unrelated route is added, and this guard has had that
+    // fault twice -- once when the retired mechanism took fifteen routes away and once when two
+    // were added -- and a guard that fails for an unrelated reason is a guard a reader learns to
+    // skip.
+    //
+    // Counted by hand rather than with `std::count` over a string, because a substring count is a
+    // second rule about what an entry is and the loop below is the one that parses them.
+    size_t served = 0;
+    for (size_t at = list.find("GET "); at != std::string::npos; at = list.find("GET ", at + 1)) {
+        ++served;
+    }
+    for (size_t at = list.find("POST "); at != std::string::npos; at = list.find("POST ", at + 1)) {
+        ++served;
+    }
+    // The routes the list advertises that no handler answered, named in the failure.
     std::vector<std::string> missing;
     std::string rest = list;
     while (!rest.empty()) {
@@ -468,9 +575,9 @@ void everyAdvertisedRouteIsReachableByItsOwnMethod() {
     // it, and a floor that was set against the larger list failed on the smaller one for a reason
     // that had nothing to do with the routes.
     check::isTrue(
-        advertised_count == 21,
+        advertised_count == served,
         "every route the channel serves is in the list, so this test reads all of them: " +
-            std::to_string(advertised_count) + " of 21");
+            std::to_string(advertised_count) + " of " + std::to_string(served));
     check::isTrue(
         missing.empty(), "every advertised route reaches a handler; these answer that they "
                          "do not exist: " +
@@ -543,6 +650,7 @@ void runControlTests() {
     aCensusTakesEntriesWithTheirFirstInstructionAndRefusesAnythingElse();
     anIdleCensusReportsNoEntriesRatherThanNothing();
     aMemoryReadNamesItsRangeAndIsBounded();
+    thePoseTableIsFedByAPostAndReadByAGet();
     everyAdvertisedRouteIsReachableByItsOwnMethod();
     aGetReportsAndDoesNotChangeAnything();
 }

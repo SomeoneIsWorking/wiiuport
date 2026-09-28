@@ -14,6 +14,7 @@ void runLogicGateTests();
 void runObjectPoseHistoryTests();
 void runGlobalPoseCensusTests();
 void runObjectPoseLocatorTests();
+void runPoseByShaderTests();
 void runNodePoseLocatorTests();
 void runJsonBodyTests();
 void runObjectIdentityScopeTests();

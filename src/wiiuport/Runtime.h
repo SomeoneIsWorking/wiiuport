@@ -22,6 +22,7 @@
 #include "wiiuport/title/NodePoseLocator.h"
 #include "wiiuport/title/ObjectIdentityScope.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
+#include "wiiuport/title/PoseByShader.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
@@ -96,6 +97,10 @@ class Runtime {
     // Where in an assembled uniform buffer the pose is, found by shape. Registered
     // before the blends so its counts are the same draws they see.
     title::ObjectPoseLocator m_poseLocator;
+    // Where a draw's pose is, in words, per shader -- fed from the locator's own candidates by
+    // `POST /pose` and read by a blend. It is here because the measurement that fills it is the
+    // locator's, and a table fed by anything else is a table of guesses.
+    title::PoseByShader m_poseByShader;
     // Which field of a node holds its pose. Registered first of the three, because it is
     // the one two measurements point at.
     title::NodePoseLocator m_nodePose{&GuestCallProbes::Register, &GuestPatching::ReadWords};
@@ -154,6 +159,8 @@ class Runtime {
         .callers = m_callers,
         .paint = m_paint,
         .blocks = m_blocks,
+        .poses = m_poseLocator,
+        .poseByShader = m_poseByShader,
         .globalPose = m_globalPose,
         .logic = m_logic,
         .guestBytes = &GuestCallProbes::GuestBytes,

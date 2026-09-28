@@ -78,6 +78,7 @@ add_library(wiiuport STATIC
   title/ObjectIdentityScope.cpp
   title/ObjectIdentityScope.h
   title/ObjectPoseLocator.cpp
+  title/PoseByShader.cpp
   title/ObjectPoseLocator.h
   title/GlobalPoseCensus.cpp
   title/GlobalPoseCensus.h
