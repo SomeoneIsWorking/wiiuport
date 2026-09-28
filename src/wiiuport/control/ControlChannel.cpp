@@ -21,19 +21,23 @@ namespace {
 // and no method reaches is a route that looks supported until a run needs it.
 // tests/cxx/control_tests.cpp asks every entry here for itself and fails on any
 // that comes back with the unknown-route refusal.
-const char* const kRoutes =
-    "GET /counters, GET /transforms, GET /capture, "
-    "GET /controllers, GET /setup, GET /substitution, GET /frames, GET /interpolation, "
-    "GET /recordings, GET /objects, GET /draws, GET /vertices, GET /memory, GET /callers, "
-    "POST /global-pose, "
-    "GET /paint, GET /blocks, GET /logic, POST "
-    "/replay, POST /capture, "
-    "POST /present, "
-    "POST /nulldiff, POST /interpolate, POST /continuous, POST /restorecheck, "
-    "POST /shadowcheck, "
-    "POST /neighbourcheck, POST /blends, POST /pacing, "
-    "POST /objects, POST /draws, POST /recordings, POST /paint, POST /logic, POST /input "
-    "and POST /quit";
+// **The routes the channel serves, and the list is the dispatch table's own.**
+//
+// The host-side frame interpolation is gone -- the camera search that found a 3x4 moving like a
+// camera, the statistical blend of the last two views, the object and vertex planning, the recorded
+// replay, the guest state guard, and the cut and neighbour checks -- and with it every route that
+// asked about it or drove it. What is left is what the product still is: the title's own draws
+// recorded and read back, the paint path, the logic gate, the data-area pose scan, and the input
+// and pacing an agent needs to drive a run.
+//
+// A route that keeps a name keeps an answer, so `/pacing` is still here and answers with the
+// pacing's own summary rather than with the interpolated frame's counts.
+const char* const kRoutes = "GET /counters, GET /capture, "
+                            "GET /controllers, GET /setup, "
+                            "GET /recordings, GET /draws, GET /memory, GET /callers, "
+                            "GET /paint, GET /blocks, GET /logic, GET /gate, POST /global-pose, "
+                            "POST /capture, POST /pacing, POST /draws, POST /recordings, "
+                            "POST /paint, POST /logic, POST /input and POST /quit";
 
 lucent::http::Response notFound() {
     return lucent::http::Response::text(
@@ -99,29 +103,6 @@ std::string floatText(float value) {
     return std::string(text.data(), static_cast<size_t>(written));
 }
 
-std::string transformJson(const interp::TransformCandidate& candidate) {
-    std::string body = "{";
-    body += "\"stageIndex\":" + std::to_string(candidate.shader.stageIndex);
-    body += ",\"baseHash\":" + std::to_string(candidate.shader.baseHash);
-    body += ",\"auxHash\":" + std::to_string(candidate.shader.auxHash);
-    body += ",\"floatOffset\":" + std::to_string(candidate.floatOffset);
-    body += ",\"framesSeen\":" + std::to_string(candidate.framesSeen);
-    body += ",\"shadersSharing\":" + std::to_string(candidate.shadersSharing);
-    body += ",\"rotationError\":" + floatText(candidate.rotationError);
-    body += ",\"meanTranslationStep\":" + floatText(candidate.meanTranslationStep);
-    body += ",\"values\":[";
-    auto first = true;
-    for (auto value : candidate.latest.values()) {
-        if (!first) {
-            body += ",";
-        }
-        first = false;
-        body += floatText(value);
-    }
-    body += "]}";
-    return body;
-}
-
 std::string_view shownStageName(LatteFrameHooks::ShownStage stage) {
     switch (stage) {
     case LatteFrameHooks::ShownStage::QueueDone:
@@ -164,18 +145,12 @@ std::string pacingJson(const frame::PresentPacing::Summary& pacing) {
 } // namespace
 
 ControlChannel::ControlChannel(const Sources& sources)
-    : m_recorder(sources.recorder), m_replayer(sources.replayer), m_search(sources.search),
-      m_input(sources.input), m_capture(sources.capture), m_presenter(sources.presenter),
-      m_scheduler(sources.scheduler), m_interpolator(sources.interpolator),
-      m_shapeLog(sources.shapeLog), m_viewTracker(sources.viewTracker),
-      m_continuous(sources.continuous), m_restoreCheck(sources.restoreCheck),
-      m_neighbourCheck(sources.neighbourCheck), m_objects(sources.objects),
-      m_vertices(sources.vertices), m_writers(sources.writers), m_callers(sources.callers),
+    : m_recorder(sources.recorder), m_input(sources.input), m_capture(sources.capture),
+      m_shapeLog(sources.shapeLog), m_writers(sources.writers), m_callers(sources.callers),
       m_paint(sources.paint), m_blocks(sources.blocks), m_logic(sources.logic),
       m_globalPose(sources.globalPose), m_guestBytes(sources.guestBytes),
       m_snapshot(sources.snapshot), m_pacing(sources.pacing), m_scanOut(sources.scanOut),
-      m_vertexChanges(sources.vertexChanges), m_gate(sources.gate),
-      m_shadowCheck(sources.shadowCheck) {
+      m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -245,26 +220,13 @@ std::string ControlChannel::countersJson() const {
     body += ",\"lastFrameDisplayLists\":" + std::to_string(last.displayLists().size());
     body += ",\"lastFrameUniformAssemblies\":" + std::to_string(last.uniformAssemblies().size());
     body += ",\"lastFrameBytes\":" + std::to_string(last.byteCount());
-    body += ",\"replaysRun\":" + std::to_string(m_replayer.replaysRun());
-    body += ",\"replayListsSubmitted\":" + std::to_string(m_replayer.listsSubmitted());
-    body += ",\"replayListsRefused\":" + std::to_string(m_replayer.listsRefused());
-    body += ",\"replayArmed\":" + std::string(m_replayer.isArmed() ? "true" : "false");
     body += ",\"inputPollsSeen\":" + std::to_string(m_input.pollsSeen());
     body += ",\"inputPollsAnswered\":" + std::to_string(m_input.pollsAnswered());
     body += ",\"inputPressesQueued\":" + std::to_string(m_input.pressesQueued());
     body += ",\"capturesRequested\":" + std::to_string(m_capture.capturesRequested());
     body += ",\"capturesRefused\":" + std::to_string(m_capture.capturesRefused());
     body += ",\"imagesReceived\":" + std::to_string(m_capture.imagesReceived());
-    body += ",\"presentsObserved\":" + std::to_string(m_presenter.presentsObserved());
-    body += ",\"presentsObservedTv\":" + std::to_string(m_presenter.presentsObservedTv());
-    body += ",\"presentsObservedDrc\":" + std::to_string(m_presenter.presentsObservedDrc());
-    body += ",\"presentsSubmitted\":" + std::to_string(m_presenter.presentsSubmitted());
-    body +=
-        ",\"presentsRefusedUnobserved\":" + std::to_string(m_presenter.presentsRefusedUnobserved());
-    body += ",\"nullDiffsCompleted\":" + std::to_string(m_scheduler.nullDiffsCompleted());
-    body += ",\"nullDiffPending\":" + std::string(m_scheduler.nullDiffPending() ? "true" : "false");
-    body += ",\"presentsRefusedBySubmit\":" + std::to_string(m_presenter.presentsRefusedBySubmit());
-    body += ",\"nestedListsSeen\":" + std::to_string(m_recorder.nestedListsSeen());
+    body += body += ",\"nestedListsSeen\":" + std::to_string(m_recorder.nestedListsSeen());
     body += ",\"guestDrawsFromCommandBuffers\":" +
             std::to_string(m_recorder.guestDrawsFromCommandBuffers());
     body += ",\"guestDrawsFromRing\":" + std::to_string(m_recorder.guestDrawsFromRing());
@@ -274,100 +236,15 @@ std::string ControlChannel::countersJson() const {
     body += ",\"runtimeSubmissions\":" + std::to_string(m_recorder.runtimeSubmissions());
     body += ",\"runtimePacketsProcessed\":" + std::to_string(m_recorder.runtimePacketsProcessed());
     body += ",\"runtimeDrawsIssued\":" + std::to_string(m_recorder.runtimeDrawsIssued());
-    const interp::TransformSubstitution& substitution = m_interpolator.substitution();
-    body += ",\"interpolatedFramesArmed\":" + std::to_string(m_interpolator.framesArmed());
-    body += ",\"interpolatedFramesRefused\":" + std::to_string(m_interpolator.framesRefused());
-    body += ",\"assembliesOffered\":" + std::to_string(substitution.assembliesOffered());
-    body += ",\"assembliesSubstituted\":" + std::to_string(substitution.assembliesSubstituted());
-    body += ",\"assembliesUnarmed\":" + std::to_string(substitution.assembliesUnarmed());
-    body +=
-        ",\"assembliesUnknownShader\":" + std::to_string(substitution.assembliesUnknownShader());
-    body += ",\"assembliesTooShort\":" + std::to_string(substitution.assembliesTooShort());
     body += "}\n";
     return body;
 }
 
-std::string ControlChannel::transformsJson(size_t limit) const {
-    auto report = m_search.search();
-    std::string body = "{";
-    body += "\"framesObserved\":" + std::to_string(report.framesObserved);
-    body += ",\"shadersTracked\":" + std::to_string(report.shadersTracked);
-    body += ",\"spansExamined\":" + std::to_string(report.spansExamined);
-    body += ",\"rejectedVaryingWithinFrame\":" + std::to_string(report.rejectedVaryingWithinFrame);
-    body += ",\"rejectedNeverChanging\":" + std::to_string(report.rejectedNeverChanging);
-    body += ",\"rejectedRotation\":" + std::to_string(report.rejectedRotation);
-    body += ",\"candidatesFound\":" + std::to_string(report.candidates.size());
-    body += ",\"sharedAndMoving\":" + std::to_string(report.sharedAndMoving);
-    body += ",\"shadersInLastFrame\":" + std::to_string(report.shadersInLastFrame);
-    body += ",\"candidates\":[";
-    for (size_t i = 0; i < report.candidates.size() && i < limit; ++i) {
-        if (i != 0) {
-            body += ",";
-        }
-        body += transformJson(report.candidates[i]);
-    }
-    body += "]}\n";
-    return body;
+std::string ControlChannel::pacingJson() const {
+    return control::pacingJson(m_pacing.summary());
 }
 
-namespace {
-
-std::string shaderJson(const interp::TransformSubstitution::OfferedShader& shader) {
-    std::string body = "{";
-    body += "\"stageIndex\":" + std::to_string(shader.shader.stageIndex);
-    body += ",\"baseHash\":" + std::to_string(shader.shader.baseHash);
-    body += ",\"auxHash\":" + std::to_string(shader.shader.auxHash);
-    body += ",\"floats\":" + std::to_string(shader.floats);
-    body += ",\"times\":" + std::to_string(shader.times);
-    body += ",\"substituted\":" + std::string(shader.substituted ? "true" : "false");
-    return body + "}";
-}
-
-// Objects by what they came to, every outcome named, zero or not.
-std::string outcomesJson(const interp::ObjectPlanner::Outcomes& outcomes) {
-    std::string body = "{";
-    for (size_t index = 0; index < interp::ObjectPlanner::kOutcomeCount; ++index) {
-        auto outcome = static_cast<interp::ObjectPlanner::Outcome>(index);
-        body += index == 0 ? "\"" : ",\"";
-        body += std::string(interp::ObjectPlanner::outcomeName(outcome)) +
-                "\":" + std::to_string(outcomes[index]);
-    }
-    return body + "}";
-}
-
-std::string censusJson(const interp::ObjectCensus& census) {
-    std::string body = "{\"frames\":" + std::to_string(census.frames);
-    body += ",\"objects\":" + std::to_string(census.objects);
-    body += ",\"outcomes\":" + outcomesJson(census.outcomes);
-    body += ",\"shaders\":" + std::to_string(census.shaders);
-    body += ",\"rows\":[";
-    for (size_t i = 0; i < census.rows.size(); ++i) {
-        const interp::ObjectCensus::Row& row = census.rows[i];
-        body += i == 0 ? "{" : ",{";
-        body += "\"stageIndex\":" + std::to_string(row.shader.stageIndex);
-        body += ",\"baseHash\":" + std::to_string(row.shader.baseHash);
-        body += ",\"auxHash\":" + std::to_string(row.shader.auxHash);
-        body += ",\"draws\":" + std::to_string(row.draws);
-        body += ",\"outcomes\":" + outcomesJson(row.outcomes);
-        body += ",\"mostValues\":" + std::to_string(row.mostValues);
-        body += ",\"withoutBlocks\":" + std::to_string(row.withoutBlocks);
-        body += "}";
-    }
-    return body + "]}\n";
-}
-
-std::string shaderArrayJson(const std::vector<interp::TransformSubstitution::OfferedShader>& set) {
-    std::string body = "[";
-    for (size_t i = 0; i < set.size(); ++i) {
-        if (i != 0) {
-            body += ",";
-        }
-        body += shaderJson(set[i]);
-    }
-    return body + "]";
-}
-
-} // namespace
+namespace {} // namespace
 
 std::string ControlChannel::framesJson() const {
     std::string body = "{\"framesLogged\":" + std::to_string(m_shapeLog.framesLogged());
@@ -435,164 +312,6 @@ std::string ControlChannel::drawsJson() const {
     body += ",\"withVertexUniforms\":" + vertexChangesJson(census.byShader);
     body += ",\"attributes\":" + attributeChangesJson(census.byAttribute);
     return body + "}}\n";
-}
-
-std::string ControlChannel::vertexShadersJson() const {
-    std::string body = "{\"shaders\":[";
-    bool first = true;
-    for (const interp::ShaderVertexOutcomes& shader : m_vertices.drawsByShader()) {
-        body += first ? "{" : ",{";
-        first = false;
-        body += "\"baseHash\":" + std::to_string(shader.shaderBaseHash) + ",\"draws\":{";
-        for (size_t index = 0; index < interp::kVertexOutcomeCount; ++index) {
-            body += index == 0 ? "\"" : ",\"";
-            body +=
-                std::string(interp::vertexOutcomeName(static_cast<interp::VertexOutcome>(index))) +
-                "\":" + std::to_string(shader.draws[index]);
-        }
-        body += "}}";
-    }
-    return body + "]}\n";
-}
-
-std::string ControlChannel::verticesJson() const {
-    std::string body = std::string(",\"objectsPlanning\":") +
-                       (m_objects.isPlanning() ? "true" : "false") +
-                       ",\"verticesBlending\":" + (m_vertices.isBlending() ? "true" : "false");
-    body += ",\"vertexDraws\":{";
-    for (size_t index = 0; index < interp::kVertexOutcomeCount; ++index) {
-        auto outcome = static_cast<interp::VertexOutcome>(index);
-        body += index == 0 ? "\"" : ",\"";
-        body += std::string(interp::vertexOutcomeName(outcome)) +
-                "\":" + std::to_string(m_vertices.draws(outcome));
-    }
-    body += "},\"guestObjectDraws\":{";
-    for (size_t index = 0; index < interp::kVertexOutcomeCount; ++index) {
-        auto outcome = static_cast<interp::VertexOutcome>(index);
-        body += index == 0 ? "\"" : ",\"";
-        body += std::string(interp::vertexOutcomeName(outcome)) +
-                "\":" + std::to_string(m_vertices.objectDraws(outcome));
-    }
-    body += "}";
-    body += ",\"runtimeDrawsReplaceable\":" + std::to_string(m_recorder.runtimeDrawsReplaceable());
-    body += ",\"runtimeDrawsReplaced\":" + std::to_string(m_recorder.runtimeDrawsReplaced());
-    body += ",\"vertexPartnersFound\":" + std::to_string(m_vertices.partnersFoundByVertices());
-    body += ",\"vertexReplaysDiverged\":" + std::to_string(m_vertices.replaysDiverged());
-    body += ",\"vertexReplaysUnaligned\":" + std::to_string(m_vertices.replaysUnaligned());
-    body += ",\"vertexBytesCopied\":" + std::to_string(m_vertices.bytesCopied());
-    body += ",\"vertexCopyingNanoseconds\":" + std::to_string(m_vertices.copying().count());
-    body += ",\"vertexBlendingNanoseconds\":" + std::to_string(m_vertices.blending().count());
-    body += ",\"vertexWaitingNanoseconds\":" + std::to_string(m_vertices.waiting().count());
-    body += ",\"bufferWriters\":{\"installed\":" + std::to_string(m_writers.installed());
-    body += ",\"calls\":" + std::to_string(m_writers.calls());
-    body += ",\"unreadable\":" + std::to_string(m_writers.unreadable());
-    body += ",\"identified\":" + std::to_string(m_writers.identified());
-    body += ",\"rewritten\":" + std::to_string(m_writers.rewritten()) + "}";
-    return body;
-}
-
-std::string ControlChannel::interpolationJson() const {
-    using Skip = interp::ContinuousInterpolator::Skip;
-    std::string body = "{";
-    body += "\"enabled\":" + std::string(m_continuous.enabled() ? "true" : "false");
-    body += ",\"ticks\":" + std::to_string(m_continuous.ticks());
-    body += ",\"framesInterpolated\":" + std::to_string(m_continuous.framesInterpolated());
-    body += ",\"skipped\":{";
-    for (size_t index = 0; index < interp::ContinuousInterpolator::kSkipCount; ++index) {
-        auto skip = static_cast<Skip>(index);
-        body += index == 0 ? "\"" : ",\"";
-        body += std::string(interp::ContinuousInterpolator::skipName(skip)) +
-                "\":" + std::to_string(m_continuous.skipped(skip));
-    }
-    body += "}";
-    body += ",\"restoresRefused\":" + std::to_string(m_continuous.restoresRefused());
-    body += ",\"restoresByCopy\":" + std::to_string(m_continuous.restoresByCopy());
-    body += ",\"restoresByReplay\":" + std::to_string(m_continuous.restoresByReplay());
-    body += ",\"subresourcesRestored\":" + std::to_string(m_continuous.subresourcesRestored());
-    body += ",\"shadowsCreated\":" + std::to_string(m_continuous.shadowsCreated());
-    body += ",\"restoreChecksCompleted\":" + std::to_string(m_restoreCheck.completed());
-    body += ",\"restoreChecksRefused\":" + std::to_string(m_restoreCheck.refused());
-    body += ",\"neighbourChecksCompleted\":" + std::to_string(m_neighbourCheck.completed());
-    body += ",\"neighbourChecksRefused\":" + std::to_string(m_neighbourCheck.refused());
-    body += ",\"neighbourChecksRestarted\":" + std::to_string(m_neighbourCheck.restarted());
-    const interp::ContinuousInterpolator::NotCopied& notCopied = m_continuous.notCopied();
-    body += ",\"notCopied\":{\"subresources\":" + std::to_string(notCopied.subresources) +
-            ",\"texturesCreated\":" + std::to_string(notCopied.texturesCreated) +
-            ",\"streamoutWrites\":" + std::to_string(notCopied.streamoutWrites) + "}";
-    body += ",\"phaseNanoseconds\":{";
-    for (size_t index = 0; index < interp::ContinuousInterpolator::kPhaseCount; ++index) {
-        auto phase = static_cast<interp::ContinuousInterpolator::Phase>(index);
-        body += index == 0 ? "\"" : ",\"";
-        body += std::string(interp::ContinuousInterpolator::phaseName(phase)) +
-                "\":" + std::to_string(m_continuous.timeIn(phase).count());
-    }
-    body += "}";
-    body += ",\"cutsByTurn\":" + std::to_string(m_continuous.cuts().cutsByTurn());
-    body += ",\"cutsByStep\":" + std::to_string(m_continuous.cuts().cutsByStep());
-    const interp::ObjectBlend& objects = m_objects;
-    body += ",\"objects\":" + outcomesJson(objects.outcomes());
-    body += ",\"objectPartnersDerived\":" + std::to_string(objects.planner().partnersDerived());
-    body += ",\"objectPartnersSearched\":" + std::to_string(objects.planner().partnersSearched());
-    body += ",\"objectPartnersReidentified\":" +
-            std::to_string(objects.planner().partnersReidentified());
-    body += ",\"objectPartnersTurned\":" + std::to_string(objects.planner().partnersTurned());
-    body +=
-        ",\"objectHeldPartnersDerived\":" + std::to_string(objects.planner().heldPartnersDerived());
-    body += ",\"objectSearchesDeferred\":" + std::to_string(objects.planner().searchesDeferred());
-    body +=
-        ",\"objectReidentifyAttempts\":" + std::to_string(objects.planner().reidentifyAttempts());
-    body += ",\"objectNearestCandidates\":" + std::to_string(objects.planner().nearestCandidates());
-    body += ",\"objectPartnerCandidates\":" + std::to_string(objects.planner().partnerCandidates());
-    body += ",\"objectValuesNotBlended\":" + std::to_string(objects.planner().valuesNotBlended());
-    body += ",\"objectValuesAlternating\":" + std::to_string(objects.planner().valuesAlternating());
-    body += ",\"objectUnverifiedSharingValues\":" +
-            std::to_string(objects.planner().unverifiedSharingValues());
-    body += ",\"objectValuesShared\":" + std::to_string(objects.planner().valuesShared());
-    body += ",\"objectMapValuesHeld\":" + std::to_string(objects.planner().mapValuesHeld());
-    body += ",\"objectMapValuesMoved\":" + std::to_string(objects.planner().mapValuesMoved());
-    body +=
-        ",\"objectPixelPassValuesHeld\":" + std::to_string(objects.planner().pixelPassValuesHeld());
-    body += ",\"objectPixelValuesMoved\":" + std::to_string(objects.planner().pixelValuesMoved());
-    body += ",\"objectUnblendedCarried\":" + std::to_string(objects.planner().unblendedCarried());
-    body += ",\"objectsLeftAtN\":" + std::to_string(objects.planner().leftAtN());
-    body += ",\"objectTransformsCarried\":" + std::to_string(objects.planner().transformsCarried());
-    body += ",\"objectLookUpRowsRebased\":" + std::to_string(objects.lookUpRowsRebased());
-    body += ",\"objectDrawsWritten\":" + std::to_string(objects.drawsWritten());
-    body += ",\"objectReplaysDiverged\":" + std::to_string(objects.replaysDiverged());
-    body += ",\"objectFramesEnded\":" + std::to_string(objects.framesEnded());
-    body += ",\"objectPlanningBusyNanoseconds\":" + std::to_string(objects.planningBusy().count());
-    body += ",\"objectFrameEndPlanningNanoseconds\":" +
-            std::to_string(objects.frameEndPlanning().count());
-    body += verticesJson();
-    body += ",\"pacing\":" + pacingJson(m_pacing.summary());
-    body += ",\"scanOut\":" + pacingJson(m_scanOut.summary());
-    body += ",\"viewFramesTracked\":" + std::to_string(m_viewTracker.framesTracked());
-    body += ",\"viewFramesLost\":" + std::to_string(m_viewTracker.framesLost());
-    body += ",\"viewReseedsRun\":" + std::to_string(m_viewTracker.reseedsRun());
-    body += ",\"viewReseedsFound\":" + std::to_string(m_viewTracker.reseedsFound());
-    body += ",\"copiesSubmitted\":" + std::to_string(m_presenter.copiesSubmitted());
-    body += ",\"withheld\":{";
-    for (uint32_t index = 0; index < LatteFrameHooks::kWithheldEffectCount; ++index) {
-        auto effect = static_cast<LatteFrameHooks::WithheldEffect>(index);
-        body += index == 0 ? "\"" : ",\"";
-        body += std::string(withheldName(effect)) +
-                "\":" + std::to_string(m_recorder.runtimeWithheld(effect));
-    }
-    body += "}";
-    body += ",\"recordingSnapshots\":" + std::to_string(m_snapshot.snapshotsCompleted());
-    return body + "}\n";
-}
-
-std::string ControlChannel::substitutionJson() const {
-    const interp::TransformSubstitution& substitution = m_interpolator.substitution();
-    std::string body = "{";
-    body += "\"armed\":" + std::string(substitution.isArmed() ? "true" : "false");
-    body += ",\"blendPoint\":" + floatText(substitution.blendPoint());
-    body += ",\"assembliesOffered\":" + std::to_string(substitution.assembliesOffered());
-    body += ",\"assembliesSubstituted\":" + std::to_string(substitution.assembliesSubstituted());
-    body += ",\"slots\":" + shaderArrayJson(substitution.armedSlots());
-    body += ",\"offered\":" + shaderArrayJson(substitution.offeredShaders());
-    return body + "}\n";
 }
 
 // The slot a capture route is talking about. Out of range is refused by the
@@ -837,42 +556,6 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
         }
         return lucent::http::Response::json(200, "OK", m_paint.json());
     }
-    if (request.method == "POST" && request.path() == "/continuous") {
-        bool on = requestedFlag(std::string(request.query()), "on", true);
-        m_continuous.setEnabled(on);
-        return lucent::http::Response::json(200, "OK", interpolationJson());
-    }
-    // Which of the per-object blends the in-between frame draws, the
-    // camera's always: objects=0 draws every object as the title did
-    // (and so every vertex), vertices=0 only the vertices, maps=0 only
-    // the draws into the light's map. A
-    // maintainer's discriminator, not a setting.
-    // vertexShaderOff=<16 hex digits>, repeated for several, draws
-    // the meshes those vertex shaders read as the title did, to name
-    // the draws a defect is; objectShaderOff does the same for the
-    // objects those shaders draw.
-    if (request.method == "POST" && request.path() == "/blends") {
-        std::string query(request.query());
-        std::vector<uint64_t> excluded;
-        if (!requestedHashes(query, "vertexShaderOff", excluded)) {
-            return lucent::http::Response::text(
-                400, "Bad Request",
-                "vertexShaderOff must be a vertex shader's base hash, 16 hex digits.\n");
-        }
-        std::vector<uint64_t> objectExcluded;
-        if (!requestedHashes(query, "objectShaderOff", objectExcluded)) {
-            return lucent::http::Response::text(
-                400, "Bad Request",
-                "objectShaderOff must be a shader's base hash, 16 hex digits.\n");
-        }
-        m_objects.exclude(std::move(objectExcluded));
-        m_objects.setPlanning(m_continuous.enabled() && requestedFlag(query, "objects", true));
-        m_objects.setMapBlending(requestedFlag(query, "maps", true));
-        m_objects.setPixelBlending(requestedFlag(query, "pixels", true));
-        m_vertices.setBlending(requestedFlag(query, "vertices", true));
-        m_vertices.exclude(std::move(excluded));
-        return lucent::http::Response::json(200, "OK", interpolationJson());
-    }
     // Holds the title between frames: pause=1 holds at the next
     // frame's end, step=N lets N more end and answers once it holds
     // again, resume=1 lets it run.
@@ -917,64 +600,12 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
         }
         return lucent::http::Response::json(200, "OK", m_logic.json());
     }
-    // Whether an in-between frame changes guest memory, measured on
-    // the frame the gate holds: rounds=N in-between and control
-    // windows, alternating.
-    if (request.method == "POST" && request.path() == "/shadowcheck") {
-        size_t rounds = requestedCount(std::string(request.query()), "rounds", 4);
-        interp::ShadowCheck::Result result;
-        bool ran = m_gate.runWhileHeld([&](const frame::FrameRecording& held) {
-            result = m_shadowCheck.run(held, static_cast<uint32_t>(rounds));
-        });
-        if (!ran) {
-            return lucent::http::Response::text(
-                409, "Conflict", "the check runs on a held frame. POST /gate?pause=1 first.\n");
-        }
-        return lucent::http::Response::json(200, "OK", interp::ShadowCheck::toJson(result));
-    }
     // Frame pacing measured from here on, so a walk is not averaged
     // with the boot and menus before it.
     if (request.method == "POST" && request.path() == "/pacing") {
         m_pacing.restart();
         m_scanOut.restart();
-        return lucent::http::Response::json(200, "OK", interpolationJson());
-    }
-    // The guest's frame captured before and after the next in-between
-    // frame is drawn over it and taken back out, into capture slots 0
-    // and 1; with inbetween=1, slot 1 is the in-between frame instead,
-    // which is the comparison's control.
-    if (request.method == "POST" && request.path() == "/restorecheck") {
-        bool inBetween = requestedFlag(std::string(request.query()), "inbetween", false);
-        if (!m_restoreCheck.arm(inBetween ? interp::RestoreCheck::Against::InBetween
-                                          : interp::RestoreCheck::Against::Restored)) {
-            return lucent::http::Response::text(
-                409, "Conflict", "a restore check is already waiting for its tick.\n");
-        }
-        return lucent::http::Response::json(200, "OK", interpolationJson());
-    }
-    // The title's frame of one interpolated tick, and the next
-    // tick's in-between frame and title's frame, into capture slots
-    // 2, 3 and 4.
-    if (request.method == "POST" && request.path() == "/neighbourcheck") {
-        if (!m_neighbourCheck.arm()) {
-            return lucent::http::Response::text(
-                409, "Conflict", "a neighbour check is already waiting for its ticks.\n");
-        }
-        return lucent::http::Response::json(200, "OK", interpolationJson());
-    }
-    // A census of the next planned frames' objects by shader; GET
-    // /objects reads it back once they are all planned.
-    if (request.method == "POST" && request.path() == "/objects") {
-        size_t frames = requestedCount(std::string(request.query()), "frames", 1);
-        if (frames == 0 || frames > interp::ObjectBlend::kMaxCensusFrames) {
-            return lucent::http::Response::text(
-                400, "Bad Request",
-                "frames must be a count from 1 to " +
-                    std::to_string(interp::ObjectBlend::kMaxCensusFrames) + ".\n");
-        }
-        m_objects.requestCensus(static_cast<uint32_t>(frames));
-        return lucent::http::Response::json(
-            200, "OK", "{\"requested\":true,\"frames\":" + std::to_string(frames) + "}\n");
+        return lucent::http::Response::json(200, "OK", pacingJson());
     }
     // A census of the next frames' draws that read uniforms, by
     // whether their vertex bytes change; GET /draws reads it back.
@@ -1004,71 +635,11 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
             "{\"armed\":true,\"frames\":" + std::to_string(frames) + ",\"snapshotsCompleted\":" +
                 std::to_string(m_snapshot.snapshotsCompleted()) + "}\n");
     }
-    bool oneShot =
-        request.method == "POST" && (request.path() == "/replay" || request.path() == "/nulldiff" ||
-                                     request.path() == "/interpolate");
-    if (oneShot && m_continuous.enabled()) {
-        return continuousOwnsFrames();
-    }
-    if (request.method == "POST" && request.path() == "/replay") {
-        m_replayer.armOnce();
-        return lucent::http::Response::json(
-            200, "OK",
-            "{\"armed\":true,\"replaysRun\":" + std::to_string(m_replayer.replaysRun()) + "}\n");
-    }
-    // One frame captured twice, as the title drew it and as a replay
-    // redrew it. The two halves have to be armed around the same
-    // frame boundary, which only the scheduler can do.
-    if (request.method == "POST" && request.path() == "/nulldiff") {
-        bool redraw = requestedFlag(std::string(request.query()), "redraw", true);
-        if (!m_scheduler.armNullDiff(redraw)) {
-            return lucent::http::Response::text(
-                409, "Conflict",
-                "a replay or a null diff is already armed, and taking it over would "
-                "compare a frame against one somebody else asked for.\n");
-        }
-        return lucent::http::Response::json(
-            200, "OK",
-            "{\"armed\":true,\"redraw\":" + std::string(redraw ? "true" : "false") +
-                ",\"nullDiffsCompleted\":" + std::to_string(m_scheduler.nullDiffsCompleted()) +
-                "}");
-    }
-
-    // One frame between two the title drew: the last frame's
-    // geometry, replayed with the view blended between where the
-    // camera stood in each. Captured as a null diff is, so the pair
-    // that must differ is the title's frame and this one.
-    if (request.method == "POST" && request.path() == "/interpolate") {
-        float t = requestedBlend(std::string(request.query()), 0.5f);
-        if (!m_interpolator.armOnce(t)) {
-            return lucent::http::Response::text(409, "Conflict",
-                                                m_interpolator.lastRefusal() + "\n");
-        }
-        return lucent::http::Response::json(
-            200, "OK",
-            "{\"armed\":true,\"t\":" + floatText(t) +
-                ",\"slots\":" + std::to_string(m_interpolator.substitution().slotCount()) + "}\n");
-    }
 
     // A present the runtime owns, so a replay's output can be seen
     // instead of being overdrawn by the guest's next frame. Refused
     // when the title has not presented yet, because the arguments
     // are observed and never invented.
-    if (request.method == "POST" && request.path() == "/present") {
-        bool presented = m_presenter.presentNow();
-        if (!presented && !m_presenter.hasObservedPresent()) {
-            return lucent::http::Response::text(
-                409, "Conflict",
-                "the title has not presented a frame yet, so there are no present "
-                "arguments to reuse. Reach gameplay first.\n");
-        }
-        return lucent::http::Response::json(
-            200, "OK",
-            "{\"presented\":" + std::string(presented ? "true" : "false") +
-                ",\"presentsSubmitted\":" + std::to_string(m_presenter.presentsSubmitted()) +
-                ",\"presentsRefusedBySubmit\":" +
-                std::to_string(m_presenter.presentsRefusedBySubmit()) + "}");
-    }
     if (request.method == "POST" && request.path() == "/capture") {
         // `count` asks for that many *consecutive* presents rather than one. Two
         // arms of one is not two presents: the renderer's screenshot request is
@@ -1150,25 +721,6 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
     if (request.path() == "/gate") {
         return lucent::http::Response::json(200, "OK", gateJson(m_gate.status()));
     }
-    if (request.path() == "/frames") {
-        return lucent::http::Response::json(200, "OK", framesJson());
-    }
-    if (request.path() == "/interpolation") {
-        return lucent::http::Response::json(200, "OK", interpolationJson());
-    }
-    if (request.path() == "/vertices") {
-        return lucent::http::Response::json(200, "OK", vertexShadersJson());
-    }
-    if (request.path() == "/objects") {
-        std::optional<interp::ObjectCensus> census = m_objects.census();
-        if (!census) {
-            return lucent::http::Response::text(
-                404, "Not Found",
-                "no census has been taken yet. Request one with POST /objects while "
-                "continuous interpolation is planning.\n");
-        }
-        return lucent::http::Response::json(200, "OK", censusJson(*census));
-    }
     if (request.path() == "/recordings") {
         std::string framed = m_snapshot.framed();
         if (framed.empty()) {
@@ -1178,9 +730,6 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
                 "and let K frames end.\n");
         }
         return lucent::http::Response::binary(200, "OK", "application/octet-stream", framed);
-    }
-    if (request.path() == "/substitution") {
-        return lucent::http::Response::json(200, "OK", substitutionJson());
     }
     if (request.path() == "/callers") {
         return lucent::http::Response::json(200, "OK", m_callers.json());
@@ -1209,9 +758,6 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
                                                 "some of that range is not guest memory.\n");
         }
         return lucent::http::Response::binary(200, "OK", "application/octet-stream", *bytes);
-    }
-    if (request.path() == "/transforms") {
-        return lucent::http::Response::json(200, "OK", transformsJson(kDefaultTransformLimit));
     }
     return notFound();
 }

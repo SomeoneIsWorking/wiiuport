@@ -6,31 +6,16 @@
 #include "wiiuport/control/ControlChannel.h"
 #include "wiiuport/frame/FrameCapture.h"
 #include "wiiuport/frame/FrameGate.h"
-#include "wiiuport/frame/FramePresenter.h"
 #include "wiiuport/frame/FrameShapeLog.h"
-#include "wiiuport/frame/GuestStateGuard.h"
 #include "wiiuport/frame/PresentPacing.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/RecordingSnapshot.h"
-#include "wiiuport/frame/ReplayScheduler.h"
-#include "wiiuport/frame/SearchFeed.h"
 #include "wiiuport/guest/BufferWriters.h"
 #include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/guest/EnvironmentProbe.h"
 #include "wiiuport/guest/LineProbe.h"
 #include "wiiuport/guest/ParticleProbe.h"
 #include "wiiuport/input/InputDriver.h"
-#include "wiiuport/interp/ContinuousInterpolator.h"
-#include "wiiuport/interp/FrameInterpolator.h"
-#include "wiiuport/interp/NeighbourCheck.h"
-#include "wiiuport/interp/ObjectBlend.h"
-#include "wiiuport/interp/ReplayBlend.h"
-#include "wiiuport/interp/RestoreCheck.h"
-#include "wiiuport/interp/ShadowCheck.h"
-#include "wiiuport/interp/TransformSearch.h"
-#include "wiiuport/interp/TransformSubstitution.h"
-#include "wiiuport/interp/VertexBlend.h"
-#include "wiiuport/interp/ViewTracker.h"
 #include "wiiuport/title/DrawAttributeCensus.h"
 #include "wiiuport/title/GlobalPoseCensus.h"
 #include "wiiuport/title/LogicGate.h"
@@ -79,12 +64,10 @@ class Runtime {
         return m_control;
     }
 
-    frame::FrameReplayer& replayer() {
-        return m_replayer;
-    }
-
-    const interp::TransformSearch& transformSearch() const {
-        return m_search;
+    // The display paint mod. It is what presents more than once per title frame now, which is why
+    // it replaced the continuous interpolator in the shell's presentation-mode decision.
+    title::WindWakerPaint& paint() {
+        return m_paint;
     }
 
     input::InputDriver& input() {
@@ -95,24 +78,8 @@ class Runtime {
         return m_capture;
     }
 
-    frame::FramePresenter& presenter() {
-        return m_presenter;
-    }
-
     const frame::FrameShapeLog& shapeLog() const {
         return m_shapeLog;
-    }
-
-    frame::ReplayScheduler& scheduler() {
-        return m_scheduler;
-    }
-
-    interp::FrameInterpolator& interpolator() {
-        return m_interpolator;
-    }
-
-    const interp::ContinuousInterpolator& continuous() const {
-        return m_continuous;
     }
 
     frame::FrameGate& frameGate() {
@@ -124,15 +91,8 @@ class Runtime {
     inline static std::once_flag s_created;
 
     frame::RecordingObserver m_recorder;
-    frame::FrameReplayer m_replayer;
-    frame::FramePresenter m_presenter;
     frame::FrameCapture m_capture;
-    frame::GuestStateGuard m_guard;
-    frame::ReplayScheduler m_scheduler{m_replayer, m_presenter, m_capture};
-    interp::TransformSearch m_search;
-    frame::SearchFeed m_searchFeed{m_search};
     frame::FrameShapeLog m_shapeLog;
-    interp::TransformSubstitution m_substitution;
     // Where in an assembled uniform buffer the pose is, found by shape. Registered
     // before the blends so its counts are the same draws they see.
     title::ObjectPoseLocator m_poseLocator;
@@ -157,8 +117,6 @@ class Runtime {
     // The base the relative offset is relative to, measured against the draw's real block
     // addresses. The last thing standing between the objective's second question and an answer.
     title::UniformBlockAddress m_blockAddress;
-    interp::ObjectBlend m_objectBlend{interp::ContinuousInterpolator::kBlendPoint};
-    interp::ReplayBlend m_replayBlend{m_objectBlend, m_substitution};
     guest::BufferWriters m_writers;
     guest::ParticleProbe m_particleProbe{m_writers};
     guest::EnvironmentProbe m_environmentProbe{m_writers};
@@ -182,36 +140,16 @@ class Runtime {
     title::WindWakerPaint m_paint{&GuestCallProbes::Register,      &GuestPatching::AllocateCode,
                                   &GuestPatching::WriteWord,       &GuestPatching::ReadWord,
                                   &GuestPatching::SetSwapInterval, &GuestPatching::SwapInterval};
-    interp::VertexBlend m_vertexBlend{m_objectBlend, m_writers,
-                                      interp::ContinuousInterpolator::kBlendPoint};
-    interp::FrameInterpolator m_interpolator{m_search, m_substitution, m_scheduler};
-    interp::ViewTracker m_viewTracker{m_search};
-    interp::RestoreCheck m_restoreCheck{m_presenter, m_capture};
-    interp::NeighbourCheck m_neighbourCheck{m_capture};
-    interp::TickProbes m_tickProbes{m_restoreCheck, m_neighbourCheck};
-    interp::ContinuousInterpolator m_continuous;
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
     frame::PresentPacing m_scanOut{&frame::PresentPacing::Clock::now};
     input::InputDriver m_input;
     frame::FrameGate m_gate;
-    interp::ShadowCheck m_shadowCheck;
     control::ControlChannel m_control{control::ControlChannel::Sources{
         .recorder = m_recorder,
-        .replayer = m_replayer,
-        .search = m_search,
         .input = m_input,
         .capture = m_capture,
-        .presenter = m_presenter,
-        .scheduler = m_scheduler,
-        .interpolator = m_interpolator,
         .shapeLog = m_shapeLog,
-        .viewTracker = m_viewTracker,
-        .continuous = m_continuous,
-        .restoreCheck = m_restoreCheck,
-        .neighbourCheck = m_neighbourCheck,
-        .objects = m_objectBlend,
-        .vertices = m_vertexBlend,
         .writers = m_writers,
         .callers = m_callers,
         .paint = m_paint,
@@ -224,7 +162,6 @@ class Runtime {
         .scanOut = m_scanOut,
         .vertexChanges = m_recorder.vertexChanges(),
         .gate = m_gate,
-        .shadowCheck = m_shadowCheck,
     }};
     bool m_hooksInstalled{false};
 };

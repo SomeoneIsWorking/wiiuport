@@ -16,71 +16,17 @@ bool requestFrameCapture(LatteFrameHooks::CaptureCallback&& callback, int count)
     return LatteFrameHooks::RequestFrameCapture(std::move(callback), count);
 }
 
-bool submitPresent(const LatteFrameHooks::PresentArguments& present) {
-    return LatteFrameHooks::SubmitPresent(present);
-}
-
-bool submitScanBufferCopy(const LatteFrameHooks::PresentArguments& present) {
-    return LatteFrameHooks::SubmitScanBufferCopy(present);
-}
-
-interp::ContinuousInterpolator::Clock::time_point steadyNow() {
-    return interp::ContinuousInterpolator::Clock::now();
-}
-
-void waitFor(interp::ShadowCheck::Clock::duration duration) {
-    std::this_thread::sleep_for(duration);
-}
-
-bool submitToCommandProcessor(const void* data, uint32_t sizeInBytes) {
-    return LatteFrameHooks::SubmitDisplayList(data, sizeInBytes);
-}
-
 } // namespace
 
-Runtime::Runtime()
-    : m_replayer(&submitToCommandProcessor), m_presenter(&submitPresent, &submitScanBufferCopy),
-      m_capture(&requestFrameCapture),
-      m_guard(&LatteFrameHooks::GuardGuestState, &LatteFrameHooks::RestoreGuestState),
-      m_continuous(m_viewTracker, m_substitution, m_objectBlend, m_replayer, m_presenter, m_guard,
-                   m_scheduler, m_tickProbes, &steadyNow),
-      m_shadowCheck(
-          &LatteFrameHooks::MappedGuestMemory,
-          [this](const frame::FrameRecording& held) {
-              uint64_t before = m_continuous.framesInterpolated();
-              m_continuous.onFrameRecorded(held);
-              return m_continuous.framesInterpolated() > before;
-          },
-          &interp::ShadowCheck::Clock::now, &waitFor) {
-    // Frame complete, before the guest's swap: everything that reads the
-    // frame first, and the continuous interpolator last, because it needs the
-    // view tracker and the object blend to have taken this frame in.
+Runtime::Runtime() : m_capture(&requestFrameCapture) {
+    // Frame complete, before the guest's swap: everything that reads the frame first.
     m_recorder.addAssemblyRecordedListener(&m_poseLocator);
-    m_recorder.addAssemblyRecordedListener(&m_objectBlend);
-    m_recorder.addAssemblyRecordedListener(&m_vertexBlend);
-    m_recorder.addDrawRecordedListener(&m_vertexBlend);
     m_recorder.addDisplayedListener(&m_pacing);
     m_recorder.addScanOutListener(&m_scanOut);
-    m_recorder.addFrameEndListener(&m_searchFeed);
     m_recorder.addFrameEndListener(&m_shapeLog);
-    m_recorder.addFrameEndListener(&m_viewTracker);
     m_recorder.addFrameEndListener(&m_snapshot);
-    m_recorder.addFrameEndListener(&m_objectBlend);
-    // After the object blend, whose frame count dates the vertices kept.
-    m_recorder.addFrameEndListener(&m_vertexBlend);
-    m_recorder.addFrameEndListener(&m_continuous);
-    // Frame shown, after the guest's swap: the one-shots.
-    m_recorder.addFrameShownListener(&m_scheduler);
-    // After the scheduler, so the frame end that runs the replay has already
-    // run it by the time the blend is taken down.
-    m_recorder.addFrameShownListener(&m_interpolator);
     // Last, so every one-shot of the frame has run before the title is held.
     m_recorder.addFrameShownListener(&m_gate);
-    m_recorder.addPresentListener(&m_presenter);
-    // The blends only ever see the runtime's own replayed draws; the recorder
-    // is what keeps the guest's frames out of their reach.
-    m_recorder.setAssemblyFilter(&m_replayBlend);
-    m_recorder.setVertexFilter(&m_vertexBlend);
 }
 
 Runtime& Runtime::instance() {
@@ -133,17 +79,14 @@ void Runtime::installHooks() {
         lucent::error("runtime", "WIIUPORT_CALLER_CENSUS: {}; no census", refusal);
     }
     long long port = lucent::config::number("CONTROL_PORT", control::ControlChannel::kDefaultPort);
-    // On unless switched off: the product is the 60 Hz one, and the switch is
-    // there to compare against the title's own rate.
-    m_continuous.setEnabled(lucent::config::number("INTERPOLATION", 1) != 0);
     if (port > 0 && port <= 65535) {
         m_control.start(static_cast<uint16_t>(port));
     } else {
         lucent::error("runtime", "WIIUPORT_CONTROL_PORT {} is not a port; no control channel",
                       port);
     }
-    lucent::info("runtime", "frame hooks installed; control channel {}; interpolation {}",
-                 m_control.running() ? "up" : "off", m_continuous.enabled() ? "on" : "off");
+    lucent::info("runtime", "frame hooks installed; control channel {}",
+                 m_control.running() ? "up" : "off");
 }
 
 } // namespace wiiuport

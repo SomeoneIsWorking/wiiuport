@@ -4,8 +4,8 @@
 Every other tool launches, runs a fixed script and tears down. This one boots
 the product headless on the GPU with the staged save, presses into the world,
 prints the control port and the PID to stop it by, and then only waits: the
-operator (or an agent) walks it with `POST /input`, reads `/interpolation`,
-`/draws` and `/objects`, and captures with `/capture` and `/restorecheck`,
+operator (or an agent) walks it with `POST /input`, reads `/pacing`,
+`/draws` and `/gate`, and captures with `/capture`,
 while the same process keeps running.
 
 It stops when the runtime exits or this tool is sent SIGTERM or SIGINT, and it
@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     session = HeadlessSession(
         layout=layout,
         activity=ACTIVITY,
-        runtime_env=runtime_env(args.port, continuous=True),
+        runtime_env=runtime_env(args.port),
         output_size=args.size,
     )
     try:

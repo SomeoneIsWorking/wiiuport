@@ -354,6 +354,11 @@ class WindWakerPaint {
 
     // Puts the stand-in in and points the vtable slot at it. Empty on success,
     // otherwise the refusal, naming what it found instead of the frame.
+    // Whether the stand-in is installed, which is what decides the shell's presentation mode: a
+    // title that paints twice in one pass needs each present on its own vblank, and a title
+    // painting once does not care which mode the surface is in.
+    bool installed() const;
+
     std::string enable(Mode mode);
 
     // Why the memory is not there, for a report: asked before anything runs,

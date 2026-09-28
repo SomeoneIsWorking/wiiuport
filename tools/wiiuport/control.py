@@ -23,17 +23,17 @@ moves it (`ControlChannel::kDefaultPort`); `./run.sh` sessions answer here too."
 
 
 ENV_CONTROL_PORT = "WIIUPORT_CONTROL_PORT"
-ENV_INTERPOLATION = "WIIUPORT_INTERPOLATION"
 
 
-def runtime_env(port: int, *, continuous: bool = True) -> dict[str, str]:
+def runtime_env(port: int) -> dict[str, str]:
     """The environment a driven run hands the product.
 
-    Continuous interpolation is the product and stays on unless a tool needs a
-    frame boundary of its own: a one-shot replay, null diff or single
-    interpolated frame would otherwise compete with it for every boundary, and
-    the runtime refuses them while it runs."""
-    return {ENV_CONTROL_PORT: str(port), ENV_INTERPOLATION: "1" if continuous else "0"}
+    It is the control port and nothing else. This once also carried
+    `WIIUPORT_INTERPOLATION`, which switched the host-side frame interpolation
+    on and off; that mechanism is deleted, the runtime no longer reads the
+    variable, and a tool that still set it would be asking for something the
+    product cannot obey."""
+    return {ENV_CONTROL_PORT: str(port)}
 
 
 class ControlUnavailable(RuntimeError):
@@ -118,88 +118,6 @@ class Counters:
             f"nothing armed, {self.assembliesUnknownShader} not carrying it, "
             f"{self.assembliesTooShort} too short)"
         )
-
-
-@dataclass(frozen=True)
-class TransformCandidate:
-    """One 3x4 the runtime found, with what decides whether it is a view."""
-
-    stageIndex: int
-    baseHash: int
-    auxHash: int
-    floatOffset: int
-    framesSeen: int
-    shadersSharing: int
-    rotationError: float
-    meanTranslationStep: float
-    values: tuple[float, ...]
-
-    @property
-    def is_shared(self) -> bool:
-        return self.shadersSharing > 1
-
-    def render(self) -> str:
-        shared = (
-            f"shared by {self.shadersSharing} shaders"
-            if self.is_shared
-            else "in this shader only, so not shown to be a view"
-        )
-        translation = (self.values[3], self.values[7], self.values[11])
-        return (
-            f"stage {self.stageIndex} shader {self.baseHash:016x}:{self.auxHash:016x} "
-            f"float {self.floatOffset} (byte {self.floatOffset * 4}): {shared}, "
-            f"rotation error {self.rotationError:.2e}, mean step "
-            f"{self.meanTranslationStep:.1f} over {self.framesSeen} frames, at "
-            f"({translation[0]:.1f}, {translation[1]:.1f}, {translation[2]:.1f})"
-        )
-
-
-@dataclass(frozen=True)
-class TransformReport:
-    """What the search found and, as importantly, what it looked at."""
-
-    framesObserved: int
-    shadersTracked: int
-    spansExamined: int
-    rejectedVaryingWithinFrame: int
-    rejectedNeverChanging: int
-    rejectedRotation: int
-    candidatesFound: int
-    sharedAndMoving: int
-    shadersInLastFrame: int
-    candidates: tuple[TransformCandidate, ...]
-
-    def render(self) -> str:
-        totals = (
-            f"{self.candidatesFound} candidates ({self.sharedAndMoving} shared and moving) "
-            f"from {self.spansExamined} spans examined across {self.shadersTracked} shaders "
-            f"({self.shadersInLastFrame} of them drawing in the last frame) "
-            f"over {self.framesObserved} frames"
-        )
-        rejected = (
-            f"  rejected: {self.rejectedVaryingWithinFrame} varying within a frame, "
-            f"{self.rejectedNeverChanging} never changing, "
-            f"{self.rejectedRotation} not a rotation"
-        )
-        lines = [totals, rejected]
-        if self.framesObserved < 2:
-            lines.append(
-                "  fewer than two frames were watched, so nothing is known to change and "
-                "no candidate could be told from a constant"
-            )
-        elif self.candidatesFound == 0:
-            lines.append(
-                "  no slot holds a frame-constant 3x4 with a real rotation. Either the run "
-                "never reached a drawn scene, or this title does not pass its view as a 3x4 "
-                "in the assembled uniform buffer."
-            )
-        elif self.sharedAndMoving == 0:
-            lines.append(
-                "  every candidate appears in one shader only, so none is shown to be a "
-                "view rather than that object's own transform"
-            )
-        lines.extend(f"  {candidate.render()}" for candidate in self.candidates)
-        return "\n".join(lines)
 
 
 # When set, every request is written to this file before it is sent and again with
@@ -509,41 +427,6 @@ def request_quit(port: int = DEFAULT_PORT, timeout: float = 5.0) -> None:
     substitute: the emulated system's handler ends the process on SIGTERM
     without the host's shutdown, so only this exercises the path players take."""
     request_bytes("POST", "/quit", port, timeout)
-
-
-def read_transforms(port: int = DEFAULT_PORT, timeout: float = 5.0) -> TransformReport:
-    """Read /transforms, refusing by reason rather than returning empty."""
-    url = f"http://127.0.0.1:{port}/transforms"
-    payload = _get("/transforms", port, timeout)
-    require_fields(url, payload, TransformReport.__annotations__, "a transform report")
-    candidates = []
-    for entry in payload["candidates"]:
-        require_fields(url, entry, TransformCandidate.__annotations__, "a transform candidate")
-        candidates.append(
-            TransformCandidate(
-                stageIndex=int(entry["stageIndex"]),
-                baseHash=int(entry["baseHash"]),
-                auxHash=int(entry["auxHash"]),
-                floatOffset=int(entry["floatOffset"]),
-                framesSeen=int(entry["framesSeen"]),
-                shadersSharing=int(entry["shadersSharing"]),
-                rotationError=float(entry["rotationError"]),
-                meanTranslationStep=float(entry["meanTranslationStep"]),
-                values=tuple(float(v) for v in entry["values"]),
-            )
-        )
-    return TransformReport(
-        framesObserved=int(payload["framesObserved"]),
-        shadersTracked=int(payload["shadersTracked"]),
-        spansExamined=int(payload["spansExamined"]),
-        rejectedVaryingWithinFrame=int(payload["rejectedVaryingWithinFrame"]),
-        rejectedNeverChanging=int(payload["rejectedNeverChanging"]),
-        rejectedRotation=int(payload["rejectedRotation"]),
-        candidatesFound=int(payload["candidatesFound"]),
-        sharedAndMoving=int(payload["sharedAndMoving"]),
-        shadersInLastFrame=int(payload["shadersInLastFrame"]),
-        candidates=tuple(candidates),
-    )
 
 
 @dataclass(frozen=True)

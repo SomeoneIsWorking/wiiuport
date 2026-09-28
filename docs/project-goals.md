@@ -31,9 +31,11 @@ addresses, identity, transform layout, or gameplay policy.
 ticks, and the intermediate frames are drawn by the title's own render path at a
 substituted pose rather than by the host re-issuing what the title submitted. The
 mechanism owns the substitution, the pacing, and the evidence; it does not know what
-any particular value means. Two routes exist and one is being retired: a title-side
-mod of the display thread's paint path, and a host-side replay of a recorded draw
-stream.
+any particular value means. **One route exists: a mod of the display thread's own paint
+path, so the title paints the tree itself at the lerped pose and there is no host-side
+copy of the frame to keep in step with one.** The other route — a host-side replay of a
+recorded draw stream, with the camera found by searching shaders and identity matched by
+uniform-block address — was deleted with its evidence, not deferred.
 
 **Why.** Wii U titles commonly lock simulation to 30 Hz. Raising the *presentation*
 rate preserves simulation semantics, unlike patching the game's tick rate. And a frame
@@ -45,8 +47,13 @@ nothing has to be guessed about which submitted value is which object's transfor
   the real title in a headless driven run, with denominators: paints per second, logic
   ticks per second, and two consecutive paints compared byte by byte.
 - An intermediate frame is the blend of the previous and current tick's pose, nearer
-  each than they are to each other, and differs from both — with the null case measured
-  too: two paints with no substitution are byte-identical.
+  each than they are to each other, and differs from both — **and the null case is a
+  discriminator, not a uniformity.** "Byte-identical" is not the right bar and is not
+  what the measurement shows: two paints with nothing substituted differ in 0.85% of
+  6,220,800 bytes with a largest delta of 3, against 32-35% with deltas of 164 and 221
+  for a genuinely different frame. So the condition is that the null case is
+  *indistinguishable from one paint on a stated measure*, and that the measure separates
+  the two cases. A uniformity would pass whether the two paints were the same or not.
 - Nothing is inferred from rendered pixels, and geometry is never sampled from an
   adjacent frame.
 - The runtime reports, with denominators: paints, logic ticks, per-binding block
@@ -65,10 +72,15 @@ stand-in in a display path touches:
 
 - one word of a vtable the display thread already calls, so the display thread paints
   through the stand-in;
-- **the first word of the frame being stood in for**, replaced by a relative branch into
-  a stub this runtime allocated, with the title's own instruction preserved inside that
-  stub and executed there before the frame resumes. A change to the guest's *code*, not
-  to a pointer to it, and therefore the one that needs the recompiler told;
+- **either the pointer to the frame, or the frame's own first word.** Two shapes are
+  offered, and the difference matters because one of them faults: the stand-in can be
+  reached by rewriting the one word of the vtable the display thread already calls
+  through, or by writing a branch at the frame's own entry. The first changes a pointer
+  to the frame; the second changes the guest's *code* and is the one that needs the
+  recompiler told, and it is the one that does not run. The shape that paints carries
+  the frame as a literal built from instructions lifted verbatim from the image, with
+  the two address words checked by reconstructing the frame from them rather than by
+  asserting two constants;
 - **executable memory in the loader's trampoline area**, through the loader's own
   allocator. That area's base is the HLE function registry's code, then its symbol
   names, then zero padding, so the capability has to say where in the area it is safe to
@@ -76,11 +88,22 @@ stand-in in a display path touches:
 - the title's own record of the interval it asked for;
 - and the emulator's flip pacing.
 
-The logic-path gate this runtime also offers is a **backstop, not a finding**: measured on
-the real title, the logic keeps 30.12 a second while the picture reaches 60, so the logic
-is not slaved to the flip on this title. Which of these a given title needs is the title
-project's decision, and the title-neutral capability that offers them says what each one
-is — including, for the third, that the loader's arena is not uniformly executable.
+**The logic-path gate is a finding, not a backstop, and this corrects what this document
+used to say.** It was written as "measured on the real title, the logic keeps its own rate
+while the picture reaches 60, so the logic is not slaved to the flip on this title". Both
+halves of that were read off runs in which the gate's probe had been refused, so the gate
+counted nothing while the title carried on. **A gate that was never installed looks
+exactly like a gate that was not needed.** With the probe installed, the tick is called
+once per paint, one for one: 480 paints and 480 tick calls in an 8.00 s window, 59.99 a
+second each, and the logic *does* follow the flip. The gate in the logic path is what
+holds it at 30.00 a second. So the gate is offered as a capability and its own
+installation state is reported next to its counts, because a zero that means "refused" and
+a zero that means "not needed" are the same number and opposite findings.
+
+Which of these a given title needs is the title project's decision, and the title-neutral
+capability that offers them says what each one is — including, for the third, that the
+loader's arena is not uniformly executable, and for the gate, that it is measured rather
+than assumed.
 
 ## GOAL-DRIVE — The runtime is drivable and measurable by an agent
 
