@@ -526,10 +526,62 @@ binder writes from the object, and the objective's own chain says so.
   have, is one object drawn at N for that one frame, counted by reason. The deleted mechanism's
   skips and their reasons are the pattern; the numbers are the reason the mechanism needed them.
 
+### Measured: the block does not hold it, and that redirects the mechanism
+
+The range scan, on the real title, gameplay reached, the camera moving, the three most-used written
+blocks of each round (the report is kept beside the harness):
+
+```
+negative control, the module's .data and .bss, 0x1018c0c0 + 3072264:
+  768055 windows, 23210 in the affine class, 0 moved, 0 poses
+written address 0: 0x3e638c00, seen 27253 times (32.2%)
+  181 windows over 768 bytes, 23 in the affine class, 0 moved, 0 poses
+written address 1: 0x3e638b00, seen 26750 times (31.6%)
+  181 windows over 768 bytes, 14 in the affine class, 0 moved, 0 poses
+written address 2: 0x453f0f00, seen 2297 times (2.7%)
+  181 windows over 768 bytes,  0 in the affine class, 0 moved, 0 poses
+```
+
+Two rounds, identical numbers to the window, so the title was in a steady state and this is not a
+sample of a transient. **The block does not hold a transform that moves.** 181 twelve-word windows
+over 768 bytes, 23 of them shaped like a transform, and not one of them changed between two readings
+a frame apart.
+
+**So "write the block" is wrong, and the section above is withdrawn rather than amended.** The pose
+was never in the guest's block: it is in the **assembled** uniform buffer -- the runtime's own copy,
+built by `uniformData_updateUniformVars` from the block and the ALU constant registers, and handed to
+the observer at `UniformAssembly::data`, which is writable and is the last point before upload. That
+is where the per-object census found it at offset 60, with 10 offsets moving and the best at 60 in
+every run.
+
+**And that is a better place, not a worse one.** `UniformAssembly::data` is:
+
+- **per draw**, and the draw is the title's own -- the objective's "blend at the game's own draw";
+- **writable at exactly one moment**, after the guest's values are read and before the GPU sees them;
+- **already carrying the node's identity** through `ObjectIdentityScope`, which the binder feeds;
+- and it needs **no guest memory write at all**, so nothing has to be put back afterwards.
+
+**The mechanism, restated against the measurement.** The host holds, per node, the twelve words the
+node's draw assembled at tick N-1 and the twelve it assembles at N. On the **second** paint of the
+tick -- the in-between frame, which the paint path's stand-in already makes possible -- the
+assembly hook for that node's draws writes the lerp into that draw's own assembled buffer, and the
+title's draw then uses it. The block is not touched, the title's own next tick sees its own values,
+and every skinning pass, attribute fetch and display list is the title's own code at the lerped pose.
+
+**What that still needs, and it is one thing.** *Which twelve words of the assembly is the pose.* The
+census says offset 60 is the best of 10 offsets that move, in 200,730 of 823,431 assemblies, and
+that the value at it is **per-object** -- 6 of 15 other objects read the same value, so a view
+matrix is not what it is. Ten moving offsets and one best offset is not a pose until the others are
+told apart: an assembly holds a model's matrix, a normal matrix, a texture matrix and a pass's view
+projection, and each of those is shaped like a transform. The discriminator is the *node*: the
+offset whose value is a function of the node and moves with the node, and which of the ten is the
+one every object draw of that node agrees on.
+
 **Native overrides are authorised, and the honest use of that here is narrow.** The blend needs no
-override of the title's code: the title reads its own block, and a block is memory. What an override
-*is* good for is the one thing a memory write cannot do -- see a block that is bound but not written
-this frame, which is a title behaviour rather than a value. That stays a measurement, not a design.
+override of the title's code: the title reads its own uniforms, and the assembled buffer is the
+runtime's own memory. What an override *is* good for is the one thing a memory write cannot do -- see
+a value the title computes into a register rather than through a block, which is a title behaviour
+rather than a value. That stays a measurement, not a design.
 
 ### What the next read is: a range, not a search
 
