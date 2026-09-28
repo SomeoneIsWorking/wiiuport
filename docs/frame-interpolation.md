@@ -615,6 +615,38 @@ armed window, 8 s:   assemblies 1,526,356 -> 1,662,256   (+135,900)
 paint, at every in-between draw that could be blended.** And the denominators are the ones that make
 it a measurement rather than a total: 1,240 of 1,240, over 78 held pairs out of 135,900 assemblies.
 
+**And a second run of the same harness wrote nothing at all.** Same title, same presses, same mode,
+same seed of play: `held` 0, `lerped` 0, `withoutShader` 29,440 of 29,440 — not one draw of any of
+the 56 shaders the table held. `POST /pose` took 64 candidates in the first run and 56 in the second,
+so the table was nearly the same size both times and covered a disjoint set of the game's draws.
+
+**So the mechanism is proven and it is not reliable, and the reason is in the table's lifetime.** The
+census is cumulative: it has found 162 distinct shaders since boot, of which the per-object signature
+admits 56 to 64. The game's *current* draws use 16 shaders it names and 146 it does not, and whether
+any of the 56 admitted ones is among the current draws is a property of when the table was fed
+relative to what the game happened to be showing. A run that reaches gameplay a second sooner, or
+turns a corner, and the table is full of shaders the game has left behind.
+
+**This is a coupling defect in the design and not in the arithmetic.** The blend needs a table of
+*the shaders being drawn now*, and it has a table of *the shaders the census has ever seen and
+admits*. The two agree only by luck. Three ways out, and the one to build is the first:
+
+1. **The table is fed from the census continuously, and the census expires.** A candidate whose
+   shader has not been drawn for some seconds is dropped, so the table holds what is being drawn. This
+   is a per-candidate timestamp and a bound, and the report carries how many were expired.
+2. **The blend asks the census directly per draw** rather than a snapshot. The cost is a lookup per
+   draw in a map that is being written, which is a lock on the display thread's path.
+3. **The census reports per shader and the table is fed per shader on demand.** A `GET /pose?shader=…`
+   the harness calls for the 16 shaders it has actually seen. This is the smallest change and it is
+   driven by the measurement rather than by a guess: **the blend's own unplaced-shader list names the
+   shaders that need an answer**, so the harness can ask for exactly those.
+
+**The run also gives the next measurement, and it is the one that decides between them**: of 299
+candidates offered, 56 to 64 were taken and 235 to 243 were refused, and the first refusal is
+reported as *"compared 0 assemblies, so nothing said whether it moves"*. **So the scene's shaders are
+being found and refused, not missed** — and the refusal breakdown, which the report counts and the
+harness only prints when nothing was accepted, is where the 235 are named.
+
 **The run also found two things by asking questions the first version of the instrument could not.**
 
 **One: `withoutShader` equal to `assemblies` said the blend was not happening and not why.** The
