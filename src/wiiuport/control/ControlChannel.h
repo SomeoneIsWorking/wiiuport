@@ -16,6 +16,8 @@
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/title/GlobalPoseCensus.h"
 #include "wiiuport/title/LogicGate.h"
+#include "wiiuport/title/ObjectPoseLocator.h"
+#include "wiiuport/title/PoseByShader.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
@@ -69,9 +71,16 @@ class ControlChannel {
         const guest::CallerCensus& callers;
         title::WindWakerPaint& paint;
         const title::UniformBlockCensus& blocks;
+        // The pose census behind `blocks`'s `poseLocator` section, handed over so the pose
+        // table can be fed from the structure rather than from the rendered report.
+        const title::ObjectPoseLocator& poses;
         // Mutable because scanning is work the channel does on request, not work the display
         // thread does per frame; the census itself is const everywhere else.
         title::GlobalPoseCensus& globalPose;
+        // Where a draw's pose is, in words, per shader. Fed from the census's own report
+        // and read by the blend, so the offsets a draw is placed from are the ones the
+        // measurement gave rather than a table written by hand.
+        title::PoseByShader& poseByShader;
         title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
@@ -203,7 +212,9 @@ class ControlChannel {
     const guest::CallerCensus& m_callers;
     title::WindWakerPaint& m_paint;
     const title::UniformBlockCensus& m_blocks;
+    const title::ObjectPoseLocator& m_poses;
     title::GlobalPoseCensus& m_globalPose;
+    title::PoseByShader& m_poseByShader;
     title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;

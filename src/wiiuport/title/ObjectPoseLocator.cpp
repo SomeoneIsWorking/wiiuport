@@ -266,6 +266,18 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
     }
 }
 
+std::vector<ObjectPoseLocator::Found> ObjectPoseLocator::found() const {
+    std::scoped_lock lock(m_mutex);
+    std::vector<Found> out;
+    out.reserve(m_candidates.size());
+    for (const Candidate& candidate : m_candidates) {
+        out.push_back(Found{candidate.shaderBaseHash, candidate.shaderAuxHash, candidate.offset,
+                            candidate.otherIdentities, candidate.otherIdentitiesSame,
+                            candidate.moved, candidate.compared});
+    }
+    return out;
+}
+
 uint32_t ObjectPoseLocator::bestOffset() const {
     std::scoped_lock lock(m_mutex);
     uint32_t best = 0;
