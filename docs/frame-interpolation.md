@@ -477,6 +477,46 @@ offset alone, 1 candidate where there should be 2.**
 code, and no fixed offset: for a draw, the pose is at the offset *that draw's own shader* puts it
 at, which is a lookup rather than a measurement.
 
+### Measured: the camera is twelve words in a flat array, at a per-shader offset
+
+With the table keyed on `(shader, offset)` and the bar measured against each shader's own
+assemblies, the same run on the real title reports **240 of 298 candidates clearing the bar** --
+against **1** before, on a whole-frame denominator no per-shader count can reach. 162 distinct
+shaders, 40 distinct moving offsets. The eight the report names, with the values:
+
+```
+shader 0x1557c18f92f3bcb9  offset  12   moved 21730/21879   0.00103093, 0.694118, 1, 1, ...
+shader 0x1557c18f92f3bcb9  offset  60   moved 21708/21857   0, -0.638178, 0.010258, 0.76982, -364194, -0.586921
+shader 0x8cecd19741c6c1c7  offset   4   moved   202/21950   0.005, 2455, 0.00103093, 0.694118, 1, 1
+shader 0x8cecd19741c6c1c7  offset  84   moved    80/21864   0.64063, -0.495092, 20791.9, -0.498249, -0.767781
+shader 0xb7252004aba21c10  offset  76   moved    98/235     0, 0.443678, 0.768473, 0.461084, 0, -2.81476
+shader 0x44f85a8fe341045c  offsets 0, 228, 284               held, never moved
+```
+
+**The same matrix is in two shaders, one word apart.** Laying the windows over each other by
+(offset - lowest) / 4, offsets 4 and 12 agree at four of six printed words with the second starting
+two words after the first -- one array, two shaders' layouts. And offset 60's words
+(`-0.638178, 0.010258, 0.76982, -364194, -0.586921`) are indices 5..10 of the seventeen-word array
+this document already recorded, with offset 84 continuing it at 13..18.
+
+**So the answer to "which twelve words of the assembly is the pose", for the camera:** the camera is
+twelve consecutive words in a flat run of floats in the title's assembled uniforms, and where that run
+lands is a property of the shader that read it. It is at **offset 12 in shader `0x1557c18f92f3bcb9`**
+(21,730 movements of 21,879 comparisons) and at **offset 4 in shader `0x8cecd19741c6c1c7`** (202 of
+21,950). The other three offsets named are the same array at other alignments, or matrices that
+never moved.
+
+**That is writable.** A blend does not need to search: for a draw, the pose is at the offset *that
+draw's own shader* puts it at, and both offsets are the title's own shader hashes. The lookup is the
+per-shader table this change built, the write is twelve words into the assembled buffer, and the
+title's own draw produces everything else.
+
+**And one more defect, found by the measurement rather than by reading:** the per-shader denominator
+was keyed on the **base hash alone**, so shaders differing only in their aux hash were summed --
+**45,475 assemblies attributed to one "shader" that is three**, and a denominator three times too
+large is a bar nothing clears honestly. It is keyed on the pair now, and the test writes two shaders
+sharing a base hash and requires the second's own denominator; with the base alone it fails.
+
 ### And the named address is the name, not the matrix
 
 The comparison against `0x10163bb4` came back with 48 bytes that are not a matrix in either byte

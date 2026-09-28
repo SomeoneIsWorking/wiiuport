@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -243,7 +244,13 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     // overflow counted rather than dropped: a shader whose count is missing makes every candidate
     // of it fail the bar, and a candidate that fails a bar for a reason the report does not name
     // reads as a candidate that is not there.
-    std::unordered_map<uint64_t, uint64_t> m_byShader;
+    // **Keyed on the pair, not the base hash alone:** a shader is identified by its base and
+    // aux hashes together, and keying on the base alone summed several of them. The run that
+    // found this reported 45,475 assemblies for one "shader" that is three, and a
+    // denominator three times too large is a bar no candidate clears honestly. A map rather
+    // than a hash map because the key is a pair, and a pair hashed by hand is a second rule
+    // about what a shader is.
+    std::map<std::pair<uint64_t, uint64_t>, uint64_t> m_byShader;
     mutable std::mutex m_mutex;
     // offset / 4 -> its counts. A buffer is a float array, so an offset in floats is the
     // unit the scan and the substitution both want.

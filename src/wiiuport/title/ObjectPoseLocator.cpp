@@ -113,7 +113,7 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
         // number the belief bar is measured against, and without it a per-shader candidate is
         // compared against the whole frame -- which no single shader's layout can reach.
         std::scoped_lock lock(m_mutex);
-        ++m_byShader[assembly.shaderBaseHash];
+        ++m_byShader[{assembly.shaderBaseHash, assembly.shaderAuxHash}];
     }
 
     // Every 4-aligned offset, tested. A vector of candidates rather than a fixed-size
@@ -307,13 +307,13 @@ uint32_t ObjectPoseLocator::bestAffineOffset() const {
 // whole-frame denominator compared against a per-shader count is a property of the window rather
 // than of the title, and it cleared one candidate of 298 in the run that found it.
 uint64_t ObjectPoseLocator::shaderAssembliesLocked(const Candidate& candidate) const {
-    const auto held = m_byShader.find(candidate.shaderBaseHash);
+    const auto held = m_byShader.find({candidate.shaderBaseHash, candidate.shaderAuxHash});
     return held == m_byShader.end() ? 0 : held->second;
 }
 
 uint64_t ObjectPoseLocator::shareOfShaderLocked(const Candidate& candidate,
                                                 uint64_t inClass) const {
-    const auto held = m_byShader.find(candidate.shaderBaseHash);
+    const auto held = m_byShader.find({candidate.shaderBaseHash, candidate.shaderAuxHash});
     if (held == m_byShader.end() || held->second == 0) {
         return 0;
     }
