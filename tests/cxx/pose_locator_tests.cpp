@@ -290,7 +290,48 @@ void theDenominatorIsKeyedOnTheShaderAndNotOnItsBaseHashAlone() {
     }
 }
 
+// **A buffer too short to hold a pose is counted as its own fact, and not as one the scan looked at
+// and found nothing in.** The two are different answers: a 20-word buffer cannot hold a 3x4, so
+// there is nothing for the scan to find, and reporting that as "no candidate here" is a claim about
+// the data when it is a statement about the size.
+//
+// **This is where the title's most-drawn shaders go**, and it was found by asking the census about
+// them by name: `0x6669a23d03806414` has 0 candidates of 300 considered over 41,136 draws, and
+// neither the belief bar nor the blend's table refused one -- the census never looked at any of
+// them.
+void aBufferTooShortToHoldAPoseIsCountedAsItsOwnFact() {
+    auto tooShort = [](size_t words) {
+        wiiuport::frame::RecordedUniformAssembly assembly;
+        assembly.shaderBaseHash = 0x6669a23d03806414;
+        assembly.blockSources = {0x3e000000u};
+        assembly.data.assign(words, 0.5f);
+        return assembly;
+    };
+    ObjectPoseLocator locator;
+    // Eleven words: one short of a 3x4.
+    locator.onAssemblyRecorded(tooShort(11));
+    locator.onAssemblyRecorded(tooShort(11));
+    const std::string body = locator.json();
+    check::isTrue(
+        mentions(body, "\"tooShortForAPose\":2"),
+        "two assemblies too short to hold a pose are counted as such, beside the others: " +
+            body.substr(0, 200));
+    check::isTrue(mentions(body, "\"assemblies\":2"),
+                  "and they are assemblies the class was handed, not a separate population");
+    // And the count is not the same field as a buffer too large to scan: a reader who saw only
+    // `unscannedBuffers` would conclude the scan had looked at these and found nothing.
+    check::isTrue(mentions(body, "\"unscannedBuffers\":0"),
+                  "and they are not counted as unscanned, which is a buffer too large: " +
+                      body.substr(0, 200));
+    // An assembly long enough to hold a pose is scanned, so the count does not grow.
+    locator.onAssemblyRecorded(tooShort(24));
+    check::isTrue(mentions(locator.json(), "\"tooShortForAPose\":2"),
+                  "and a buffer that could hold a pose is not counted, so the field means what its "
+                  "name says");
+}
+
 void wiiuport::tests::runObjectPoseLocatorTests() {
+    aBufferTooShortToHoldAPoseIsCountedAsItsOwnFact();
     theDenominatorIsKeyedOnTheShaderAndNotOnItsBaseHashAlone();
     oneMatrixIsOneCandidateHoweverManyAlignmentsItIsAffineAt();
     oneMatrixInTwoShadersIsTwoCandidatesAndTwiceInOneShaderIsOne();
