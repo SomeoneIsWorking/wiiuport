@@ -66,7 +66,11 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
         uint64_t moved = 0;        // of those, how many found the value moved
         uint64_t still = 0;        // of those, how many found it did not
         float biggestDelta = 0.0f; // the largest single-float change seen
-        uint64_t identities = 0;   // distinct block-source sets seen holding one here
+        // Distinct identities that have held this offset. **This was a constant 1** -- set when the
+        // candidate was created and never moved -- so a report sorting offsets by it sorted them by
+        // nothing. It is now counted where the identity set is used, and the two differ whenever
+        // more than one object has held the offset, which is the normal case.
+        uint64_t identities = 0;
         // The two classes, counted apart. `affine` is the superset -- a non-singular 3x3 --
         // and `rigid` the strict one. An offset can be affine in every assembly and rigid in
         // none, and that difference is the answer to "is this a transform, or a rigid one".

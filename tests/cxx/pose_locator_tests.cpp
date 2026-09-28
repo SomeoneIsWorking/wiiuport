@@ -507,6 +507,38 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
                               nested(body, "identitySamplesCapped"));
         }
         {
+            // **The distinct-identity count is a measurement.** It was `= 1` on the candidate's
+            // first appearance and never touched again, so every run reported `identities: 1` at
+            // every offset and a reader sorting offsets by it sorted them by nothing. A field that
+            // is a constant cannot be told from a field that is telling the truth by reading it --
+            // only by looking at two offsets in the same report and seeing whether they differ.
+            auto twoObjects = [](uint32_t object, float spin) {
+                std::vector<float> words(64, 0.0f);
+                putPose(words, 8, spin);
+                return assembly(words, {0x3e000000u}, object);
+            };
+            ObjectPoseLocator locator;
+            for (int round = 0; round < 40; round++) {
+                locator.onAssemblyRecorded(twoObjects(0x1000u, 0.10f * static_cast<float>(round)));
+                locator.onAssemblyRecorded(twoObjects(0x2000u, 0.20f * static_cast<float>(round)));
+            }
+            const std::string body = locator.json();
+            const std::string marker = "\"offset\":" + std::to_string(8 * sizeof(float));
+            const size_t at = body.find(marker);
+            check::isTrue(at != std::string::npos, "the offset is in the report: " + body);
+            // The entry is read up to the next offset's marker rather than to a brace: the report
+            // nests, and a window closed on the wrong brace reads a field that is not there as one
+            // that is absent -- which is a different failure with the same symptom.
+            const size_t next = body.find("\"offset\":", at + 1);
+            const std::string entry =
+                body.substr(at, (next == std::string::npos ? body.size() : next) - at);
+            // Two objects each held it, so the count is two. A constant of one fails here and a
+            // counter that only ever fires once fails here too.
+            check::isTrue(mentions(entry, "\"identities\":2"),
+                          "two objects held this offset, so the report says two and not one: " +
+                              entry);
+        }
+        {
             // **The case that tells "compared against the last value" from "compared against the
             // first".** Three objects in a row holding A, B, B. Compared against the value just
             // seen, the second differs and the third agrees -- one difference and one agreement.
