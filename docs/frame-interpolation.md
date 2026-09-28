@@ -391,6 +391,23 @@ matrix. **The per-object chain cannot carry a camera move.**
 > The fix is to count offsets *per identity*: hold an identity's offset on the identity, not on the
 > offset. The discriminator is already the right question -- does this value belong to this node --
 > and it is being asked of the wrong subject.
+>
+> **One of the three defects in it is fixed and the other two are not.** The report's `identities`
+> field -- "distinct block-source sets seen holding one here" -- was `= 1` when a candidate was
+> created and never moved again, so **every run reported one identity at every offset** and a reader
+> sorting offsets by it was sorting by nothing. It is now **derived** from the per-(identity, offset)
+> history that actually holds the information, and it is a different number from `otherIdentities`
+> (the bounded sample the comparison used) and from `otherIdentitiesSameValue` (what it concluded).
+> The test reads two objects into one offset and requires `identities: 2`, and is shown its other
+> answer: put the field back to a constant and it fails.
+>
+> The other two are not fixed and are not pretended to be. The "held often" bar is still pooled over
+> identities, so a per-object value is still diluted below it; and the cross-object comparison is
+> still against the **previous assembly's** value rather than the same object's, which measures
+> whether *consecutive draws* share a value -- a pass-value test, not a per-object one. Both are the
+> same redesign, and the redesign is: keep the candidates **per identity**, hold an identity's
+> offset on the identity, and answer "does this value track this node" over that node's own
+> consecutive assemblies.
 
 ### The vertex-attribute census offers nothing, and a zero that offers nothing is not a finding
 

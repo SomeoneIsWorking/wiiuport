@@ -136,7 +136,10 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
                                       return one.offset == candidate.offset;
                                   });
         if (known == m_candidates.end()) {
-            candidate.identities = 1;
+            // `identities` is **derived** in `json()` from the pairs this class remembers, not
+            // counted here: it was `= 1` here and never touched again, so every run reported one
+            // identity at every offset and a reader sorting offsets by it sorted them by nothing.
+            candidate.identities = 0;
             m_candidates.push_back(candidate);
             known = m_candidates.end() - 1;
         } else {
@@ -380,7 +383,20 @@ std::string ObjectPoseLocator::json() const {
             one.raw("moving", candidate.moved > 0 ? "true" : "false");
             one.raw("biggestDelta", JsonBody::real(static_cast<double>(candidate.biggestDelta)));
             one.raw("scale", JsonBody::real(static_cast<double>(candidate.biggestScale)));
-            one.number("identities", candidate.identities);
+            // **Derived, not counted.** `identities` is how many distinct objects have held this
+            // offset, and the structure that knows is the per-(identity, offset) history -- so it is
+            // read from there. A counter maintained beside it was `= 1` on the candidate's first
+            // appearance and never moved, which is a report field that is a constant and reads like
+            // a measurement. And this is a different number from `otherIdentities`, which is the
+            // bounded sample the cross-object comparison used, and from `otherIdentitiesSameValue`,
+            // which is what that comparison concluded.
+            uint64_t holders = 0;
+            for (const auto& [heldIdentity, held] : m_seen) {
+                if (held.first == candidate.offset) {
+                    ++holders;
+                }
+            }
+            one.number("identities", holders);
             // The global-or-per-object question, three numbers that answer it between them: a
             // candidate compared against two or more objects and never differing from the first is
             // a value every object shares, which is what a camera's view matrix is. Reported for
