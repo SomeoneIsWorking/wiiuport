@@ -112,6 +112,19 @@ void linked() {
     g_fake->writeWord(LogicGate::kTickBody, LogicGate::kTickSecond);
 }
 
+// **Where the four counters live, in words.** Each is a named constant computed from another one,
+// and a constant expression written in a function body is a named constant in the wrong place: the
+// value does not change, the *name* is what a reader looks for, and four of them spelled out at
+// their uses were four places to look.
+constexpr uint32_t kCallsAt = kCounters + 4 * LogicGate::kCallsWord;
+constexpr uint32_t kTicksAt = kCounters + 4 * LogicGate::kTicksWord;
+constexpr uint32_t kThroughAt = kBlock + 4 * LogicGate::kThroughWord;
+constexpr uint32_t kBranchAt = kBlock + 4 * LogicGate::kBranchWord;
+// The bare pass-through a freshly allocated gate block holds: a branch to the tick's own body, by
+// the displacement from the block rather than an absolute address, because the block's address is
+// chosen at link time.
+constexpr uint32_t kPassThroughAt = (18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu);
+
 } // namespace
 
 // The report is read by a JSON parser and by nothing else, so "it has the field"
@@ -153,10 +166,10 @@ void wiiuport::tests::runLogicGateTests() {
         }
         // In the data block, which is where the payload counts and where the
         // report says the counters are.
-        const uint32_t calls = kCounters + 4 * LogicGate::kCallsWord;
-        const uint32_t ticks = kCounters + 4 * LogicGate::kTicksWord;
-        const uint32_t through = kBlock + 4 * LogicGate::kThroughWord;
-        const uint32_t branchAt = kBlock + 4 * LogicGate::kBranchWord;
+        const uint32_t calls = kCallsAt;
+        const uint32_t ticks = kTicksAt;
+        const uint32_t through = kThroughAt;
+        const uint32_t branchAt = kBranchAt;
         // Every word below is written as opcode, then source in bits 21-25, then
         // destination in bits 16-20, then the immediate -- the order the
         // encodings actually have. The two that were got wrong first time are
@@ -320,7 +333,7 @@ void wiiuport::tests::runLogicGateTests() {
                           word == ((18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu)),
                       "and the gate's block is a bare pass-through to the tick's own body before "
                       "the gate is ever enabled");
-        const uint32_t passThrough = (18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu);
+        const uint32_t passThrough = kPassThroughAt;
         check::isTrue(gate.enable().empty(), "the gate installs");
         check::isTrue(readWord(kBlock, word) && word != passThrough,
                       "and enabling it puts the counting payload there instead of the "
