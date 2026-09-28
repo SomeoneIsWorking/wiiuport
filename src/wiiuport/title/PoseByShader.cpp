@@ -113,8 +113,7 @@ uint32_t PoseByShader::blendableWords(const float* words) {
     return blendable;
 }
 
-std::string PoseByShader::json() const {
-    JsonBody body;
+void PoseByShader::writeTo(JsonBody& body) const {
     body.number("shareBar", kShareBar);
     body.number("poseWords", kWords);
     body.number("shaders", static_cast<uint64_t>(m_byShader.size()));
@@ -148,6 +147,11 @@ std::string PoseByShader::json() const {
         ++index;
     }
     body.object("shaders", shaders.text());
+}
+
+std::string PoseByShader::json() const {
+    JsonBody body;
+    writeTo(body);
     return body.finish();
 }
 

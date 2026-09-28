@@ -21,6 +21,14 @@ bool requestFrameCapture(LatteFrameHooks::CaptureCallback&& callback, int count)
 Runtime::Runtime() : m_capture(&requestFrameCapture) {
     // Frame complete, before the guest's swap: everything that reads the frame first.
     m_recorder.addAssemblyRecordedListener(&m_poseLocator);
+    // **The blend is asked which paint of the pair is in progress, from the paint module itself.**
+    // Registered before anything else is because it writes into the guest's own buffer, so it has
+    // to be the listener the observer reaches with a mutable span -- and it is last in that list
+    // because a measurement must never see the value the blend wrote: the census reports the
+    // title's own pose, and a census that read a lerp would be a census of this project's own
+    // arithmetic.
+    m_poseBlend.setPaint(&m_paint);
+    m_recorder.addAssemblyBeforeDrawListener(&m_poseBlend);
     m_recorder.addDisplayedListener(&m_pacing);
     m_recorder.addScanOutListener(&m_scanOut);
     m_recorder.addFrameEndListener(&m_shapeLog);

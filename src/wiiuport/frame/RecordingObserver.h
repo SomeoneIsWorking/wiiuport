@@ -42,6 +42,24 @@ class AssemblyRecordedListener {
     virtual void onAssemblyRecorded(const RecordedUniformAssembly& assembly) = 0;
 };
 
+// **Notified with the guest's own buffer, before it is copied and before the draw is issued.** This
+// is a separate seam from `AssemblyRecordedListener` because that one is handed a *copy* -- a
+// `RecordedUniformAssembly` whose `data` is a vector this class owns -- and a listener that wanted
+// to change what the title is about to transform with would be changing a copy, which the draw
+// never reads. A write to a copy is a write to nothing, and it would report having blended.
+//
+// The window is the only one in which the value the title is about to use is still the title's own
+// and not yet frozen into a record: the observer is called at the fork's uniform-assembly hook, the
+// buffer is the assembled one, and the draw follows.
+class AssemblyBeforeDrawListener {
+  public:
+    virtual ~AssemblyBeforeDrawListener() = default;
+    // `words` is the assembled buffer as a mutable span, `node` is the address the title's binder
+    // named for this draw, and the shader hashes identify whose layout the buffer is.
+    virtual void onAssemblyBeforeDraw(float* words, size_t count, uint64_t shaderBaseHash,
+                                      uint64_t shaderAuxHash, uint32_t node) = 0;
+};
+
 // Notified after the guest's swap has shown the frame most recently recorded.
 // Separate from FrameEndListener because some measurements are defined by
 // what is already on screen: a null diff captures the guest's present and
@@ -162,6 +180,15 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void addAssemblyRecordedListener(AssemblyRecordedListener* listener) {
         if (listener != nullptr) {
             m_assemblyListeners.push_back(listener);
+        }
+    }
+
+    // Registered here rather than at construction because a listener that wants the live buffer is
+    // one the caller adds alongside the measurement that fills its table, and the two are wired at
+    // different times.
+    void addAssemblyBeforeDrawListener(AssemblyBeforeDrawListener* listener) {
+        if (listener != nullptr) {
+            m_beforeDrawListeners.push_back(listener);
         }
     }
 
@@ -326,6 +353,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
   private:
     std::vector<FrameEndListener*> m_listeners;
     std::vector<AssemblyRecordedListener*> m_assemblyListeners;
+    std::vector<AssemblyBeforeDrawListener*> m_beforeDrawListeners;
     std::vector<FrameShownListener*> m_shownListeners;
     std::vector<PresentListener*> m_presentListeners;
     std::vector<DisplayedListener*> m_displayedListeners;
