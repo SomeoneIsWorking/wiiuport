@@ -149,7 +149,14 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
     }
 
     std::scoped_lock lock(m_mutex);
-    for (const uint32_t at : seenHere) {
+    for (const uint32_t byteOffset : seenHere) {
+        // The offset is in bytes and the data is indexed in words. **One named conversion here
+        // rather than five `at / sizeof(float)` inside pointer expressions**, which is a scaled
+        // value scaled again by the time it is used, and which left the two units implicit at every
+        // use.
+        // **Not `const`**: it is computed from the loop's own variable, and the rule for a computed
+        // value is an ordinary local -- a `const` here reads as a named constant and is not one.
+        size_t word = byteOffset / sizeof(float);
         // **Keyed on the shader as well as the offset.** An assembly is one shader's uniform
         // buffer, and a uniform block's layout is fixed: two draws of one shader put the same
         // uniform at the same slot every frame, and two *different* shaders may put the same
@@ -157,22 +164,24 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
         // shader's layout together and read one matrix as eight candidates -- the same class of
         // fault as pooling offsets over identities, and for the same reason: the instrument was
         // keyed on the wrong subject.
-        auto known = std::find_if(
-            m_candidates.begin(), m_candidates.end(), [at, &assembly](const Candidate& one) {
-                return one.offset == at && one.shaderBaseHash == assembly.shaderBaseHash &&
-                       one.shaderAuxHash == assembly.shaderAuxHash;
-            });
+        auto known = std::find_if(m_candidates.begin(), m_candidates.end(),
+                                  [byteOffset, &assembly](const Candidate& one) {
+                                      return one.offset == byteOffset &&
+                                             one.shaderBaseHash == assembly.shaderBaseHash &&
+                                             one.shaderAuxHash == assembly.shaderAuxHash;
+                                  });
         if (known == m_candidates.end()) {
             Candidate candidate;
             candidate.shaderBaseHash = assembly.shaderBaseHash;
             candidate.shaderAuxHash = assembly.shaderAuxHash;
-            candidate.offset = at;
+            candidate.offset = byteOffset;
             candidate.assemblies = 1;
             candidate.affineAssemblies = 1;
-            if (Shape::isRigid(assembly.data.data() + at / sizeof(float))) {
+            const float* const words = assembly.data.data() + word;
+            if (Shape::isRigid(words)) {
                 candidate.rigidAssemblies = 1;
             } else {
-                candidate.biggestScale = Shape::scaleOf(assembly.data.data() + at / sizeof(float));
+                candidate.biggestScale = Shape::scaleOf(words);
             }
             // `identities` is **derived** in `json()` from the pairs this class remembers, not
             // counted here: it was `= 1` here and never touched again, so every run reported one
@@ -183,29 +192,29 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
         } else {
             known->assemblies++;
             known->affineAssemblies++;
-            if (Shape::isRigid(assembly.data.data() + at / sizeof(float))) {
+            const float* const words = assembly.data.data() + word;
+            if (Shape::isRigid(words)) {
                 known->rigidAssemblies++;
             } else {
-                known->biggestScale = std::max(
-                    known->biggestScale, Shape::scaleOf(assembly.data.data() + at / sizeof(float)));
+                known->biggestScale = std::max(known->biggestScale, Shape::scaleOf(words));
             }
         }
         // The alignment this assembly saw the matrix at, and the over-count the collapse removed
         // beside it. **The alignments are the fact the blend turns on: the same matrix at two
         // offsets is two offsets to write, so a pose's offset in an assembly is not a constant.**
-        if (std::find(known->alignments.begin(), known->alignments.end(), at) ==
+        if (std::find(known->alignments.begin(), known->alignments.end(), byteOffset) ==
             known->alignments.end()) {
             if (known->alignments.size() >= kMaxAlignments) {
                 known->alignmentsCapped = true;
             } else {
-                known->alignments.push_back(at);
+                known->alignments.push_back(byteOffset);
             }
         }
         known->folded += foldedHere;
         // One unit throughout: the offset in bytes, as the candidates and the report both use
         // it, and the data indexed by it.
-        remember(identity, assembly.shaderBaseHash, assembly.shaderAuxHash, at,
-                 assembly.data.data() + at / sizeof(float));
+        remember(identity, assembly.shaderBaseHash, assembly.shaderAuxHash, byteOffset,
+                 assembly.data.data() + word);
     }
 
     // The global-or-per-object question, over the candidates as a whole rather than the ones this

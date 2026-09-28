@@ -542,7 +542,11 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
             }
             return lucent::http::Response::json(200, "OK", m_paint.json());
         }
-        const long long asked = requestedCount(std::string(request.query()), "mode", 3);
+        // **The cast is stated, because `requestedCount` counts and a count is a `size_t`.** It was
+        // narrowed into the signed type `modeFrom` takes without a word, which is a conversion fine
+        // for every count a title can make and a defect in the reader.
+        const auto asked =
+            static_cast<long long>(requestedCount(std::string(request.query()), "mode", 3));
         const std::optional<title::WindWakerPaint::Mode> mode =
             title::WindWakerPaint::modeFrom(asked);
         if (!mode.has_value()) {

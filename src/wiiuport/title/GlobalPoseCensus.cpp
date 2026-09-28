@@ -35,11 +35,11 @@ std::string hexValue(uint32_t value) {
 } // namespace
 
 GlobalPoseCensus::Range GlobalPoseCensus::data() {
-    return {"data", "the title's .data and .bss", kStart, kEnd};
+    return kTitleRange;
 }
 
 GlobalPoseCensus::Range GlobalPoseCensus::gpuUniformBlocks() {
-    return {"gpu-uniform-blocks", "GX2 uniform block memory", kGpuStart, kGpuEnd};
+    return kGpuUniformRange;
 }
 
 // A hexadecimal address as a caller writes it, and whether it was one at all: `0x` in front is
@@ -55,7 +55,7 @@ bool parseHexWord(const std::string& text, uint32_t& out) {
         return false;
     }
     uint32_t value = 0;
-    for (const char digit : body) {
+    for (const char& digit : body) {
         uint32_t nibble = 0;
         if (digit >= '0' && digit <= '9') {
             nibble = static_cast<uint32_t>(digit - '0');
@@ -140,11 +140,9 @@ GlobalPoseCensus::NamedRange GlobalPoseCensus::namedRange(const std::string& sta
 }
 
 const GlobalPoseCensus::Range& GlobalPoseCensus::rangeByName(const std::string& name) {
-    static const Range title = GlobalPoseCensus::data();
-    static const Range gpu = gpuUniformBlocks();
-    // A name that matches neither is a refusal at the channel, not a silent default: a scan asked
-    // for a range the code does not have would otherwise report the other range's answer.
-    static const Range unknown = {"no-such-range", "no such range", 0, 0};
+    const Range& title = kTitleRange;
+    const Range& gpu = kGpuUniformRange;
+    const Range& unknown = kNoSuchRange;
     if (name == title.token) {
         return title;
     }
@@ -163,7 +161,7 @@ size_t GlobalPoseCensus::scan(std::string& refusal, const Range& range) {
         return 0;
     }
     const uint32_t start = range.start;
-    const uint32_t words = (range.end - range.start) / 4;
+    uint32_t words = (range.end - range.start) / 4;
     m_rangeName = range.label;
     m_rangeStart = start;
     m_rangeEnd = range.end;
