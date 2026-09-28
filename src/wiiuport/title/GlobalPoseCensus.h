@@ -89,8 +89,8 @@ class GlobalPoseCensus {
     // fixed addresses, so both are constants. The uniform block a draw sources does not -- it is
     // wherever the title's binder put it, and it moves between runs, between frames and between
     // objects. A table cannot hold those, and the measurement that unblocked the blend needs
-    // exactly them: the write location is `0x47eee100` to `0x47eee400` on one run and somewhere else
-    // on the next, from the title's own `GET /blocks` report.
+    // exactly them: the write location is `0x47eee100` to `0x47eee400` on one run and somewhere
+    // else on the next, from the title's own `GET /blocks` report.
     //
     // So the range is a parameter, bounded and parsed rather than trusted: a caller cannot make the
     // scan walk the whole address space, and a range that wraps, is empty, is not four-aligned or
@@ -104,6 +104,7 @@ class GlobalPoseCensus {
         uint32_t askedStart = 0;
         uint32_t askedEnd = 0;
     };
+
     static NamedRange namedRange(const std::string& start, const std::string& bytes);
     // The widest a named range may be, and the reason. Two snapshots of the range are held while it
     // is compared, so 4 MB is 8 MB of host memory on the channel thread and about 350,000

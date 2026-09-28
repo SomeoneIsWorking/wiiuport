@@ -260,8 +260,8 @@ size_t GlobalPoseCensus::scan(std::string& refusal, const Range& range) {
     // the one that moved most, because the sort put it first, so a real pose is kept and its own
     // shifted fragments are not -- and the count becomes the number of distinct poses in the data
     // area rather than the number of windows that happened to satisfy a test.
-    // **The rule is `TransformShape::sameShapeAs`,** which `ObjectPoseLocator` also asks. It used to
-    // be a lambda here and a second copy of the same arithmetic there, and two copies of a rule
+    // **The rule is `TransformShape::sameShapeAs`,** which `ObjectPoseLocator` also asks. It used
+    // to be a lambda here and a second copy of the same arithmetic there, and two copies of a rule
     // that decides how many poses a report claims are two numbers a reader cannot compare.
     std::vector<uint32_t> keptAddresses;
     std::vector<Hit> kept;
