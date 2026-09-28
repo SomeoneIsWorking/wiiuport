@@ -34,19 +34,53 @@ std::string hexValue(uint32_t value) {
 
 } // namespace
 
-size_t GlobalPoseCensus::scan(std::string& refusal) {
+GlobalPoseCensus::Range GlobalPoseCensus::data() {
+    return {"data", "the title's .data and .bss", kStart, kEnd};
+}
+
+GlobalPoseCensus::Range GlobalPoseCensus::gpuUniformBlocks() {
+    return {"gpu-uniform-blocks", "GX2 uniform block memory", kGpuStart, kGpuEnd};
+}
+
+const GlobalPoseCensus::Range& GlobalPoseCensus::rangeByName(const std::string& name) {
+    static const Range title = GlobalPoseCensus::data();
+    static const Range gpu = gpuUniformBlocks();
+    // A name that matches neither is a refusal at the channel, not a silent default: a scan asked
+    // for a range the code does not have would otherwise report the other range's answer.
+    static const Range unknown = {"no-such-range", "no such range", 0, 0};
+    if (name == title.token) {
+        return title;
+    }
+    if (name == gpu.token) {
+        return gpu;
+    }
+    return unknown;
+}
+
+size_t GlobalPoseCensus::scan(std::string& refusal, const Range& range) {
     refusal.clear();
+    if (range.end <= range.start) {
+        refusal = std::string("no such range: ") + range.token;
+        m_lastRefusal = refusal;
+        m_refusedScans++;
+        return 0;
+    }
+    const uint32_t start = range.start;
+    const uint32_t words = (range.end - range.start) / 4;
+    m_rangeName = range.label;
+    m_rangeStart = start;
+    m_rangeEnd = range.end;
     const uint64_t firstFrame = m_frame ? m_frame() : 0;
 
     // Snapshot one, then wait for the frame counter to move before snapshot two. **A frame apart is
     // the whole point**: two readings taken back to back would report a transform that has not
     // moved as one that has, and that mistake is the whole difference between finding the camera
     // and finding every basis matrix in the data area.
-    std::vector<uint32_t> before(kWords);
-    std::vector<uint32_t> after(kWords);
-    if (!m_readWords(kStart, before.data(), static_cast<uint32_t>(kWords))) {
-        refusal = "the guest would not give up " + std::to_string(kWords) + " words at " +
-                  hexValue(kStart) + ", so the scan read nothing";
+    std::vector<uint32_t> before(words);
+    std::vector<uint32_t> after(words);
+    if (!m_readWords(start, before.data(), words)) {
+        refusal = "the guest would not give up " + std::to_string(words) + " words at " +
+                  hexValue(start) + ", so the scan read nothing";
         m_lastRefusal = refusal;
         m_refusedScans++;
         return 0;
@@ -59,8 +93,8 @@ size_t GlobalPoseCensus::scan(std::string& refusal) {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(kWaitMs / kWaitSteps));
     }
-    if (!m_readWords(kStart, after.data(), static_cast<uint32_t>(kWords))) {
-        refusal = "the guest would not give up the second reading at " + hexValue(kStart);
+    if (!m_readWords(start, after.data(), words)) {
+        refusal = "the guest would not give up the second reading at " + hexValue(start);
         m_lastRefusal = refusal;
         m_refusedScans++;
         return 0;
@@ -81,7 +115,7 @@ size_t GlobalPoseCensus::scan(std::string& refusal) {
     size_t classified = 0;
     size_t rigid = 0;
     size_t moved = 0;
-    for (size_t word = 0; word + TransformShape::kWords <= kWords; word++) {
+    for (size_t word = 0; word + TransformShape::kWords <= words; word++) {
         tested++;
         const float* first = reinterpret_cast<const float*>(before.data() + word);
         const float* second = reinterpret_cast<const float*>(after.data() + word);
@@ -101,7 +135,7 @@ size_t GlobalPoseCensus::scan(std::string& refusal) {
         moved++;
         Hit hit;
         hit.offset = static_cast<uint32_t>(word * 4);
-        hit.address = kStart + hit.offset;
+        hit.address = start + hit.offset;
         hit.biggestDelta = TransformShape::deltaOf(first, second);
         hit.scale = TransformShape::scaleOf(first);
         hit.rigid = TransformShape::isRigid(first);
@@ -160,9 +194,9 @@ size_t GlobalPoseCensus::scan(std::string& refusal) {
 
 std::string GlobalPoseCensus::json() const {
     JsonBody body;
-    body.string("range", hexValue(kStart) + "-" + hexValue(kEnd));
-    body.number("rangeBytes", kEnd - kStart);
-    body.number("windowsTested", kWords - TransformShape::kWords + 1);
+    body.string("rangeName", m_rangeName.empty() ? "(none scanned)" : m_rangeName);
+    body.string("range", hexValue(m_rangeStart) + "-" + hexValue(m_rangeEnd));
+    body.number("rangeBytes", m_rangeEnd - m_rangeStart);
     body.number("scans", m_scans);
     body.number("windowsTestedLastScan", m_wordsTested);
     body.number("windowsInAffineClass", m_classified);

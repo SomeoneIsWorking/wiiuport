@@ -1583,6 +1583,53 @@ uniform block at offset 60, not the node's own field.** Which node field holds t
 answered *negatively* with denominators, and the pose is located in the draw's uniforms with the node
 as its identity -- which is the chain the objective named.
 
+### The camera's matrix is in neither the module's data nor GX2's uniform block memory
+
+The per-object census reads what each draw assembles. It cannot answer where a *global* uniform is
+written, because a global is bound once and read by every shader, and a scan of per-draw assemblies
+will never see it as a per-draw value. So `title::GlobalPoseCensus` reads a range of guest memory
+twice, a frame apart, and names every 4-aligned offset where `TransformShape`'s affine class holds
+in both readings **and moved** -- and a static prop's world matrix is the same for ever while a
+camera's view matrix is different in every frame, which is the difference that matters.
+
+**The camera was moving for every run below.** Gameplay reached and confirmed from the runtime's own
+reports, not from a frame count: 16 display lists in the last frame, 64 uniform assemblies, and the
+transform search reporting 123 shared-and-moving candidates over 256 shaders.
+
+```
+data  (.data and .bss, 0x1018c0c0-0x1047a1c8)
+  768055 windows over 3072264 bytes, 23210 in the affine class, 0 moved, 0 poses
+  768055 windows, 23210 in the class, 0 moved, 0 poses
+  768055 windows, 23210 in the class, 0 moved, 0 poses
+
+gpu-uniform-blocks  (0x15800000-0x16000000, 8 MB)
+  2097141 windows over 8388608 bytes, 0 in the affine class, 0 moved, 0 poses
+  2097141 windows, 0 in the class, 0 moved, 0 poses
+  2097141 windows, 0 in the class, 0 moved, 0 poses
+```
+
+**So the view matrix is in neither.** 2.9 million windows, with the camera moving, and nothing that is
+a transform and changed. That is a real negative with a large denominator, and it closes off the two
+regions where a global uniform would most obviously be.
+
+**The second row is the one to read carefully: 0 windows in the affine class at all, over 2.1
+million.** The reader answered -- it refused nothing, so the 8 MB is guest memory as far as the
+product is concerned -- and a region with 23,210 transform-shaped windows elsewhere reads as having
+none here. **That is what a range of zeroes looks like**, and 0x15800000 reading as zeroes while the
+module's own data reads 23,210 is a statement about where GX2's uniform blocks are *not*, not about
+the camera. The scan says both things and does not pick one: the class count is 0 and the movement
+count is 0, and a reader can see which of the two did the deciding.
+
+**What this leaves, stated rather than narrowed away.** Three places the view matrix is not: the
+module's own data and bss, GX2 uniform block memory at 0x15800000, and the per-draw assemblies. The
+fourth place is the one this has not measured, and it is the one the title's naming points at: the
+uniform is registered by name -- `cWorldViewMatrix[0]` is a string at 0x10163bb4 in the running guest
+and in the converted ELF, followed by `uBlurOffset`, `uOneMinusNearDivFar`, `cToyCam_Saturation1` --
+and a registered uniform is written through whatever the renderer passes the registration. **Finding
+that means following the registration, not scanning memory**, and the registration function
+`FUN_02786520` is 21,488 addresses, which is why the decompilation route was abandoned in favour of
+reading the bytes the title itself names.
+
 ### The affine class was already here, already firing, and a second copy of it was the wrong answer
 
 The rigid predicate asks for three rows of unit length, and the argument for looking again is sound:
