@@ -587,7 +587,7 @@ a lerp would be a census of this project's own arithmetic.
 `writeTo` rather than by splicing their rendered text — `body.substr(0, body.size() - 2)` is how a
 report grows a second one, and this project has paid for that once.
 
-### So the whole of condition 2 is answered with addresses
+### So the whole of condition 2 is answered with addresses, from the addresses alone
 
 - the identity is the **node** -- `0x027ff88c` and `0x027ff9c0`, 195,581 bindings over 590 objects;
 - the pose is **twelve words in the title's assembled uniforms**, not in the node's own 2,588-byte
@@ -640,6 +640,17 @@ reason is in the class's own entry condition: `onAssemblyRecorded` returns befor
 cannot hold a 3x4 and is never examined.** The report's own `unscanned` count is the place that fact
 belongs and it is not a candidate at all: a buffer too short to hold the shape is not a buffer the
 scan looked at and found nothing in, and the two are different answers.
+
+**And refeeding them offers nothing at all, which settles the question.** The per-shader feed exists
+precisely for this case -- a candidate refused on first sight can be admitted by offering it again
+once it has drawn enough -- and pointed at the sixteen shaders the blend could not place it offered
+**0 candidates, took 0, and the table held 78 where it held 78.** So staleness is not what is wrong
+with the scene's most-drawn shaders: there is nothing to re-offer, because the census has never
+found anything in them. **That is the difference between a candidate that is late and one that is
+absent, and only the per-shader query tells them apart.** A fifth run in the same session, with the
+loop: `POST /pose` took 78 of 283, refused 111 as a pass's value and 94 as a value that never moved,
+and **lerped 7,149 times of 7,149 in-between draws, 85,788 words in eight seconds**, with 42,478 of
+56,972 assemblies unplaceable. The stand-in-off arm wrote nothing across 39,013 assemblies.
 
 **So the picture is two censuses, not one.** The shaders whose uniform buffers are long enough carry
 a per-object pose in those uniforms, and the blend writes it — **74 shaders accepted of 297 offered,
@@ -766,7 +777,32 @@ that read the other parity would pass for the wrong reason — and then takes th
 requires four paints of which two read an in-between parity to write nothing. **With the guard
 removed, draws 1 and 3 read 35 and 55 instead of 40 and 60 and `lerped` goes to 4.**
 
-### So the whole of condition 2 is answered with addresses
+### What the RE session settles, and what it rules out
+
+The RE session's findings, recorded here because they change where the missing pose is looked for, and
+they are the reason one search is **not** being run:
+
+- **HD has no GameCube-style J3DModel draw-matrix double buffer.** No `+0x94`/`+0x98` swap indexed by
+  `+0xb0` anywhere in 2.36M instructions. **The natural place to look for "the pose the object is
+  drawn with" does not exist on this title**, and a search for it would have been a search for a
+  structure that is not in the binary.
+- **HD draws on its logic thread and paints on a separate display thread** (`fpcM_Management`
+  `0x025df948`: execute then draw; the frame at `0x0274c264` paints), and the GameCube painter is an
+  empty stub. So the pose is filled before the display thread sees it -- consistent with the uniform
+  buffer holding it, and inconsistent with anything the display thread recomputes.
+- **J3D uploads its uniform buffers through one bind helper** (for example `0x027f1a30`) from a
+  **28-byte-entry table, index word at `+76` and pointer at `+28`.** That table is where the buffers
+  this mechanism reads are filled, and the RE session is running a caller census over the seven bind
+  functions to find which draw code fills them and from which object.
+
+**What that leaves for this side.** The gap is precisely that the scene's most-drawn shaders produce
+uniform buffers shorter than 48 bytes, so whatever fills them does not put a 3x4 there -- and the bind
+helper's table is where whatever they *do* put is named. **This document does not edit the RE
+session's sections and does not duplicate the census it is running.** The coordination is that the
+interpolation side has measured *which* shaders are missing and *that* the uniform buffer is too short
+for a pose, and the RE side is measuring *where* the missing values are written.
+
+### And the measurements: the blend running, the guard, and what is still missing
 
 **And one more defect, found by the measurement rather than by reading:** the per-shader denominator
 was keyed on the **base hash alone**, so shaders differing only in their aux hash were summed --
