@@ -579,6 +579,23 @@ void aNamedShaderAnswersForItselfWithTheTablesOwnRefusal() {
     check::isTrue(contains(plainAnswer.body, "\"table\":{"),
                   "and with no shader named the whole report comes back as before: " +
                       plainAnswer.body.substr(0, 80));
+
+    // **A named shader narrows the feed to that shader's candidates.** The census is cumulative and
+    // the table evaluates whatever counts it is given, so a candidate refused on first sight can be
+    // admitted by offering it again once it has drawn enough. The blend's own unplaced-shader list
+    // names the shaders that need that, and a caller holding the measurement should be able to ask
+    // for exactly those rather than the whole census every time.
+    lucent::http::Request narrow;
+    narrow.method = "POST";
+    narrow.target = "/pose?shader=0x6669a23d03806414";
+    auto narrowed = fixture.channel.dispatch(narrow);
+    check::isTrue(narrowed.status == 200, "a narrowed feed answers");
+    check::isTrue(contains(narrowed.body, "\"offeredLastFeed\":"),
+                  "and says how many candidates it offered: " + narrowed.body.substr(0, 200));
+    // Whatever it offered, the table's size is unchanged by a narrowed feed of candidates it
+    // already holds, and the document is still one document.
+    check::isTrue(oneJsonDocument(narrowed.body),
+                  "and it is still one JSON document: " + narrowed.body.substr(0, 60));
 }
 
 void everyAdvertisedRouteIsReachableByItsOwnMethod() {
