@@ -57,9 +57,17 @@ in the same session blended 17,673 times. **Exact gap: the four shaders the game
 considered -- because a uniform buffer shorter than 48 bytes cannot hold a 3x4 and the census never
 examines it. Those draws take their transform from the vertex attribute stream, whose census reports
 `objectsOffered: 0`, `nodesTracked: 0` and `drawsWithoutPosition` equal to all 1,388,163 draws: a
-blind instrument. **Coverage is 2% to 37% of draws depending on the run**, because the table is fed
-from a cumulative census and the game changes scene; the census expires, or the table is fed per
-shader on demand, and neither is built.
+blind instrument. **Coverage is 2% to 37% of draws depending on the run**, and the per-shader refeed does
+not close it: pointed at the sixteen shaders the blend could not place, `POST /pose?shader=...`
+offered **0 candidates and took 0**, so the census has never found anything in them and staleness is
+not the reason. **Exact remaining step, and it is not in this file:** the RE session has established
+that HD has **no J3DModel draw-matrix double buffer** (no `+0x94`/`+0x98` swap indexed by `+0xb0` in
+2.36M instructions), that it draws on its logic thread and paints on a separate display thread, and
+that **J3D uploads its uniform buffers through one bind helper** (e.g. `0x027f1a30`) from a
+**28-byte-entry table, index word at `+76` and pointer at `+28`**. Those shaders' buffers are too
+short to hold a pose, so what the pose is instead is named in that table, and a caller census over
+the seven bind functions is running to say which draw code fills it and from which object. **This row
+is not waiting on a census: it is waiting on that answer.**
 built.** The identity is the **node** (the binder at `0x027ff88c` and `0x027ff9c0`, 195,581 bindings
 over 590 objects). The pose is **twelve words in the title's assembled uniforms** -- not in the node's
 own 2,588-byte window, where 0 of 23,210 transform-shaped windows move, and not in the uniform block
