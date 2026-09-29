@@ -101,10 +101,10 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
     // nothing" reads as a claim about the data when it is a statement about the size.
     //
     // **This is where the title's most-drawn shaders go.** Measured by asking the census about them
-    // by name: `0x6669a23d03806414` has 0 candidates of 300 considered over 41,136 draws, and neither
-    // the belief bar nor the table refused one -- the census never looked at any of them. The scene's
-    // geometry takes its transform from the vertex attribute stream, and the uniform buffer for those
-    // draws is too small to hold it.
+    // by name: `0x6669a23d03806414` has 0 candidates of 300 considered over 41,136 draws, and
+    // neither the belief bar nor the table refused one -- the census never looked at any of them.
+    // The scene's geometry takes its transform from the vertex attribute stream, and the uniform
+    // buffer for those draws is too small to hold it.
     if (assembly.data.size() < kPoseWords) {
         std::scoped_lock lock(m_mutex);
         m_tooShort++;
@@ -370,8 +370,8 @@ std::string ObjectPoseLocator::json() const {
     body.number("maxScanBytes", kMaxScanBytes);
     body.number("unscannedBuffers", m_unscanned);
     // **Too short to hold a pose, which is neither of the two above.** A reader who sees
-    // `unscannedBuffers` and a candidate count of zero for a shader has been told the scan looked at
-    // that shader and found nothing; this says it never could have found anything there.
+    // `unscannedBuffers` and a candidate count of zero for a shader has been told the scan looked
+    // at that shader and found nothing; this says it never could have found anything there.
     body.number("tooShortForAPose", m_tooShort);
     body.number("buffersWithoutSources", m_noSources);
     body.number("identitiesRefused", m_identitiesRefused);

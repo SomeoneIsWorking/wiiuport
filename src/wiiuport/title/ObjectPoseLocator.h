@@ -274,9 +274,9 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     std::vector<std::pair<std::string, std::pair<uint32_t, std::array<float, kPoseWords>>>> m_seen;
     uint64_t m_unscanned = 0;
     // Assemblies whose buffer is shorter than `kPoseWords`, so it cannot hold a 3x4 and the scan
-    // was never a question about them. **Its own counter, not `unscannedBuffers`**: a buffer too big
-    // to scan in one go was partly looked at, and one too small to hold the shape was not looked at
-    // at all, and "found nothing" is a claim about data that neither of them makes.
+    // was never a question about them. **Its own counter, not `unscannedBuffers`**: a buffer too
+    // big to scan in one go was partly looked at, and one too small to hold the shape was not
+    // looked at at all, and "found nothing" is a claim about data that neither of them makes.
     uint64_t m_tooShort = 0;
     uint64_t m_noSources = 0;
     // Whether any assembly carried a published object, so the report can say which of the two
