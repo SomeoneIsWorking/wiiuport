@@ -16,17 +16,23 @@ constexpr uint64_t kObjectShaderA = 0x1557c18f92f3bcb9;
 constexpr uint64_t kObjectShaderB = 0x8cecd19741c6c1c7;
 constexpr uint64_t kPassShader = 0xb7252004aba21c10;
 
-PoseByShader::Entry perObject(uint32_t byteOffset, uint64_t moved, uint64_t compared) {
+// **Three numbers are one named struct, not three adjacent parameters.** Two `uint64_t`s and a
+// `uint32_t` in a row are swappable by mistake and the mistake compiles, which is the finding
+// clang-tidy raises; a name is the only thing that stops it, and the counts read better as a pair.
+struct Movements {
+    uint64_t moved = 0;
+    uint64_t compared = 0;
+};
+
+PoseByShader::Entry perObject(uint32_t byteOffset, Movements movements) {
     PoseByShader::Entry entry;
     entry.byteOffset = byteOffset;
-    entry.moved = moved;
-    entry.compared = compared;
+    entry.moved = movements.moved;
+    entry.compared = movements.compared;
     entry.otherObjects = 15;
     entry.otherObjectsSame = 0;
     return entry;
 }
-
-} // namespace
 
 // **The table the measurement says the title has, and the two refusals that keep a pass's value and
 // a basis matrix out of a blend's way.** A blend that wrote twelve words at a wrong offset would
@@ -38,14 +44,14 @@ void aPerObjectPoseIsFoundByItsShaderAndTheOtherTwoAreRefused() {
     std::string refusal;
 
     // The two per-object entries, at the offsets and with the counts the title measured.
-    poses.offer(kObjectShaderA, 0, perObject(12, 21730, 21879), refusal);
+    poses.offer(kObjectShaderA, 0, perObject(12, Movements{21730, 21879}), refusal);
     check::isTrue(refusal.empty(), "the per-object pose at offset 12 is offered: " + refusal);
-    poses.offer(kObjectShaderB, 0, perObject(4, 202, 21950), refusal);
+    poses.offer(kObjectShaderB, 0, perObject(4, Movements{202, 21950}), refusal);
     check::isTrue(refusal.empty(), "and the same pose at offset 4 in the other shader: " + refusal);
 
     // A pass's view projection: shared by 12 of 15 objects. **Refused, and the count is in the
     // reason** -- a blend that wrote a pass's camera at t would move the light with the object.
-    auto pass = perObject(76, 98, 235);
+    auto pass = perObject(76, Movements{98, 235});
     pass.otherObjectsSame = 12;
     poses.offer(kPassShader, 0, pass, refusal);
     check::isTrue(refusal.find("pass's value") != std::string::npos,
@@ -57,7 +63,7 @@ void aPerObjectPoseIsFoundByItsShaderAndTheOtherTwoAreRefused() {
                       refusal);
 
     // A basis matrix: shaped like a transform and never changes. Refused, with its own count.
-    auto still = perObject(0, 0, 193570);
+    auto still = perObject(0, Movements{0, 193570});
     poses.offer(0x44f85a8fe341045c, 0, still, refusal);
     check::isTrue(refusal.find("basis matrix") != std::string::npos,
                   "a value that never moved is a basis matrix and is refused: " + refusal);
@@ -88,11 +94,11 @@ void aPerObjectPoseIsFoundByItsShaderAndTheOtherTwoAreRefused() {
 void theKeyIsTheShaderAndNotItsBaseHashAlone() {
     PoseByShader poses;
     std::string refusal;
-    poses.offer(0xdddd, 1, perObject(12, 100, 100), refusal);
+    poses.offer(0xdddd, 1, perObject(12, Movements{100, 100}), refusal);
     check::isTrue(refusal.empty(), "the first shader is offered: " + refusal);
     // A second with the same base and a different aux: refused as a duplicate, which is how the two
     // are told apart rather than one overwriting the other.
-    poses.offer(0xdddd, 2, perObject(4, 50, 50), refusal);
+    poses.offer(0xdddd, 2, perObject(4, Movements{50, 50}), refusal);
     check::isTrue(refusal.empty(),
                   "and the second, with the same base hash, is a different one: " + refusal);
     check::isTrue(poses.offsetFor(0xdddd, 1, refusal).value_or(0) == 12,
@@ -104,45 +110,55 @@ void theKeyIsTheShaderAndNotItsBaseHashAlone() {
 // **A value a blend may not touch is a value it is told about, not one it assumes.** A colour
 // triple and a packed integer both satisfy a shape test, and averaging two of either is not a
 // matrix.
+//
+// **The three fixtures are named constants of the file, not `const` values in a body.** They are
+// read by three checks that differ only by which of the twelve words they change, and a `const`
+// local spelled out three times is three places to keep in step -- and a `const` local holding a
+// constant reads as a named constant in the wrong place.
+constexpr std::array<float, PoseByShader::kWords> kAPose{1.0f, 0.0f, -1.0f, 0.5f, 0.0f, 2.0f,
+                                                         0.0f, 0.0f, 1.0f,  3.0f, 0.0f, -4.0f};
+constexpr std::array<float, PoseByShader::kWords> kWithADenormal{
+    1.0f, 0.0f, -1.0f, 5e-40f, 0.0f, 2.0f, 0.0f, 0.0f, 1.0f, 3.0f, 0.0f, -4.0f};
+constexpr std::array<float, PoseByShader::kWords> kWithAnInfinity{
+    std::numeric_limits<float>::infinity(),
+    0.0f,
+    -1.0f,
+    0.5f,
+    0.0f,
+    2.0f,
+    0.0f,
+    0.0f,
+    1.0f,
+    3.0f,
+    0.0f,
+    -4.0f};
+
 void aValueThatCannotBeBlendedIsCountedRatherThanAssumed() {
-    const std::array<float, PoseByShader::kWords> plain{1.0f, 0.0f, -1.0f, 0.5f, 0.0f, 2.0f,
-                                                        0.0f, 0.0f, 1.0f,  3.0f, 0.0f, -4.0f};
-    check::equal(PoseByShader::blendableWords(plain.data()), uint32_t{PoseByShader::kWords},
+    check::equal(PoseByShader::blendableWords(kAPose.data()), uint32_t{PoseByShader::kWords},
                  "a pose of zeros and normal floats is twelve blendable words");
-    const std::array<float, PoseByShader::kWords> withDenormal{
-        1.0f, 0.0f, -1.0f, 5e-40f, 0.0f, 2.0f, 0.0f, 0.0f, 1.0f, 3.0f, 0.0f, -4.0f};
-    check::equal(PoseByShader::blendableWords(withDenormal.data()), uint32_t{11},
+    check::equal(PoseByShader::blendableWords(kWithADenormal.data()), uint32_t{11},
                  "and a denormal is not, because averaging two of them makes an integer neither "
                  "frame wrote");
-    const std::array<float, PoseByShader::kWords> withInfinity{
-        std::numeric_limits<float>::infinity(),
-        0.0f,
-        -1.0f,
-        0.5f,
-        0.0f,
-        2.0f,
-        0.0f,
-        0.0f,
-        1.0f,
-        3.0f,
-        0.0f,
-        -4.0f};
     check::equal(
-        PoseByShader::blendableWords(withInfinity.data()), uint32_t{11},
+        PoseByShader::blendableWords(kWithAnInfinity.data()), uint32_t{11},
         "and an infinity is not either, because a lerp towards one is a number nothing can "
         "draw");
     // And the one implementation of the rule, asked rather than defined: this class's predicate and
     // `Blendable`'s must agree word for word, because two copies of a rule that decides what a
     // blend may touch is one more thing to fall out of step.
     uint32_t byBlendable = 0;
-    for (const float word : plain) {
+    // **Not `const`:** a range-for's own value over a fixture the test does not change, and the
+    // rule for a computed value is an ordinary local.
+    for (float word : kAPose) {
         if (wiiuport::interp::isNumber(word)) {
             ++byBlendable;
         }
     }
-    check::equal(PoseByShader::blendableWords(plain.data()), byBlendable,
+    check::equal(PoseByShader::blendableWords(kAPose.data()), byBlendable,
                  "and the class asks Blendable's rule rather than keeping a second copy of it");
 }
+
+} // namespace
 
 void wiiuport::tests::runPoseByShaderTests() {
     aPerObjectPoseIsFoundByItsShaderAndTheOtherTwoAreRefused();
