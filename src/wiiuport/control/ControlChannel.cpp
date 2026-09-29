@@ -3,6 +3,7 @@
 #include <lucent/http.h>
 #include <lucent/log.h>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstdio>
@@ -787,10 +788,24 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
         // **Fed from the census's own candidates, as the structure.** Reading its rendered report
         // back into a class would be a second implementation of the fields the report already has,
         // and a second one that could disagree with it.
+        //
+        // **A named `shader` narrows the feed to that shader's own candidates, and the narrowing is
+        // the point.** The census is cumulative and `PoseByShader::offer` evaluates the counts it
+        // is given, so a candidate refused on first sight -- because nothing had been compared
+        // against it yet -- can be admitted by offering it again once it has drawn enough. The
+        // blend's own unplaced-shader list names which shaders need that, so the caller holding the
+        // measurement asks for exactly those rather than the whole census every time.
+        std::vector<uint64_t> only;
+        const bool narrowed =
+            requestedHashes(std::string(request.query()), "shader", only) && !only.empty();
         const auto found = m_poses.found();
         std::vector<title::PoseByShader::Offered> offered;
-        offered.reserve(found.size());
         for (const title::ObjectPoseLocator::Found& one : found) {
+            if (narrowed && std::none_of(only.begin(), only.end(), [&one](uint64_t hash) {
+                    return hash == one.shaderBaseHash;
+                })) {
+                continue;
+            }
             offered.push_back(title::PoseByShader::Offered{
                 one.shaderBaseHash, one.shaderAuxHash, one.byteOffset, one.otherObjects,
                 one.otherObjectsSame, one.moved, one.compared});
