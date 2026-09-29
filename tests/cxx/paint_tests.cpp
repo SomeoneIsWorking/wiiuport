@@ -149,40 +149,6 @@ FakeGuest loadedTitle() {
     return guest;
 }
 
-} // namespace
-
-// A report read before the graphics bring-up has made its shared area. The
-// pacing is not an interval then, and the two ways of saying so are not equal:
-// a number nobody can interpret reads as a bug, and 0xffffffff in a report reads
-// as a bug too. It says so in words, and the product does not fault asking.
-namespace {
-
-void thePacingIsReportedAsNotYetThereRatherThanAsANumber() {
-    FakeGuest guest = loadedTitle();
-    auto mod = makeMod(guest);
-    g_sharedAreaExists = false;
-    const std::string body = mod.json();
-    g_sharedAreaExists = true;
-    check::isTrue(body.find("\"pacing\":null") != std::string::npos,
-                  "no interval is in force and the report says so");
-    check::isTrue(body.find("pacingWhy") != std::string::npos,
-                  "and says why, which is the graphics bring-up");
-    check::isTrue(body.find("\"pacing\":2") == std::string::npos,
-                  "and does not print a number that would read as one");
-}
-
-} // namespace
-
-// **The blend writes on the stand-in's in-between paint and on nothing else.** The stand-in's
-// `installed()` is the guard, and this is the arm that matters: **a parity is only "half the
-// paints" while the stand-in is doubling them.** With one paint per tick the counter still climbs
-// and the parity still alternates, so without the guard every second of the game's *own* frame read
-// as an in-between paint. That was measured on the title -- the falsifier arm of
-// `pose_blend_run.py` caught the blend writing on paints it had been told were the tick's own --
-// and this is the unit test for the fix, with the same fixture that installs the stand-in.
-//
-// The fixture lives here rather than beside the blend's own tests because installing a stand-in
-// needs a guest to install it into, and there is one here and none there.
 void theBlendWritesOnTheStandInsInBetweenPaintAndOnNothingElse() {
     using wiiuport::title::PoseBlend;
     using wiiuport::title::PoseByShader;
@@ -286,6 +252,41 @@ void theBlendWritesOnTheStandInsInBetweenPaintAndOnNothingElse() {
                  "and the two lerps from while it was on are the only ones there are, across four "
                  "draws of which two read an in-between parity");
 }
+
+} // namespace
+
+// A report read before the graphics bring-up has made its shared area. The
+// pacing is not an interval then, and the two ways of saying so are not equal:
+// a number nobody can interpret reads as a bug, and 0xffffffff in a report reads
+// as a bug too. It says so in words, and the product does not fault asking.
+namespace {
+
+void thePacingIsReportedAsNotYetThereRatherThanAsANumber() {
+    FakeGuest guest = loadedTitle();
+    auto mod = makeMod(guest);
+    g_sharedAreaExists = false;
+    const std::string body = mod.json();
+    g_sharedAreaExists = true;
+    check::isTrue(body.find("\"pacing\":null") != std::string::npos,
+                  "no interval is in force and the report says so");
+    check::isTrue(body.find("pacingWhy") != std::string::npos,
+                  "and says why, which is the graphics bring-up");
+    check::isTrue(body.find("\"pacing\":2") == std::string::npos,
+                  "and does not print a number that would read as one");
+}
+
+} // namespace
+
+// **The blend writes on the stand-in's in-between paint and on nothing else.** The stand-in's
+// `installed()` is the guard, and this is the arm that matters: **a parity is only "half the
+// paints" while the stand-in is doubling them.** With one paint per tick the counter still climbs
+// and the parity still alternates, so without the guard every second of the game's *own* frame read
+// as an in-between paint. That was measured on the title -- the falsifier arm of
+// `pose_blend_run.py` caught the blend writing on paints it had been told were the tick's own --
+// and this is the unit test for the fix, with the same fixture that installs the stand-in.
+//
+// The fixture lives here rather than beside the blend's own tests because installing a stand-in
+// needs a guest to install it into, and there is one here and none there.
 
 void wiiuport::tests::runPaintTests() {
     theBlendWritesOnTheStandInsInBetweenPaintAndOnNothingElse();

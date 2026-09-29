@@ -93,7 +93,10 @@ void putPose(std::vector<float>& words, size_t at, float spin, float scale = 1.0
     }
 }
 
-} // namespace
+// **Where the file's poses start, in words.** Every test below writes a 3x4 at word 8, and a
+// `const size_t at = 8` repeated at each of them is three places to keep in step -- and a `const`
+// local holding a constant reads as a named constant in the wrong place.
+constexpr size_t kPoseWord = 8;
 
 // **One matrix is one candidate, however many alignments it is affine at.** This is the defect the
 // real title exposed: eight of the twelve held offsets were one flat array of seventeen words seen
@@ -105,12 +108,11 @@ void putPose(std::vector<float>& words, size_t at, float spin, float scale = 1.0
 // beside it: a *second* matrix elsewhere in the same assembly is a second candidate, because the
 // collapse folds windows on one value and not two.
 void oneMatrixIsOneCandidateHoweverManyAlignmentsItIsAffineAt() {
-    const size_t at = 8;
     std::vector<float> words(64, 0.0f);
-    putPose(words, at, 0.3f);
+    putPose(words, kPoseWord, 0.3f);
     // A second matrix, far enough away that the collapse must not fold it in: a span is twelve
     // words, so anything past one 3x4 apart is its own value.
-    putPose(words, 40, 0.9f, 2.0f);
+    putPose(words, kPoseWord + 32, 0.9f, 2.0f);
 
     ObjectPoseLocator locator;
     for (int round = 0; round < 30; round++) {
@@ -118,7 +120,7 @@ void oneMatrixIsOneCandidateHoweverManyAlignmentsItIsAffineAt() {
     }
     const std::string body = locator.json();
     // The two matrices, each once.
-    const size_t first = body.find("\"offset\":" + std::to_string(at * sizeof(float)));
+    const size_t first = body.find("\"offset\":" + std::to_string(kPoseWord * sizeof(float)));
     const size_t second = body.find("\"offset\":" + std::to_string(40 * sizeof(float)));
     check::isTrue(first != std::string::npos && second != std::string::npos,
                   "both matrices are candidates: " + body.substr(0, 200));
@@ -159,10 +161,9 @@ void oneMatrixIsOneCandidateHoweverManyAlignmentsItIsAffineAt() {
 // assemblies were counted against whichever shader's layout arrived first. The pose's offset in an
 // assembly is a function of the shader, not of the draw, so the shader is part of the key.
 void oneMatrixInTwoShadersIsTwoCandidatesAndTwiceInOneShaderIsOne() {
-    const size_t at = 8;
     auto wordsWithPose = [](float spin) {
         std::vector<float> words(64, 0.0f);
-        putPose(words, at, spin);
+        putPose(words, kPoseWord, spin);
         return words;
     };
     const std::string twoShaders = "1804";
@@ -185,7 +186,8 @@ void oneMatrixInTwoShadersIsTwoCandidatesAndTwiceInOneShaderIsOne() {
         check::isTrue(mentions(body, "\"distinctShaders\":2"),
                       "two shaders were seen, so the report says two: " + body.substr(0, 160));
         // The same offset under two shader hashes is two entries, and each carries its own shader.
-        const size_t offsetAt = body.find("\"offset\":" + std::to_string(at * sizeof(float)));
+        const size_t offsetAt =
+            body.find("\"offset\":" + std::to_string(kPoseWord * sizeof(float)));
         check::isTrue(offsetAt != std::string::npos, "the offset is in the report");
         const size_t next = body.find("\"offset\":", offsetAt + 1);
         const std::string entry = body.substr(offsetAt, (next - offsetAt));
@@ -195,7 +197,7 @@ void oneMatrixInTwoShadersIsTwoCandidatesAndTwiceInOneShaderIsOne() {
         // affine tables share an offset that is both, so a count over the whole body is a property
         // of the report's shape rather than of the data.
         const size_t affineAt = body.find("\"affine\":");
-        const std::string needle = "\"offset\":" + std::to_string(at * sizeof(float));
+        const std::string needle = "\"offset\":" + std::to_string(kPoseWord * sizeof(float));
         size_t sameOffset = 0;
         for (size_t at_ = body.find(needle, affineAt); at_ != std::string::npos;
              at_ = body.find(needle, at_ + 1)) {
@@ -220,7 +222,7 @@ void oneMatrixInTwoShadersIsTwoCandidatesAndTwiceInOneShaderIsOne() {
         check::isTrue(mentions(body, "\"distinctShaders\":1"),
                       "one shader was seen: " + body.substr(0, 160));
         const size_t affineAt = body.find("\"affine\":");
-        const std::string needle = "\"offset\":" + std::to_string(at * sizeof(float));
+        const std::string needle = "\"offset\":" + std::to_string(kPoseWord * sizeof(float));
         size_t sameOffset = 0;
         for (size_t at_ = body.find(needle, affineAt); at_ != std::string::npos;
              at_ = body.find(needle, at_ + 1)) {
@@ -238,10 +240,9 @@ void oneMatrixInTwoShadersIsTwoCandidatesAndTwiceInOneShaderIsOne() {
 // one's assemblies count against the first one's candidate, so its share is wrong; with the pair
 // each is its own denominator.
 void theDenominatorIsKeyedOnTheShaderAndNotOnItsBaseHashAlone() {
-    const size_t at = 8;
     auto wordsWithPose = [](float spin) {
         std::vector<float> words(64, 0.0f);
-        putPose(words, at, spin);
+        putPose(words, kPoseWord, spin);
         return words;
     };
     ObjectPoseLocator locator;
@@ -329,6 +330,8 @@ void aBufferTooShortToHoldAPoseIsCountedAsItsOwnFact() {
                   "and a buffer that could hold a pose is not counted, so the field means what its "
                   "name says");
 }
+
+} // namespace
 
 void wiiuport::tests::runObjectPoseLocatorTests() {
     aBufferTooShortToHoldAPoseIsCountedAsItsOwnFact();
@@ -661,7 +664,9 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
             putPose(words, 8, 0.4f + static_cast<float>(object) * 0.37f);
             return assembly(words, {0x3e000000u}, object);
         };
-        const size_t offsetBytes = 8 * sizeof(float);
+        // **Not `const`:** a computed value from a named constant, and the rule for a computed
+        // value is an ordinary local -- a `const` here reads as a named constant and is not one.
+        size_t offsetBytes = kPoseWord * sizeof(float);
 
         auto countsFor = [](const std::string& body, uint32_t offset, const char* other,
                             const char* same, const char* different) {

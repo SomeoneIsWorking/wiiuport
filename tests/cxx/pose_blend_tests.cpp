@@ -31,17 +31,18 @@ PoseByShader::Entry perObjectAt(uint32_t byteOffset) {
     return entry;
 }
 
-void putPose(std::vector<float>& words, size_t at, float x, float y) {
+// **One float, not two.** The second was never used by the fixture, so the pair was swappable by
+// mistake and the mistake compiled -- a `y` of zero and a `y` of the other value are both plausible
+// at a call and neither is a type error.
+void putPose(std::vector<float>& words, size_t at, float x) {
     // Three rows of three and a translation, which is how `TransformShape` reads a 3x4. The
     // translation is what moves between ticks, so it is the only part that needs to differ.
     const float pose[PoseBlend::kWords] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
-                                           0.0f, 0.0f, 1.0f, x,    y,    0.0f};
+                                           0.0f, 0.0f, 1.0f, x,    0.0f, 0.0f};
     for (size_t word = 0; word < PoseBlend::kWords; word++) {
         words[at + word] = pose[word];
     }
 }
-
-} // namespace
 
 // **The in-between frame is the midpoint of tick N-1 and tick N, and it is the first of the two
 // paints.** Two ticks, two objects, and the arithmetic is the test's own: node A at x=0 then x=10
@@ -56,13 +57,13 @@ void theInBetweenFrameIsTheMidpointOfTheLastTwoTicksAndOnlyOnTheInBetweenPaint()
     // **Tick N-1**: the title's own paint, pose at x=0. Held, nothing written.
     {
         std::vector<float> words(64, 0.0f);
-        putPose(words, kObjectOffset / 4, 0.0f, 0.0f);
+        putPose(words, kObjectOffset / 4, 0.0f);
         blend.onAssemblyAtOffset(words.data(), words.size(), kObjectOffset, kShader, kNodeA, false);
     }
     // **Tick N**: the in-between paint, pose at x=10, written as 5.
     {
         std::vector<float> words(64, 0.0f);
-        putPose(words, kObjectOffset / 4, 10.0f, 0.0f);
+        putPose(words, kObjectOffset / 4, 10.0f);
         blend.onAssemblyAtOffset(words.data(), words.size(), kObjectOffset, kShader, kNodeA, true);
         check::equal(words[kObjectOffset / 4 + 9], 5.0f,
                      "the translation is the midpoint of 0 and 10, which is the lerp of N-1 to N");
@@ -73,7 +74,7 @@ void theInBetweenFrameIsTheMidpointOfTheLastTwoTicksAndOnlyOnTheInBetweenPaint()
     // **And the tick's own paint, which must be the title's own value and not the midpoint.**
     {
         std::vector<float> words(64, 0.0f);
-        putPose(words, kObjectOffset / 4, 10.0f, 0.0f);
+        putPose(words, kObjectOffset / 4, 10.0f);
         blend.onAssemblyAtOffset(words.data(), words.size(), kObjectOffset, kShader, kNodeA, false);
         check::equal(words[kObjectOffset / 4 + 9], 10.0f,
                      "the tick's own paint carries the tick's own value, so the midpoint is not "
@@ -82,9 +83,9 @@ void theInBetweenFrameIsTheMidpointOfTheLastTwoTicksAndOnlyOnTheInBetweenPaint()
     // A second object, at its own pose, is unaffected by the first's: the identity is the node.
     {
         std::vector<float> words(64, 0.0f);
-        putPose(words, kObjectOffset / 4, 0.0f, 0.0f);
+        putPose(words, kObjectOffset / 4, 0.0f);
         blend.onAssemblyAtOffset(words.data(), words.size(), kObjectOffset, kShader, kNodeB, false);
-        putPose(words, kObjectOffset / 4, 4.0f, 0.0f);
+        putPose(words, kObjectOffset / 4, 4.0f);
         blend.onAssemblyAtOffset(words.data(), words.size(), kObjectOffset, kShader, kNodeB, true);
         check::equal(words[kObjectOffset / 4 + 9], 2.0f,
                      "the second node is the midpoint of its own two ticks and not the first's");
@@ -117,9 +118,11 @@ void theHeldPoseIsTheTitlesOwnAndNeverALerp() {
     poses.offer(kShader, 0, perObjectAt(kObjectOffset), refusal);
     PoseBlend blend(poses);
     std::vector<float> written;
-    for (const float at : {0.0f, 10.0f, 20.0f, 30.0f}) {
+    // **Not `const`:** it is a loop's own value, and the rule for a computed value is an ordinary
+    // local -- a `const` here reads as a named constant and is not one.
+    for (float at : {0.0f, 10.0f, 20.0f, 30.0f}) {
         std::vector<float> words(64, 0.0f);
-        putPose(words, kObjectOffset / 4, at, 0.0f);
+        putPose(words, kObjectOffset / 4, at);
         blend.onAssemblyAtOffset(words.data(), words.size(), kObjectOffset, kShader, kNodeA,
                                  at != 0.0f);
         written.push_back(words[kObjectOffset / 4 + 9]);
@@ -169,11 +172,11 @@ void aBlendThatCannotBeSafeWritesNothingAndSaysWhy() {
     // **Three: a word a lerp may not touch.** A pose holding a denormal cannot be blended, and a
     // partial write would be a matrix with a row from each frame.
     std::vector<float> first(64, 0.0f);
-    putPose(first, kObjectOffset / 4, 4.0f, 0.0f);
+    putPose(first, kObjectOffset / 4, 4.0f);
     first[kObjectOffset / 4 + 5] = 5.0e-40f; // a denormal, in the held pose
     blend.onAssemblyAtOffset(first.data(), first.size(), kObjectOffset, kShader, kNodeB, false);
     std::vector<float> second(64, 0.0f);
-    putPose(second, kObjectOffset / 4, 12.0f, 0.0f);
+    putPose(second, kObjectOffset / 4, 12.0f);
     blend.onAssemblyAtOffset(second.data(), second.size(), kObjectOffset, kShader, kNodeB, true);
     check::equal(second[kObjectOffset / 4 + 9], 12.0f,
                  "the tick's own value is left in place rather than a pose with one row from each "
@@ -214,7 +217,7 @@ void aPairHeldWithoutTheTitlesNodeIsCountedAsAFallback() {
     PoseBlend blend(poses);
 
     std::vector<float> words(64, 0.0f);
-    putPose(words, kObjectOffset / 4, 2.0f, 0.0f);
+    putPose(words, kObjectOffset / 4, 2.0f);
     // `objectAddress == 0` is "the title has not said which node this is".
     blend.onAssemblyAtOffset(words.data(), words.size(), kObjectOffset, kShader, 0, false);
     check::equal(blend.held(), uint64_t{1}, "the pose is held");
@@ -222,7 +225,7 @@ void aPairHeldWithoutTheTitlesNodeIsCountedAsAFallback() {
                  "and counted as a fallback, so 'held 1' is not read as one node");
     // Two draws of the same shader with no node are *one* pair under the fallback, and that is the
     // weakness: the second draw's pose overwrites the first's rather than being compared with it.
-    putPose(words, kObjectOffset / 4, 6.0f, 0.0f);
+    putPose(words, kObjectOffset / 4, 6.0f);
     blend.onAssemblyAtOffset(words.data(), words.size(), kObjectOffset, kShader, 0, true);
     check::equal(words[kObjectOffset / 4 + 9], 4.0f,
                  "which is the midpoint of the fallback's two readings -- the arithmetic, and the "
@@ -240,7 +243,7 @@ void theReportSaysHeldPairsAgainstLerps() {
     PoseBlend blend(poses);
     // Held, and nothing blended: the ratio must say so rather than reading as a healthy table.
     std::vector<float> words(64, 0.0f);
-    putPose(words, kObjectOffset / 4, 1.0f, 0.0f);
+    putPose(words, kObjectOffset / 4, 1.0f);
     blend.onAssemblyAtOffset(words.data(), words.size(), kObjectOffset, kShader, kNodeA, false);
     check::isTrue(blend.json().find("\"lerpsPerInBetween\":0") != std::string::npos,
                   "a pose held and never blended reads as zero lerps per in-between draw: " +
@@ -252,9 +255,9 @@ void theReportSaysHeldPairsAgainstLerps() {
                       blend.json());
     // And a second node that is blended, so the ratio moves off zero.
     std::vector<float> other(64, 0.0f);
-    putPose(other, kObjectOffset / 4, 1.0f, 0.0f);
+    putPose(other, kObjectOffset / 4, 1.0f);
     blend.onAssemblyAtOffset(other.data(), other.size(), kObjectOffset, kShader, kNodeB, false);
-    putPose(other, kObjectOffset / 4, 9.0f, 0.0f);
+    putPose(other, kObjectOffset / 4, 9.0f);
     blend.onAssemblyAtOffset(other.data(), other.size(), kObjectOffset, kShader, kNodeB, true);
     const std::string report = blend.json();
     check::isTrue(report.find("\"lerpsPerInBetween\":100") != std::string::npos,
@@ -265,6 +268,8 @@ void theReportSaysHeldPairsAgainstLerps() {
     check::isTrue(report.find("\"maxHeld\":") != std::string::npos,
                   "the bound is beside the count: " + report);
 }
+
+} // namespace
 
 void wiiuport::tests::runPoseBlendTests() {
     theInBetweenFrameIsTheMidpointOfTheLastTwoTicksAndOnlyOnTheInBetweenPaint();
