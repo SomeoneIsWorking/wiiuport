@@ -8,6 +8,8 @@
 #include "suites.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
 
+#include <cstdlib>
+#include <functional>
 #include <limits>
 #include <string>
 #include <vector>
@@ -16,6 +18,133 @@ namespace {
 
 using wiiuport::frame::RecordedUniformAssembly;
 using wiiuport::title::ObjectPoseLocator;
+
+// **A structural JSON validator, because this class's own header asks for one and its report
+// stopped parsing without it.** The header says: "the next change to this class should bring a
+// parser with it", and that change is this one -- so the parser arrives with it.
+//
+// A substring search is what the rest of this file uses and it cannot see a malformed body at
+// all: `mentions(body, "\"tooShortForAPose\":2")` passes on a body whose braces do not balance,
+// because the field it looks for is well formed. **A run then reports an I/O failure** -- the
+// client cannot decode the document -- and the report says nothing about which part is wrong.
+// That is exactly what happened: `GET /blocks` embeds this report, so a body that does not parse
+// takes the binder census, the vertex census and the whole `/blocks` route down with it.
+//
+// This walks the document the way a client does: strings with their escapes, objects, arrays,
+// numbers, and the three literals, and it returns the offset of the first thing a client would
+// refuse. It is not a general parser and does not pretend to be; it is the check that would have
+// caught this.
+std::string firstJsonFault(const std::string& text, size_t& at) {
+    const size_t n = text.size();
+    size_t i = 0;
+    auto skip = [&] {
+        while (i < n && (text[i] == ' ' || text[i] == '\t' || text[i] == '\r' || text[i] == '\n')) {
+            ++i;
+        }
+    };
+    // A named std::function rather than an `auto` lambda: a lambda that recurses through another
+    // lambda cannot deduce its own type, and the fix is the indirection the language asks for.
+    std::function<bool()> value = [&]() -> bool {
+        skip();
+        if (i >= n) {
+            return false;
+        }
+        const char c = text[i];
+        if (c == '"') {
+            ++i;
+            while (i < n) {
+                if (text[i] == '"') {
+                    ++i;
+                    return true;
+                }
+                if (text[i] == '\\') {
+                    i += 2;
+                    continue;
+                }
+                ++i;
+            }
+            at = n;
+            return false;
+        }
+        if (c == '{' || c == '[') {
+            const char close = c == '{' ? '}' : ']';
+            ++i;
+            skip();
+            if (i < n && text[i] == close) {
+                ++i;
+                return true;
+            }
+            while (true) {
+                if (close == '}') {
+                    skip();
+                    if (i >= n || text[i] != '"') {
+                        return false;
+                    }
+                    if (!value()) {
+                        return false;
+                    }
+                    skip();
+                    if (i >= n || text[i] != ':') {
+                        return false;
+                    }
+                    ++i;
+                }
+                if (!value()) {
+                    return false;
+                }
+                skip();
+                if (i < n && text[i] == ',') {
+                    ++i;
+                    skip();
+                    if (i < n && text[i] == close) {
+                        at = i;
+                        return false; // a trailing comma
+                    }
+                    continue;
+                }
+                if (i < n && text[i] == close) {
+                    ++i;
+                    return true;
+                }
+                return false;
+            }
+        }
+        size_t j = i;
+        while (j < n && text[j] != ',' && text[j] != '}' && text[j] != ']' && text[j] != '\n' &&
+               text[j] != '\r' && text[j] != ' ' && text[j] != '\t') {
+            ++j;
+        }
+        const std::string token = text.substr(i, j - i);
+        if (token == "true" || token == "false" || token == "null") {
+            i = j;
+            return true;
+        }
+        if (token.empty()) {
+            return false;
+        }
+        char* end = nullptr;
+        std::strtod(token.c_str(), &end);
+        if (end == token.c_str() || *end != '\0') {
+            at = i;
+            return false;
+        }
+        i = j;
+        return true;
+    };
+    if (!value()) {
+        if (at == std::string::npos) {
+            at = i;
+        }
+        return "the body stops being JSON here";
+    }
+    skip();
+    if (i != n) {
+        at = i;
+        return "the body continues after the value";
+    }
+    at = n;
+    return "";
+}
 
 std::string field(const std::string& body, const std::string& name) {
     const size_t at = body.find("\"" + name + "\":");
@@ -498,9 +627,61 @@ void anAssemblyWithNoBlockButANodeIsScannedRatherThanRefused() {
     }
 }
 
+// **The report parses, and this is the test that says so.** Every other test in this file finds a
+// field with a substring search, which cannot see a body that is not JSON: the field it looks for
+// is well formed inside a document no client can decode. `GET /blocks` embeds this report, so that
+// took the binder census, the vertex census and the route itself down, and the run reported an I/O
+// failure rather than a report with a mistake in it.
+void theReportParsesAsJson() {
+    // A census with one of every outcome the report can carry, so the validator sees each shape:
+    // a scanned assembly, one too short, one with no identity, and one over the scan's bound.
+    ObjectPoseLocator locator;
+
+    // One struct rather than three adjacent parameters: `words` and `node` are both small integers
+    // a caller can swap, and a swap here builds an assembly of a different size carrying a
+    // different identity, which is a fixture that tests nothing.
+    struct Wanted {
+        size_t words = 0;
+        uint32_t node = 0;
+        std::vector<uint32_t> sources;
+    };
+
+    auto assembly = [](Wanted wanted) {
+        wiiuport::frame::RecordedUniformAssembly one;
+        one.shaderBaseHash = 0x6669a23d03806414;
+        one.shaderAuxHash = 0x0;
+        one.objectAddress = wanted.node;
+        one.blockSources = std::move(wanted.sources);
+        one.data.assign(wanted.words, 0.5f);
+        return one;
+    };
+    locator.onAssemblyRecorded(assembly({68, 0x1000, {}})); // scanned, no block
+    locator.onAssemblyRecorded(assembly({68, 0x1000, {}})); // again, so it has a pair to compare
+    locator.onAssemblyRecorded(assembly({8, 0x2000, {0x3e000000u}}));    // too short
+    locator.onAssemblyRecorded(assembly({68, 0, {}}));                   // no identity at all
+    locator.onAssemblyRecorded(assembly({4096, 0x3000, {0x3e000000u}})); // over the scan's bound
+
+    const std::string body = locator.json();
+    size_t at = 0;
+    const std::string fault = firstJsonFault(body, at);
+    check::isTrue(
+        fault.empty(),
+        "the census report is JSON a client can decode, because /blocks embeds it: " + fault +
+            (fault.empty() ? std::string() : " near " + body.substr(at > 40 ? at - 40 : 0, 80)));
+    // And the shapes the validator cannot check are still asserted by name, so a parseable report
+    // with a missing field does not pass as a correct one.
+    check::isTrue(mentions(body, "\"shaderOutcomes\""),
+                  "and it carries the per-shader table: " + body.substr(0, 160));
+    check::isTrue(mentions(body, "\"unidentified\""),
+                  "and the count of assemblies with no identity at all");
+    check::isTrue(mentions(body, "\"scannedWithoutBlocks\""),
+                  "and the count of assemblies scanned that named no uniform block");
+}
+
 } // namespace
 
 void wiiuport::tests::runObjectPoseLocatorTests() {
+    theReportParsesAsJson();
     anAssemblyWithNoBlockButANodeIsScannedRatherThanRefused();
     eachShadersOwnAssembliesSayWhatBecameOfThem();
     aBufferTooShortToHoldAPoseIsCountedAsItsOwnFact();
