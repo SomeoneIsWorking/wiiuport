@@ -713,8 +713,8 @@ genuinely too small: a shader declaring 32 or 16 bytes of uniforms cannot be app
 whatever it binds, so those draws are already positioned when they are issued and a blend that leaves
 them alone is right, not incomplete. The other two take their uniforms from the **ALU constant bank**
 rather than from any block, which `uniformData_updateUniformVars` copies into the same assembled buffer
-the blend already writes — **so for the largest share of the frame the pose is inside the buffer, not in
-a place nobody looked.** What those 272 bytes hold is now visible: **eight windows, five of them shared
+the blend already writes -- and **that sentence was wrong, and the run that followed is what said
+so.** What those 272 bytes hold is now visible: **eight windows, five of them shared
 by 8 to 14 of 16 objects — globals, a camera or a projection — and three per-object** (offsets 0, 4 and
 52, where 1 of 15 other objects reads the same), with movement counted over **2 comparisons**, which is
 the same small-denominator caveat every candidate in this project carries and is stated beside it rather
@@ -725,12 +725,52 @@ than divided away.
 12,072 / 0, then 12,298 / 12,054 / 0. The two short shaders unchanged in both, at 58,622 and 40,855 and
 5,595 and 5,655 assemblies all too short. **The shape is the finding and the counts are the window.**
 
-**What is left for the frame's largest share is therefore the vertex bytes, and that is now a measured
-conclusion rather than an assertion.** The previous sentence here — "the scene's geometry takes its
-transform from the vertex attribute stream" — rested on the short-buffer claim, which was half wrong;
-the census can now look at those shaders and what it finds is mostly globals. The instrument that would
-say more is the vertex-attribute census, and it is still blind (`nodesTracked: 0`), so **that** is the
-next step and this row no longer claims to know its answer.
+### And the blend refuses every one of them, which is the answer the change was for
+
+**Feeding the census's own candidates back through the table, on the real disc at gameplay, with the
+stand-in painting twice a tick (1,210 paints) and the camera moving.** The whole census, then each
+of the sixteen shaders the blend reports it cannot place, by name:
+
+```
+POST /pose offered 386, took 71, refused 315
+  0x6669a23d03806414:  4 candidates of 32108 scanned, 272 bytes,  table took 0 of 4
+  0x5ae6d5fe34beb432:  0 candidates of  8764 scanned,  64 bytes,  table took 0 of 0
+  0x2802e519ac163806:  0 candidates of     0 scanned,  32 bytes,  table took 0 of 0
+  0x842a19b509f8b91a:  0 candidates of     0 scanned,  16 bytes,  table took 0 of 0
+  0xb00a68512e38669a:  6 candidates of  2065 scanned, 368 bytes,  table took 0 of 6
+  0x3a8d0f380931d09b:  0 candidates of  1261 scanned,  48 bytes,  table took 0 of 0
+  0xff71dcd2ad4defdc:  1 candidates of  1261 scanned,  80 bytes,  table took 0 of 1
+  refusals: shared 210, still 116, none for want of another object
+```
+
+(A second run: 385 offered, 77 taken, 308 refused; 214 shared, 105 still. **The counts move, the
+shape does not.**)
+
+**So the sentence this section carried a moment ago -- "for the largest share of the frame the pose is
+inside the buffer" -- was wrong, and the run that followed is what said so.** The buffer *is* where
+those uniforms are assembled, and the census now reads it: 32,108 assemblies, 272 bytes, four
+candidates found. **The blend refuses all four, and across the whole feed it refuses 210 as a pass's
+value -- the same twelve words as twelve or more of fifteen other objects -- and 116 as a value that
+never moved.** What a constant-bank shader carries at that size is a **camera or a projection**: shared
+by nearly every object, or static. **There is no per-object pose in it, so narrowing the gate bought
+the census a clear look and the blend nothing.** That is the opposite of the claim, and it was worth
+the run: before, those 60,361 assemblies were *not examined*, and the report said so only because the
+per-shader outcome was added; now they are examined and the answer is measured rather than assumed.
+
+**And the per-shader feed is what makes the question askable at all.** One unscoped `POST /pose` for
+four runs, and the blend's own list then said the scene's most-drawn shader was unplaceable with
+nothing to say why. Asking by name returns that shader's own outcome and its own refusal
+independently, and the two cases separate: a shader the census found and the table refused (the
+camera above) is a different problem from one the census never looked at (the 16-byte and 32-byte
+shaders, whose scans are zero), and only the per-shader route can tell them apart.
+
+**What is left for the frame's largest share is therefore the vertex bytes, and this is now measured
+twice over rather than asserted once.** The short-buffer claim that rested it was half wrong; the
+constant-bank claim that replaced it was wrong too, and the feed above is what said so — the values
+there are a camera and a projection, shared or static. So the frame's largest share has **no per-object
+pose in its uniforms at all**, by measurement rather than by inference. The instrument that would say
+more is the vertex-attribute census, and it is still blind (`nodesTracked: 0`), so **that** is the next
+step and this document does not claim to know its answer.
 
 **The instrument change this needed, and why it is the same shape as what was there.** The per-shader
 counts are kept in `ObjectPoseLocator`'s own keyed table beside `m_byShader`, counted at the gate that

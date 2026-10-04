@@ -88,8 +88,13 @@ is a property of the *shader*: `LatteBufferCache_collectUniformBlockSources` wal
 `list_remappedUniformEntries_bufferGroups`, so a shader naming no uniform block returns none however
 many the draw binds. **Those uniforms come from the ALU constant bank**, which
 `uniformData_updateUniformVars` copies into the assembled buffer from `mmSQ_ALU_CONST0_0 + 0x400`
-(vertex) or `+ 0` (pixel) -- **so for the largest share of the frame the pose is already inside the
-buffer `PoseBlend` writes.** The gate was also wrong to refuse them: `identityOf` takes the node the
+(vertex) or `+ 0` (pixel) -- and **feeding the census's own candidates back proved that sentence
+wrong.** On the real disc at gameplay with the stand-in painting twice a tick, `POST /pose` offered 386
+candidates and took 71, refusing **210 as a pass's value** (the same twelve words as twelve or more of
+fifteen other objects) and **116 as a value that never moved**; per shader, `0x6669a23d03806414` offers
+4 candidates of 32,108 scanned assemblies and the table takes **0 of 4**. So the 272 bytes hold a camera
+and a projection -- shared by nearly every object, or static -- and **there is no per-object pose in
+them**, which the census could not say before because it was not looking. The gate was also wrong to refuse them: `identityOf` takes the node the
 binder published and falls back to block sources only when there is no node, so it now refuses only an
 assembly with neither, and re-run on the rebuilt runtime that shader answers with **84,187 assemblies
 scanned and 8 candidates of 596 where it had 0 of 414** -- five shared by 8 to 14 of 16 objects (globals)
@@ -101,7 +106,9 @@ leaving them alone is right. The census also found the descriptor list is **two 
 at `object + 0x10 + *(u32 *)(object + 0x4c) * 0x1c`, address `+0x04`/size `+0x0c`; `0x027f16e8`'s at
 `base + cursor * 0x1c`, size `+0x14`/address `+0x1c`) and that **one call binds three blocks**
 (`0x027fe118`: nine setter calls in three stage-triples), so "the block the draw sourced" is at most one
-of the blocks it bound. Gates: 1039 C++ checks, 0 failures. **What is left for the frame's largest share
+of the blocks it bound. **Gates: 1043 C++ checks, 0 failures** (four of them the JSON validator this
+report needed: a substring search cannot see a body that does not parse, and `/blocks` embeds this
+report, so a malformed body takes three reports and a route down with it). **What is left for the frame's largest share
 is the vertex bytes, as a conclusion rather than an assertion: the vertex-attribute census is blind
 (`nodesTracked: 0`) and is the next read.**
 built.** The identity is the **node** (the binder at `0x027ff88c` and `0x027ff9c0`, 195,581 bindings
