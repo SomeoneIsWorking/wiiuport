@@ -83,7 +83,18 @@ RecordedUniformAssembly assembly(std::vector<float> data, std::vector<uint32_t> 
 
 // A transform: three rows and a translation, with a scale on the rows so a caller can ask
 // for the scaled case the strict class cannot see. Rigid at scale 1.
-void putPose(std::vector<float>& words, size_t at, float spin, float scale = 1.0f) {
+// **The spin and the scale are one parameter, not two.** They are adjacent floats with a
+// default, which is the shape clang-tidy calls out as easily swappable -- and it is right: a
+// caller that passes a scale where a spin belongs gets a matrix that is still affine, still
+// moving, and tests the wrong thing. One small struct says which is which at every call site.
+struct PoseShape {
+    float spin = 0.0f;
+    float scale = 1.0f;
+};
+
+void putPose(std::vector<float>& words, size_t at, PoseShape shape = {}) {
+    const float spin = shape.spin;
+    const float scale = shape.scale;
     const float s = std::sin(spin);
     const float c = std::cos(spin);
     const float pose[12] = {scale * c, scale * s, 0.0f,  -scale * s, scale * c, 0.0f,
@@ -109,10 +120,10 @@ constexpr size_t kPoseWord = 8;
 // collapse folds windows on one value and not two.
 void oneMatrixIsOneCandidateHoweverManyAlignmentsItIsAffineAt() {
     std::vector<float> words(64, 0.0f);
-    putPose(words, kPoseWord, 0.3f);
+    putPose(words, kPoseWord, {0.3f});
     // A second matrix, far enough away that the collapse must not fold it in: a span is twelve
     // words, so anything past one 3x4 apart is its own value.
-    putPose(words, kPoseWord + 32, 0.9f, 2.0f);
+    putPose(words, kPoseWord + 32, {0.9f, 2.0f});
 
     ObjectPoseLocator locator;
     for (int round = 0; round < 30; round++) {
@@ -163,7 +174,7 @@ void oneMatrixIsOneCandidateHoweverManyAlignmentsItIsAffineAt() {
 void oneMatrixInTwoShadersIsTwoCandidatesAndTwiceInOneShaderIsOne() {
     auto wordsWithPose = [](float spin) {
         std::vector<float> words(64, 0.0f);
-        putPose(words, kPoseWord, spin);
+        putPose(words, kPoseWord, {spin});
         return words;
     };
     const std::string twoShaders = "1804";
@@ -242,7 +253,7 @@ void oneMatrixInTwoShadersIsTwoCandidatesAndTwiceInOneShaderIsOne() {
 void theDenominatorIsKeyedOnTheShaderAndNotOnItsBaseHashAlone() {
     auto wordsWithPose = [](float spin) {
         std::vector<float> words(64, 0.0f);
-        putPose(words, kPoseWord, spin);
+        putPose(words, kPoseWord, {spin});
         return words;
     };
     ObjectPoseLocator locator;
@@ -331,9 +342,167 @@ void aBufferTooShortToHoldAPoseIsCountedAsItsOwnFact() {
                   "name says");
 }
 
+// **The same four facts per shader, because the whole question is a per-shader one and the
+// counters were not.** `tooShortForAPose` is a whole-run total, so "0 candidates of 300
+// considered" -- the answer the title's four most-drawn shaders get -- could not say whether the
+// scan ever looked at one of them. A shader whose every assembly is too short to hold twelve
+// floats has no matrix in its uniforms to find, which is a fact about the title; a shader that was
+// scanned and held none was looked at and came back empty, which is a fact about the search. The
+// two call for opposite next steps.
+void eachShadersOwnAssembliesSayWhatBecameOfThem() {
+    // One struct rather than three adjacent parameters: a base hash and an aux hash side by
+    // side are two numbers a caller can swap, and a swapped pair is a different shader measured
+    // under this one's name.
+    struct Shader {
+        uint64_t base = 0;
+        uint64_t aux = 0;
+    };
+
+    auto withWords = [](Shader shader, size_t words) {
+        wiiuport::frame::RecordedUniformAssembly assembly;
+        assembly.shaderBaseHash = shader.base;
+        assembly.shaderAuxHash = shader.aux;
+        assembly.blockSources = {0x3e000000u};
+        assembly.data.assign(words, 0.5f);
+        return assembly;
+    };
+    // A pose the scan can find, so the long shader is one that was scanned and held something.
+    auto withPose = [](uint64_t base) {
+        wiiuport::frame::RecordedUniformAssembly assembly;
+        assembly.shaderBaseHash = base;
+        assembly.shaderAuxHash = 0x79;
+        assembly.blockSources = {0x3e000000u};
+        assembly.data.assign(24, 0.0f);
+        for (size_t row = 0; row < 3; row++) {
+            assembly.data[row * 4 + 0] = 1.0f;
+            assembly.data[row * 4 + 5] = 1.0f;
+            assembly.data[row * 4 + 10] = 1.0f;
+            assembly.data[row * 4 + 15] = 1.0f;
+        }
+        return assembly;
+    };
+
+    ObjectPoseLocator locator;
+    // The scene's most-drawn shader: three assemblies, every one of them eleven words.
+    for (int i = 0; i < 3; i++) {
+        locator.onAssemblyRecorded(withWords({0x6669a23d03806414, 0x0}, 11));
+    }
+    locator.onAssemblyRecorded(withPose(0x2802e519ac163806));
+    locator.onAssemblyRecorded(withPose(0x2802e519ac163806));
+
+    const auto short_ = locator.outcomeOf(0x6669a23d03806414, std::nullopt);
+    check::isTrue(short_.assemblies == 3 && short_.tooShort == 3 && short_.scanned == 0,
+                  "every assembly of the short shader is counted against that shader, and none of "
+                  "them is a candidate's business: " +
+                      std::to_string(short_.assemblies) + "/" + std::to_string(short_.tooShort) +
+                      "/" + std::to_string(short_.scanned));
+    // Eleven words is 44 bytes, and 48 is what a 3x4 needs: the size says on its own that this
+    // shader cannot be applying a matrix from its uniforms, whatever it binds.
+    check::isTrue(short_.largestBytes == 44,
+                  "and the largest uniform range it carried is reported in bytes, so the threshold "
+                  "can be read against it: " +
+                      std::to_string(short_.largestBytes));
+    check::isTrue(short_.largestBytes < ObjectPoseLocator::kPoseWords * sizeof(float),
+                  "which is below the bytes a 3x4 needs");
+
+    const auto long_ = locator.outcomeOf(0x2802e519ac163806, std::nullopt);
+    check::isTrue(long_.assemblies == 2 && long_.tooShort == 0 && long_.scanned == 2,
+                  "and the long shader's own two assemblies are counted as scanned, beside its own "
+                  "denominator: " +
+                      std::to_string(long_.assemblies) + "/" + std::to_string(long_.scanned));
+
+    // **An aux hash of zero asks about every aux hash of the base hash**, because the census
+    // keys its candidates on the pair and a caller naming one hash was never told the other.
+    // Asking for an aux hash that is not the one recorded must not borrow its numbers.
+    check::isTrue(locator.outcomeOf(0x2802e519ac163806, std::optional<uint64_t>{0x79}).assemblies ==
+                      2,
+                  "the aux hash it was recorded under finds it");
+    check::isTrue(
+        locator.outcomeOf(0x2802e519ac163806, std::optional<uint64_t>{0x3c9}).assemblies == 0,
+        "and an aux hash it was not recorded under does not, rather than answering for a "
+        "shader it knows nothing about");
+
+    // And the report carries the table, so a reader who asks about the whole run sees the same
+    // per-shader facts beside the run's total.
+    const std::string body = locator.json();
+    check::isTrue(mentions(body, "\"shaderOutcomes\""),
+                  "the report carries the per-shader table beside the run's total: " +
+                      body.substr(0, 200));
+    check::isTrue(mentions(body, "\"canHoldAPose\":false"),
+                  "and it says, per shader, whether that shader's uniforms could hold a pose at "
+                  "all");
+    check::isTrue(mentions(body, "\"outcomeShaders\":2"),
+                  "with the table's own size, so a bounded list cannot read as the title's whole "
+                  "set of shaders");
+}
+
+// **No block source is not the same as no identity, and the gate that said it was is narrowed.**
+// `identityOf` takes the node the binder published and falls back to the block sources only when
+// there is no node, so an assembly with no blocks and a node is exactly as pairable as one with
+// both. Refusing it was refusing the title's most-drawn shader: 60,361 assemblies of 272 bytes --
+// five 3x4s' worth -- every one turned away because the *shader* names no uniform block, its
+// uniforms coming from the ALU constant bank that `uniformData_updateUniformVars` copies into this
+// same buffer. The pose the blend needs was in there and the scan was the only thing not looking.
+void anAssemblyWithNoBlockButANodeIsScannedRatherThanRefused() {
+    auto fromConstantBank = [](uint64_t node, size_t words) {
+        wiiuport::frame::RecordedUniformAssembly assembly;
+        assembly.shaderBaseHash = 0x6669a23d03806414;
+        assembly.shaderAuxHash = 0x0;
+        // No block source: a shader whose uniform groups name no block returns none, whatever
+        // the draw binds.
+        assembly.blockSources = {};
+        assembly.objectAddress = node;
+        assembly.data.assign(words, 0.0f);
+        for (size_t row = 0; row < 3; row++) {
+            assembly.data[row * 4 + 0] = 1.0f;
+            assembly.data[row * 4 + 5] = 1.0f;
+            assembly.data[row * 4 + 10] = 1.0f;
+            assembly.data[row * 4 + 15] = 1.0f;
+        }
+        return assembly;
+    };
+
+    ObjectPoseLocator locator;
+    locator.onAssemblyRecorded(fromConstantBank(0x1000, 68));
+    locator.onAssemblyRecorded(fromConstantBank(0x1000, 68));
+    locator.onAssemblyRecorded(fromConstantBank(0x2000, 68));
+
+    const auto outcome = locator.outcomeOf(0x6669a23d03806414, std::nullopt);
+    check::isTrue(outcome.scanned == 3 && outcome.unidentified == 0,
+                  "three assemblies with a node and no block source are scanned, and none is "
+                  "counted as unidentifiable: " +
+                      std::to_string(outcome.scanned) + "/" + std::to_string(outcome.unidentified));
+    check::isTrue(outcome.scannedWithoutBlocks == 3,
+                  "and all three are counted as having named no uniform block, which is the whole "
+                  "difference from a block-sourced shader: " +
+                      std::to_string(outcome.scannedWithoutBlocks));
+    // And they found candidates, which is the point: a 68-word buffer holding a 3x4 scanned and
+    // held one, so the shader now has an offset the blend can be told about.
+    check::isTrue(locator.found().size() > 0,
+                  "and they produced candidates, which is what the refused gate was costing: " +
+                      std::to_string(locator.found().size()));
+
+    // An assembly with neither a node nor a block source still cannot be paired with anything,
+    // and is counted as the unidentifiable case rather than merged into a neighbour's.
+    {
+        ObjectPoseLocator alone;
+        auto orphan = fromConstantBank(0, 68);
+        orphan.objectAddress = 0;
+        alone.onAssemblyRecorded(orphan);
+        const std::string body = alone.json();
+        check::isTrue(field(body, "assembliesWithoutAnIdentity") == "1",
+                      "an assembly with neither a node nor a block source is counted as having no "
+                      "identity at all");
+        check::isTrue(field(body, "candidates") == "0",
+                      "and contributes no candidate, because there is nothing to pair it with");
+    }
+}
+
 } // namespace
 
 void wiiuport::tests::runObjectPoseLocatorTests() {
+    anAssemblyWithNoBlockButANodeIsScannedRatherThanRefused();
+    eachShadersOwnAssembliesSayWhatBecameOfThem();
     aBufferTooShortToHoldAPoseIsCountedAsItsOwnFact();
     theDenominatorIsKeyedOnTheShaderAndNotOnItsBaseHashAlone();
     oneMatrixIsOneCandidateHoweverManyAlignmentsItIsAffineAt();
@@ -344,7 +513,7 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
         ObjectPoseLocator locator;
         for (int seen = 0; seen < 10; seen++) {
             std::vector<float> words(64, 0.0f);
-            putPose(words, 16, 0.1f * static_cast<float>(seen));
+            putPose(words, 16, {0.1f * static_cast<float>(seen)});
             // The same block sources every time, so the readings are one object's and
             // the movement count means something.
             locator.onAssemblyRecorded(assembly(words, {0x3e000000u}));
@@ -390,7 +559,7 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
         ObjectPoseLocator locator;
         for (int seen = 0; seen < 10; seen++) {
             std::vector<float> words(64, 0.0f);
-            putPose(words, 16, 0.1f * static_cast<float>(seen));
+            putPose(words, 16, {0.1f * static_cast<float>(seen)});
             // A new address every assembly, as the title produces: the same object,
             // re-uploaded.
             locator.onAssemblyRecorded(assembly(
@@ -419,7 +588,7 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
         ObjectPoseLocator locator;
         for (int seen = 0; seen < 10; seen++) {
             std::vector<float> words(64, 0.0f);
-            putPose(words, 16, 0.1f * static_cast<float>(seen));
+            putPose(words, 16, {0.1f * static_cast<float>(seen)});
             locator.onAssemblyRecorded(assembly(words, {0x3e000000u}, 0));
         }
         const std::string body = locator.json();
@@ -439,7 +608,7 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
         for (int seen = 0; seen < 10; seen++) {
             std::vector<float> words(64, 0.0f);
             if (seen == 3) {
-                putPose(words, 16, 0.5f);
+                putPose(words, 16, {0.5f});
             }
             locator.onAssemblyRecorded(assembly(words, {0x3e000000u}));
         }
@@ -464,7 +633,7 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
         ObjectPoseLocator locator;
         for (int seen = 0; seen < 10; seen++) {
             std::vector<float> words(64, 0.0f);
-            putPose(words, 16, 0.25f);
+            putPose(words, 16, {0.25f});
             locator.onAssemblyRecorded(assembly(words, {0x3e000000u}));
         }
         const std::string body = locator.json();
@@ -492,7 +661,7 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
         ObjectPoseLocator locator;
         for (int seen = 0; seen < 10; seen++) {
             std::vector<float> words(64, 0.0f);
-            putPose(words, 16, 0.1f * static_cast<float>(seen), 2.5f);
+            putPose(words, 16, {0.1f * static_cast<float>(seen), 2.5f});
             locator.onAssemblyRecorded(assembly(words, {0x3e000000u}));
         }
         const std::string body = locator.json();
@@ -550,9 +719,9 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
     // are arithmetic, not to find a transform at exactly one scale.
     {
         std::vector<float> scaled(12, 0.0f);
-        putPose(scaled, 0, 0.0f, 2.5f);
+        putPose(scaled, 0, {0.0f, 2.5f});
         std::vector<float> huge(12, 0.0f);
-        putPose(huge, 0, 0.0f, ObjectPoseLocator::Shape::kScaleCeiling * 2.0f);
+        putPose(huge, 0, {0.0f, ObjectPoseLocator::Shape::kScaleCeiling * 2.0f});
         check::isTrue(ObjectPoseLocator::Shape::isAffine(scaled.data()),
                       "a transform with rows 2.5 long is in the loose class");
         check::isTrue(!ObjectPoseLocator::Shape::isRigid(scaled.data()),
@@ -588,7 +757,7 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
     {
         ObjectPoseLocator locator;
         std::vector<float> words(ObjectPoseLocator::kMaxScanBytes / sizeof(float) + 64, 0.0f);
-        putPose(words, 8, 0.5f);
+        putPose(words, 8, {0.5f});
         locator.onAssemblyRecorded(assembly(words, {0x3e000000u}));
         const std::string body = locator.json();
         check::isTrue(field(body, "unscannedBuffers") == "1",
@@ -604,13 +773,13 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
         ObjectPoseLocator locator;
         for (int seen = 0; seen < 4; seen++) {
             std::vector<float> words(64, 0.0f);
-            putPose(words, 16, 0.2f);
+            putPose(words, 16, {0.2f});
             locator.onAssemblyRecorded(assembly(
                 words, seen == 0 ? std::vector<uint32_t>{} : std::vector<uint32_t>{0x3e000000u}));
         }
         const std::string body = locator.json();
-        check::isTrue(field(body, "buffersWithoutSources") == "1",
-                      "an assembly with no block sources is counted on its own");
+        check::isTrue(field(body, "assembliesWithoutAnIdentity") == "1",
+                      "an assembly with neither a node nor a block source is counted on its own");
     }
 
     // A buffer too short to hold a pose is not a buffer with no pose in it, and is
@@ -655,13 +824,13 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
         // one had a mutation in it that nothing noticed.
         auto globalFrame = [](uint32_t object, float spin) {
             std::vector<float> words(64, 0.0f);
-            putPose(words, 8, spin);
+            putPose(words, 8, {spin});
             return assembly(words, {0x3e000000u}, object);
         };
         auto perObjectValue = [](uint32_t object) {
             std::vector<float> words(64, 0.0f);
             // A different spin per object, which is what two props at different places hold.
-            putPose(words, 8, 0.4f + static_cast<float>(object) * 0.37f);
+            putPose(words, 8, {0.4f + static_cast<float>(object) * 0.37f});
             return assembly(words, {0x3e000000u}, object);
         };
         // **Not `const`:** a computed value from a named constant, and the rule for a computed
@@ -764,7 +933,7 @@ void wiiuport::tests::runObjectPoseLocatorTests() {
             // whether they differ.
             auto twoObjects = [](uint32_t object, float spin) {
                 std::vector<float> words(64, 0.0f);
-                putPose(words, 8, spin);
+                putPose(words, 8, {spin});
                 return assembly(words, {0x3e000000u}, object);
             };
             ObjectPoseLocator locator;

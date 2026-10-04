@@ -68,6 +68,42 @@ that **J3D uploads its uniform buffers through one bind helper** (e.g. `0x027f1a
 short to hold a pose, so what the pose is instead is named in that table, and a caller census over
 the seven bind functions is running to say which draw code fills it and from which object. **This row
 is not waiting on a census: it is waiting on that answer.**
+
+**That answer is in, and it corrects the sentence above it.** The caller census ran on the real disc
+on 2026-10-04 with eight installable entries (the two binder entries in the RE side's recorded string
+could never install -- a standing probe already holds them, and `EntryHeldOther` is permanent), and
+`GET /pose?shader=` now reports what became of **each named shader's own assemblies**, which is the fact
+the row's claim rested on and the report could not give:
+
+```
+0x6669a23d03806414   60361 assemblies      0 too short   60361 without sources   272 bytes   can hold a pose
+0x5ae6d5fe34beb432   12080 assemblies      0 too short   12080 without sources    64 bytes   can hold a pose
+0x2802e519ac163806   40727 assemblies  40727 too short        0 without sources    32 bytes   cannot
+0x842a19b509f8b91a    5625 assemblies   5625 too short        0 without sources    16 bytes   cannot
+```
+
+**Two of the four were never short, and the most-drawn shader in the game carries 272 bytes -- five
+3x4s' worth.** All 60,361 of its assemblies were refused because `assembly.blockSources` is empty, which
+is a property of the *shader*: `LatteBufferCache_collectUniformBlockSources` walks
+`list_remappedUniformEntries_bufferGroups`, so a shader naming no uniform block returns none however
+many the draw binds. **Those uniforms come from the ALU constant bank**, which
+`uniformData_updateUniformVars` copies into the assembled buffer from `mmSQ_ALU_CONST0_0 + 0x400`
+(vertex) or `+ 0` (pixel) -- **so for the largest share of the frame the pose is already inside the
+buffer `PoseBlend` writes.** The gate was also wrong to refuse them: `identityOf` takes the node the
+binder published and falls back to block sources only when there is no node, so it now refuses only an
+assembly with neither, and re-run on the rebuilt runtime that shader answers with **84,187 assemblies
+scanned and 8 candidates of 596 where it had 0 of 414** -- five shared by 8 to 14 of 16 objects (globals)
+and three per-object (offsets 0, 4, 52), movement over **2 comparisons**, stated beside the number. The
+other constant-bank shader (64 bytes) scans 12,072 and holds nothing in the affine class. **The two that
+really are too small cannot be helped**: 58,622 and 5,595 assemblies at 32 and 16 bytes of uniforms, and
+a shader declaring that little cannot apply a 3x4 from them, so those draws are already positioned and
+leaving them alone is right. The census also found the descriptor list is **two shapes** (the binder's
+at `object + 0x10 + *(u32 *)(object + 0x4c) * 0x1c`, address `+0x04`/size `+0x0c`; `0x027f16e8`'s at
+`base + cursor * 0x1c`, size `+0x14`/address `+0x1c`) and that **one call binds three blocks**
+(`0x027fe118`: nine setter calls in three stage-triples), so "the block the draw sourced" is at most one
+of the blocks it bound. Gates: 1039 C++ checks, 0 failures. **What is left for the frame's largest share
+is the vertex bytes, as a conclusion rather than an assertion: the vertex-attribute census is blind
+(`nodesTracked: 0`) and is the next read.**
 built.** The identity is the **node** (the binder at `0x027ff88c` and `0x027ff9c0`, 195,581 bindings
 over 590 objects). The pose is **twelve words in the title's assembled uniforms** -- not in the node's
 own 2,588-byte window, where 0 of 23,210 transform-shaped windows move, and not in the uniform block
