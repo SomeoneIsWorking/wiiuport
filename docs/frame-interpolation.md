@@ -661,6 +661,90 @@ this project already has, which reports `objectsOffered: 0`, `nodesTracked: 0` a
 `drawsWithoutPosition` equal to all 1,388,163 draws. That is a blind instrument reporting zeros, not
 an instrument that found nothing.
 
+### The four are two different things, and half of them are not short at all
+
+**Everything above rests on a sentence the report could not support**: that those shaders' assembled
+buffers are *under 48 bytes* and so were never examined. `tooShortForAPose` is a **whole-run total**,
+and `GET /pose?shader=` counted *candidates*, not that shader's assemblies — so "0 candidates of 300
+considered" said the census held nothing that belongs to this shader and nothing about whether the scan
+ever looked at one of them. The two readings call for opposite next steps, and only one of them was
+ever a fact.
+
+Asked per shader, on the real title, gameplay reached and walked (2026-10-04):
+
+```
+0x6669a23d03806414   60361 assemblies      0 too short   60361 without sources   272 bytes   can hold a pose
+0x5ae6d5fe34beb432   12080 assemblies      0 too short   12080 without sources    64 bytes   can hold a pose
+0x2802e519ac163806   40727 assemblies  40727 too short        0 without sources    32 bytes   cannot
+0x842a19b509f8b91a    5625 assemblies   5625 too short        0 without sources    16 bytes   cannot
+```
+
+**Two are too short, and two are refused at a different gate entirely.** `0x6669a23d03806414` — the
+most-drawn shader in the game — carries **272 bytes** of uniforms, which is five 3x4s, and *can* hold a
+pose. Every one of its 60,361 assemblies was refused because `assembly.blockSources` was empty, and
+that is a statement about the **shader**: `LatteBufferCache_collectUniformBlockSources` walks the
+shader's own `list_remappedUniformEntries_bufferGroups`, so a shader that names no uniform block returns
+none however many blocks the draw binds.
+
+**And the gate that refused them was not needed.** `identityOf` takes the node the title's own binder
+published and falls back to the block sources only when there is no node — so an assembly with no blocks
+*and* a node is exactly as pairable as one with both, and the gate was refusing the title's
+most-drawn shader for a field its own identity function does not use. It now refuses only what cannot be
+paired at all, no node **and** no block source, and the renamed counter says so
+(`assembliesWithoutAnIdentity`).
+
+**What that buys, measured on the same title after the narrowing** (2026-10-04, gameplay reached and
+walked, `/pose?shader=` on the rebuilt runtime):
+
+```
+0x6669a23d03806414  84274 assemblies  0 too short   87 unidentified   84187 scanned, all without a block   272 bytes
+                    8 candidates of 596, where before the narrowing it had 0 of 414
+                      offset   0: moved 2 of 2 comparisons, 1 of 15 other objects read the same   <- per-object
+                      offsets  4, 52:                                                 1 of 15     <- per-object
+                      offsets 32, 132, 216, 156, 152:                                   8 to 14 of 15  <- shared
+0x5ae6d5fe34beb432  12282 assemblies  0 too short  210 unidentified   12072 scanned, all without a block    64 bytes
+                    0 candidates: scanned, and the affine class held nothing at any offset
+0x2802e519ac163806  58622 assemblies  58622 too short   --                                      32 bytes  cannot hold a pose
+0x842a19b509f8b91a   5595 assemblies   5595 too short   --                                      16 bytes  cannot hold a pose
+```
+
+**So the answer is two answers, and neither is the one this file asserted.** Two of the four are
+genuinely too small: a shader declaring 32 or 16 bytes of uniforms cannot be applying a 3x4 from them
+whatever it binds, so those draws are already positioned when they are issued and a blend that leaves
+them alone is right, not incomplete. The other two take their uniforms from the **ALU constant bank**
+rather than from any block, which `uniformData_updateUniformVars` copies into the same assembled buffer
+the blend already writes — **so for the largest share of the frame the pose is inside the buffer, not in
+a place nobody looked.** What those 272 bytes hold is now visible: **eight windows, five of them shared
+by 8 to 14 of 16 objects — globals, a camera or a projection — and three per-object** (offsets 0, 4 and
+52, where 1 of 15 other objects reads the same), with movement counted over **2 comparisons**, which is
+the same small-denominator caveat every candidate in this project carries and is stated beside it rather
+than divided away.
+
+**Two runs of the narrowed gate, and only the numbers move.** `0x6669a23d03806414`: 84,274 assemblies /
+84,187 scanned / 8 candidates of 596, then 60,749 / 60,647 / 8 of 545. `0x5ae6d5fe34beb432`: 12,282 /
+12,072 / 0, then 12,298 / 12,054 / 0. The two short shaders unchanged in both, at 58,622 and 40,855 and
+5,595 and 5,655 assemblies all too short. **The shape is the finding and the counts are the window.**
+
+**What is left for the frame's largest share is therefore the vertex bytes, and that is now a measured
+conclusion rather than an assertion.** The previous sentence here — "the scene's geometry takes its
+transform from the vertex attribute stream" — rested on the short-buffer claim, which was half wrong;
+the census can now look at those shaders and what it finds is mostly globals. The instrument that would
+say more is the vertex-attribute census, and it is still blind (`nodesTracked: 0`), so **that** is the
+next step and this row no longer claims to know its answer.
+
+**The instrument change this needed, and why it is the same shape as what was there.** The per-shader
+counts are kept in `ObjectPoseLocator`'s own keyed table beside `m_byShader`, counted at the gate that
+refuses rather than in one place per gate, and reported two ways: a bounded `shaderOutcomes` list in
+`json()` and an `assemblyOutcome` object on `GET /pose?shader=`, carrying `largestUniformBytes` and
+`canHoldAPose` so the threshold is readable rather than known. `1039 checks, 0 failures`
+(`eachShadersOwnAssembliesSayWhatBecameOfThem`, `anAssemblyWithNoBlockButANodeIsScannedRatherThanRefused`).
+
+**And the aux hash, which made the same question unaskable.** The census keys its candidates on the
+(base, aux) pair; the route took one sixteen-digit hash and passed `0` for the other, so it matched the
+pair exactly and answered "nothing" for any shader whose aux hash it was never told — and "nothing" is
+the one answer a caller cannot tell from a real absence. **An aux hash of zero now asks about every aux
+hash of that base hash**, for the candidates and for the outcome alike.
+
 **That is the honest gap and it is large.** This run: 134,786 assemblies, of which **131,918 were
 draws whose shader the table could not place — 98%.** Run three, whose table caught more of the
 scene, was 63%. The mechanism blends what it can place and leaves the rest exactly as the title drew
@@ -809,6 +893,41 @@ was keyed on the **base hash alone**, so shaders differing only in their aux has
 **45,475 assemblies attributed to one "shader" that is three**, and a denominator three times too
 large is a bar nothing clears honestly. It is keyed on the pair now, and the test writes two shaders
 sharing a base hash and requires the second's own denominator; with the base alone it fails.
+
+### The J3D bind census, run: seven of its entries could never install, and the rest is the draw code
+
+The RE side's recorded step was a caller census over the J3D functions that hold
+`GX2Set*UniformBlock`, and it named seven entries. **Two of them could never have installed, and not
+because an address was wrong**: `0x027ff88c` and `0x027ff9c0` are the two binder entries the standing
+`UniformBlockCensus` probe already holds, every first word matches the image, and a registration that
+holds an entry refuses every other one for it for the rest of the run with `EntryHeldOther` with no way
+to take it back. Rerun with eight entries no standing probe holds, each verified against the image
+first (8 of 8), on the real disc with gameplay reached and walked:
+
+```
+0x027f16e8 installed  141084 calls   0x027f112c x125400, 0x027f11d8 x15600, 0x025e88d8 x84
+0x027fe118 installed   13104 calls   0x025ec340 x11232,  0x0257ec98 x1248,   0x0246e38c x624
+0x027ffb48 installed   13104 calls   0x025ec518 x11232,  and six more at 312 each
+0x0282d098 installed    5702 calls   0x0282daa0 x5702
+0x027f1fa8, 0x027ff75c, 0x027cc78c, 0x027d3960   installed, 0 calls
+```
+
+**The census is checked against the static answer it was built to replace.** `0x027fe118` has ten
+direct `bl` call sites in the image across seven functions; the three the run saw are exactly three of
+them, and the ones the title did not draw from are *absent* rather than counted zero.
+
+**What it adds.** Across the J3D range the three setters are called 84 times from 20 functions, and a
+whole-image `bl` scan finds direct callers for 3 of the 20 — so 17 are reached only through a pointer,
+which is the whole reason this instrument exists. And the descriptor list is **two shapes**: the
+binder's sub-object reads `object + 0x10 + *(u32 *)(object + 0x4c) * 0x1c` with the address at `+0x04`
+and the size at `+0x0c`, while `0x027f16e8` reads `base + cursor * 0x1c` with the list at `+0`, the size
+at `+0x14` and the address at `+0x1c`. **One call binds three blocks**: `0x027fe118` issues nine setter
+calls in three stage-triples from three 28-byte lists on the same sub-object -- `+0x10` indexed by the
+word at `+0x4c`, `+0x1c` indexed by `+0x58`, and `+0xc4` indexed by `+0x100` (`0x027fe148`,
+`0x027fe1ec`, `0x027fe290`), each read at `+0x04` for the address and `+0x0c` for the size -- and
+`0x027f16e8` issues fifteen. So "the block
+the draw sourced" is at most one of the blocks the draw bound — which is what the two-shape finding and
+the three-block finding each say, from the instructions rather than from a count.
 
 ### And the named address is the name, not the matrix
 

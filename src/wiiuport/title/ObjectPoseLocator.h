@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -183,6 +184,87 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
 
     std::vector<Found> found() const;
 
+    // **What happened to each assembly of one shader, per shader, because the whole
+    // question the blend turns on is a per-shader question and the counters were not.**
+    //
+    // The run's own totals say how many assemblies were too short to hold a 3x4 and how
+    // many were scanned, and `GET /pose?shader=` says how many *candidates* belong to a
+    // named shader. Neither says how many of **that shader's** assemblies were too
+    // short, so "0 candidates of 300 considered" -- the answer the title's four
+    // most-drawn shaders get -- reads as "the scan looked at them and found nothing"
+    // when nothing in the report says the scan ever looked at them. The two readings
+    // call for opposite next steps, and the instrument could not tell them apart.
+    //
+    // So each assembly is counted against its own shader at the point the gate that
+    // refused it is the one that refuses, and the four outcomes are kept apart because
+    // they are four different facts: a buffer too short to hold the shape was never
+    // looked at, one with no block source cannot be paired with an object, one larger
+    // than the scan's bound was only partly looked at, and one scanned is the only case
+    // where "found nothing" is a statement about the data.
+    struct ShaderOutcome {
+        // Every assembly this shader contributed, which is the denominator.
+        uint64_t assemblies = 0;
+        uint64_t tooShort = 0;
+        // Assemblies this shader contributed that carry **no identity at all** -- neither the
+        // node the binder published nor a block source to fall back on. Renamed from
+        // `noSources` when the gate narrowed: an assembly with no block source and a node is
+        // pairable and is scanned, so counting it here would be counting a scan that happened.
+        uint64_t unidentified = 0;
+        uint64_t unscanned = 0;
+        uint64_t scanned = 0;
+        // Of those, the ones that named **no uniform block at all** and were scanned anyway
+        // because the title's own binder had published a node. Kept apart because it is the
+        // whole difference between a shader whose uniforms come from the ALU constant bank
+        // and one that reads them from a block, and the two need opposite paths through the
+        // blend: a constant-bank shader's pose is in the same assembled buffer, at an offset
+        // this census has never been allowed to look for.
+        uint64_t scannedWithoutBlocks = 0;
+        // The largest uniform range any of this shader's assemblies carried, in bytes, and
+        // whether every one of them carried the same size. **A shader whose declared range is
+        // under `kPoseWords * sizeof(float)` cannot be applying a 3x4 from its uniforms at
+        // all**, which is what makes `tooShort` a statement about the title rather than a gap
+        // in the search.
+        //
+        // **A maximum, and a shader is more than one assembly.** The same program assembles
+        // once per stage, and the stages need not be the same size -- a vertex shader's 64
+        // bytes beside a pixel shader's 8 is an ordinary pairing. So the number that decides
+        // `canHoldAPose` is the largest of them, not the one that happened to be seen last:
+        // the claim "this shader cannot hold a 3x4 in its uniforms" is only true of the
+        // maximum, and a last-seen value would make it true of whichever stage was drawn most
+        // recently. `sizesAgree` says whether the stages differed at all.
+        size_t largestBytes = 0;
+        bool sizesAgree = true;
+    };
+
+    // The outcome for a shader. **A null aux hash asks about every aux hash of the base
+    // hash**, which is what a caller naming one sixteen-digit hash means: the census keys
+    // its candidates on the pair, so a route that matched the pair exactly would answer
+    // "nothing" about a shader whose aux hash it was never told.
+    //
+    // **The optional is the point and not decoration.** Two adjacent `uint64_t` parameters
+    // are two parameters a caller can swap without a compiler noticing, and one of them
+    // used to be a magic zero meaning "any" -- a swap that silently measured a different
+    // shader and reported it under this one's name.
+    ShaderOutcome outcomeOf(uint64_t shaderBaseHash, std::optional<uint64_t> shaderAuxHash) const;
+
+    // One shader's outcome with the hashes it belongs to, so a report can carry both
+    // without a reader having to pair two lists.
+    struct ShaderReport {
+        uint64_t shaderBaseHash = 0;
+        uint64_t shaderAuxHash = 0;
+        ShaderOutcome outcome;
+    };
+
+    // The most-used shaders' outcomes, most assemblies first. Bounded by `limit` and by the
+    // table, and the whole table's size comes with it: a reader seeing sixteen entries cannot
+    // tell a small title from a capped one unless the report says which it is.
+    std::vector<ShaderReport> shaderOutcomes(size_t limit) const;
+
+    // How many shaders' outcomes the report carries. Enough to name a scene's most-drawn
+    // shaders and every one of them at once on this title; a larger list would be a list of
+    // everything the title has ever drawn.
+    static constexpr size_t kOutcomeExamples = 16;
+
     // The offset the report believes, or 0 when no offset cleared the bar. Zero is a
     // real answer here: it means "no offset was a pose often enough to name", and the
     // report says which bar.
@@ -217,6 +299,15 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     static constexpr uint32_t kBeliefPercent = 20;
 
   private:
+    // **The outcome table's size and its ranked list, both with the lock already held.**
+    // `json()` holds it and there is no caller outside that does, so a locking form of either
+    // would be a second way to read one table -- and `json()` calling it would deadlock.
+    size_t outcomeShadersLocked() const {
+        return m_outcomes.size();
+    }
+
+    std::vector<ShaderReport> shaderOutcomesLocked(size_t limit) const;
+
     // The identity of a draw's object: its block sources, as the fork hands them over.
     //
     // **Measured not to recur, and that is a finding, not a detail.** Over 836,990 assembled
@@ -251,8 +342,20 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     uint64_t shareOfShaderLocked(const Candidate& candidate, uint64_t inClass) const;
     bool clearsBarLocked(const Candidate& candidate, uint64_t inClass) const;
 
+    // One outcome counter for a shader, with the lock already held. A member pointer rather
+    // than four near-identical blocks: a gate that counts its outcome for the run and forgets
+    // it for the shader is the fault this table exists to remove.
+    void countedLocked(const std::pair<uint64_t, uint64_t>& shader,
+                       uint64_t ShaderOutcome::* field);
+
     bool remember(const std::string& identity, uint64_t shaderBaseHash, uint64_t shaderAuxHash,
                   uint32_t byteOffset, const float* words);
+
+    // How many distinct shaders the outcome table keeps. A title has as many shaders as it
+    // has programs, and the table is one entry per (base, aux) pair; past the bound the
+    // overflow is counted, so a shader with no outcome reads as "refused" rather than as
+    // "nothing happened".
+    static constexpr size_t kMaxShaders = 4096;
 
     std::atomic<uint64_t> m_assemblies{0};
     // How many assemblies each shader contributed, which is the denominator the belief bar is
@@ -267,6 +370,12 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     // than a hash map because the key is a pair, and a pair hashed by hand is a second rule
     // about what a shader is.
     std::map<std::pair<uint64_t, uint64_t>, uint64_t> m_byShader;
+    // The same key, holding the outcome of each assembly rather than only the ones that
+    // reached the scan. Bounded like `m_byShader` is in spirit -- a title has as many
+    // shaders as it has -- and the overflow is counted beside the table so a shader
+    // missing from it is a stated fact rather than a silent zero.
+    std::map<std::pair<uint64_t, uint64_t>, ShaderOutcome> m_outcomes;
+    uint64_t m_outcomesRefused = 0;
     mutable std::mutex m_mutex;
     // offset / 4 -> its counts. A buffer is a float array, so an offset in floats is the
     // unit the scan and the substitution both want.
@@ -278,7 +387,7 @@ class ObjectPoseLocator : public frame::AssemblyRecordedListener {
     // big to scan in one go was partly looked at, and one too small to hold the shape was not
     // looked at at all, and "found nothing" is a claim about data that neither of them makes.
     uint64_t m_tooShort = 0;
-    uint64_t m_noSources = 0;
+    uint64_t m_unidentified = 0;
     // Whether any assembly carried a published object, so the report can say which of the two
     // keys the numbers came from. A run where every assembly fell back is a run whose
     // identities are addresses, and that is a different measurement from one whose are nodes.

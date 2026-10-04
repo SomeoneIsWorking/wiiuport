@@ -255,13 +255,53 @@ std::string ControlChannel::poseForShader(uint64_t shaderBaseHash, uint64_t shad
     title::JsonBody body;
     body.string("shaderBaseHash", title::JsonBody::hex(shaderBaseHash));
     body.string("shaderAuxHash", title::JsonBody::hex(shaderAuxHash));
+    // **What happened to this shader's own assemblies, and this is the answer the candidate
+    // list cannot give.** "0 candidates of 300 considered" says the census found nothing that
+    // belongs to this shader; it does not say whether the scan ever looked at one of them. A
+    // shader whose every assembly is too short to hold twelve floats has no matrix in its
+    // uniforms *to* find -- a fact about the title -- while a shader that was scanned and held
+    // none was looked at and came back empty, which is a fact about the search. The two call
+    // for opposite next steps, and before this the report carried only the whole-run total.
+    // **A zero aux hash asks about every aux hash of this base hash**, for the same reason the
+    // candidate filter below does: the census keys on the pair and a caller naming one hash was
+    // never told the other. `std::optional` rather than a magic zero, so a caller's own zero
+    // cannot be read as a request for "all aux hashes" by accident.
+    const std::optional<uint64_t> wantAux =
+        shaderAuxHash == 0 ? std::nullopt : std::optional<uint64_t>{shaderAuxHash};
+    const title::ObjectPoseLocator::ShaderOutcome outcome =
+        m_poses.outcomeOf(shaderBaseHash, wantAux);
+    title::JsonBody counted;
+    counted.number("assemblies", outcome.assemblies);
+    counted.number("tooShortForAPose", outcome.tooShort);
+    counted.number("unidentified", outcome.unidentified);
+    counted.number("unscanned", outcome.unscanned);
+    counted.number("scanned", outcome.scanned);
+    counted.number("scannedWithoutBlocks", outcome.scannedWithoutBlocks);
+    counted.number("largestUniformBytes", outcome.largestBytes);
+    counted.raw("uniformBytesAgree", outcome.sizesAgree ? "true" : "false");
+    // The threshold the size is read against, stated so a reader does not have to know it: a
+    // shader below this cannot be applying a 3x4 from its uniforms, whatever it binds.
+    counted.number("poseBytesWanted",
+                   static_cast<uint64_t>(title::ObjectPoseLocator::kPoseWords) * sizeof(float));
+    counted.raw("canHoldAPose",
+                outcome.largestBytes >= title::ObjectPoseLocator::kPoseWords * sizeof(float)
+                    ? "true"
+                    : "false");
+    body.object("assemblyOutcome", counted.text());
     const auto found = m_poses.found();
     title::JsonBody list;
     size_t index = 0;
     uint64_t considered = 0;
     for (const title::ObjectPoseLocator::Found& one : found) {
         ++considered;
-        if (one.shaderBaseHash != shaderBaseHash || one.shaderAuxHash != shaderAuxHash) {
+        if (one.shaderBaseHash != shaderBaseHash) {
+            continue;
+        }
+        // **An aux hash of zero asks about every aux hash of this base hash.** The census
+        // keys its candidates on the pair, so matching the pair exactly answered "nothing" for
+        // any shader whose aux hash the caller was never told -- and "nothing" is the one answer
+        // a caller cannot tell from a real absence.
+        if (shaderAuxHash != 0 && one.shaderAuxHash != shaderAuxHash) {
             continue;
         }
         title::PoseByShader::Entry entry;

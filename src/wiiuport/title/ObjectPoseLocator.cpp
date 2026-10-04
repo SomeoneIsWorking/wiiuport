@@ -86,13 +86,112 @@ bool ObjectPoseLocator::remember(const std::string& identity, uint64_t shaderBas
     return false;
 }
 
+// One outcome counter, with the lock already held. A member pointer rather than four
+// near-identical blocks, because a gate that counts its own outcome for the run and forgets
+// it for the shader is exactly the fault this table exists to remove.
+void ObjectPoseLocator::countedLocked(const std::pair<uint64_t, uint64_t>& shader,
+                                      uint64_t ShaderOutcome::* field) {
+    auto known = m_outcomes.find(shader);
+    if (known != m_outcomes.end()) {
+        known->second.*field += 1;
+    }
+}
+
+ObjectPoseLocator::ShaderOutcome
+ObjectPoseLocator::outcomeOf(uint64_t shaderBaseHash, std::optional<uint64_t> shaderAuxHash) const {
+    std::scoped_lock lock(m_mutex);
+    ShaderOutcome total;
+    for (const auto& [key, outcome] : m_outcomes) {
+        if (key.first != shaderBaseHash) {
+            continue;
+        }
+        if (shaderAuxHash.has_value() && key.second != *shaderAuxHash) {
+            continue;
+        }
+        total.assemblies += outcome.assemblies;
+        total.tooShort += outcome.tooShort;
+        total.unidentified += outcome.unidentified;
+        total.unscanned += outcome.unscanned;
+        total.scanned += outcome.scanned;
+        total.scannedWithoutBlocks += outcome.scannedWithoutBlocks;
+        total.largestBytes = std::max(total.largestBytes, outcome.largestBytes);
+        // Agreement is a statement about every assembly that contributed, so one
+        // aux hash that disagreed is enough to make the sum disagree.
+        total.sizesAgree = total.sizesAgree && outcome.sizesAgree;
+    }
+    return total;
+}
+
+std::vector<ObjectPoseLocator::ShaderReport>
+ObjectPoseLocator::shaderOutcomesLocked(size_t limit) const {
+    std::vector<ShaderReport> ranked;
+    ranked.reserve(m_outcomes.size());
+    for (const auto& [key, outcome] : m_outcomes) {
+        ranked.push_back(ShaderReport{key.first, key.second, outcome});
+    }
+    // Most assemblies first, then the hash, so two runs of the same title order the list the
+    // same way and a diff between them is about the numbers rather than the sequence.
+    std::sort(ranked.begin(), ranked.end(),
+              [](const ShaderReport& left, const ShaderReport& right) {
+                  if (left.outcome.assemblies != right.outcome.assemblies) {
+                      return left.outcome.assemblies > right.outcome.assemblies;
+                  }
+                  if (left.shaderBaseHash != right.shaderBaseHash) {
+                      return left.shaderBaseHash < right.shaderBaseHash;
+                  }
+                  return left.shaderAuxHash < right.shaderAuxHash;
+              });
+    if (ranked.size() > limit) {
+        ranked.resize(limit);
+    }
+    return ranked;
+}
+
+std::vector<ObjectPoseLocator::ShaderReport> ObjectPoseLocator::shaderOutcomes(size_t limit) const {
+    std::scoped_lock lock(m_mutex);
+    return shaderOutcomesLocked(limit);
+}
+
 void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly& assembly) {
     m_assemblies.fetch_add(1, std::memory_order_relaxed);
+    // **Every assembly is counted against its own shader before any gate refuses it.** The
+    // run's own totals cannot answer a per-shader question, and the per-shader question is the
+    // one the blend turns on: a shader whose every assembly is too short to hold a 3x4 has no
+    // matrix in its uniforms to find, which is a different answer from a shader that was
+    // scanned and held none. One place, so the count cannot be one thing in one path and
+    // another in another.
+    const std::pair<uint64_t, uint64_t> shader{assembly.shaderBaseHash, assembly.shaderAuxHash};
+    // A size_t, not a uint32_t: this value is reported, and a product that wrapped at four
+    // billion would be a small number in a field a reader takes a threshold against.
+    const size_t bytes = assembly.data.size() * sizeof(float);
+    {
+        std::scoped_lock lock(m_mutex);
+        auto known = m_outcomes.find(shader);
+        if (known == m_outcomes.end()) {
+            if (m_outcomes.size() >= kMaxShaders) {
+                m_outcomesRefused++;
+            } else {
+                known = m_outcomes.emplace(shader, ShaderOutcome{}).first;
+            }
+        }
+        if (known != m_outcomes.end()) {
+            ShaderOutcome& outcome = known->second;
+            // The first assembly sets the size and every later one is measured against
+            // it, rather than each against its own predecessor: a run whose sizes wander
+            // would otherwise report agreement between whichever two happened to be equal.
+            if (outcome.assemblies > 0 && bytes != outcome.largestBytes) {
+                outcome.sizesAgree = false;
+            }
+            outcome.assemblies++;
+            outcome.largestBytes = std::max(outcome.largestBytes, bytes);
+        }
+    }
     // A buffer larger than the scan's bound is reported as unscanned, not scanned in
     // part: a partial scan's "no pose here" is about the part it looked at.
-    if (assembly.data.size() * sizeof(float) > kMaxScanBytes) {
+    if (bytes > kMaxScanBytes) {
         std::scoped_lock lock(m_mutex);
         m_unscanned++;
+        countedLocked(shader, &ShaderOutcome::unscanned);
         return;
     }
     // **A buffer too short to hold a pose is counted as its own fact, not scanned and found
@@ -108,16 +207,40 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
     if (assembly.data.size() < kPoseWords) {
         std::scoped_lock lock(m_mutex);
         m_tooShort++;
+        countedLocked(shader, &ShaderOutcome::tooShort);
         return;
     }
-    if (assembly.blockSources.empty()) {
+    // **No block source is not the same as no identity, and this gate used to say it was.**
+    // `identityOf` takes the node the title's own binder published and falls back to the block
+    // sources only when there is no node, so an assembly with no blocks and a node is exactly as
+    // pairable as one with both. Refusing it was refusing the title's most-drawn shader: measured
+    // on the real title, `0x6669a23d03806414` has **60,361 assemblies of 272 bytes each** -- five
+    // 3x4s' worth, more than enough to hold a pose -- and every one was turned away here, because
+    // `LatteBufferCache_collectUniformBlockSources` walks the *shader's* own
+    // `list_remappedUniformEntries_bufferGroups` and a shader whose uniforms come from the ALU
+    // constant bank names no block at all. Those uniforms are copied into this same assembled
+    // buffer by `uniformData_updateUniformVars`, so the pose the blend needs is in here and the
+    // scan was the only thing not looking at it.
+    //
+    // So the gate now refuses only what cannot be paired: no node *and* no block source is an
+    // assembly with no identity at all, and counting it as such keeps the report honest about the
+    // ones that remain.
+    if (assembly.blockSources.empty() && assembly.objectAddress == 0) {
         std::scoped_lock lock(m_mutex);
-        m_noSources++;
+        m_unidentified++;
+        countedLocked(shader, &ShaderOutcome::unidentified);
         return;
     }
     const size_t words = assembly.data.size();
-    if (assembly.objectAddress != 0) {
-        m_sawObjectAddress = true;
+    {
+        std::scoped_lock lock(m_mutex);
+        if (assembly.objectAddress != 0) {
+            m_sawObjectAddress = true;
+        }
+        countedLocked(shader, &ShaderOutcome::scanned);
+        if (assembly.blockSources.empty()) {
+            countedLocked(shader, &ShaderOutcome::scannedWithoutBlocks);
+        }
     }
     const std::string identity = identityOf(assembly);
     {
@@ -125,7 +248,7 @@ void ObjectPoseLocator::onAssemblyRecorded(const frame::RecordedUniformAssembly&
         // number the belief bar is measured against, and without it a per-shader candidate is
         // compared against the whole frame -- which no single shader's layout can reach.
         std::scoped_lock lock(m_mutex);
-        ++m_byShader[{assembly.shaderBaseHash, assembly.shaderAuxHash}];
+        ++m_byShader[shader];
     }
 
     // Every 4-aligned offset, tested. A vector of candidates rather than a fixed-size
@@ -373,7 +496,38 @@ std::string ObjectPoseLocator::json() const {
     // `unscannedBuffers` and a candidate count of zero for a shader has been told the scan looked
     // at that shader and found nothing; this says it never could have found anything there.
     body.number("tooShortForAPose", m_tooShort);
-    body.number("buffersWithoutSources", m_noSources);
+    body.number("assembliesWithoutAnIdentity", m_unidentified);
+    // **The same four facts per shader, for the shaders that drew most.** `tooShortForAPose`
+    // is a whole-run total, and the question the blend turns on is a per-shader one: a shader
+    // whose every assembly is too short to hold twelve floats cannot be applying a 3x4 from
+    // its uniforms at all, while a shader that was scanned and held none was looked at and came
+    // back empty. Those are opposite next steps and one total cannot tell them apart. The list
+    // is bounded and the table's size is beside it, so a capped list cannot read as the title's.
+    body.number("outcomeShaders", outcomeShadersLocked());
+    body.number("outcomeShadersRefused", m_outcomesRefused);
+    body.number("poseBytesWanted", static_cast<uint64_t>(kPoseWords * sizeof(float)));
+    {
+        JsonBody list;
+        size_t shown = 0;
+        for (const ShaderReport& one : shaderOutcomesLocked(kOutcomeExamples)) {
+            JsonBody entry;
+            entry.string("shaderBaseHash", JsonBody::hex(one.shaderBaseHash));
+            entry.string("shaderAuxHash", JsonBody::hex(one.shaderAuxHash));
+            entry.number("assemblies", one.outcome.assemblies);
+            entry.number("tooShort", one.outcome.tooShort);
+            entry.number("unidentified", one.outcome.unidentified);
+            entry.number("unscanned", one.outcome.unscanned);
+            entry.number("scanned", one.outcome.scanned);
+            entry.number("scannedWithoutBlocks", one.outcome.scannedWithoutBlocks);
+            entry.number("largestUniformBytes", one.outcome.largestBytes);
+            entry.raw("uniformBytesAgree", one.outcome.sizesAgree ? "true" : "false");
+            entry.raw("canHoldAPose",
+                      one.outcome.largestBytes >= kPoseWords * sizeof(float) ? "true" : "false");
+            list.object(std::to_string(shown), entry.text());
+            ++shown;
+        }
+        body.object("shaderOutcomes", list.text());
+    }
     body.number("identitiesRefused", m_identitiesRefused);
     // Every candidate offset the scan ever saw, in either class, so "no offset was named" is
     // a statement about a set and not an absence.
