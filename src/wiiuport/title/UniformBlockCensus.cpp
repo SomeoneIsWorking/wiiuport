@@ -1,5 +1,6 @@
 #include "wiiuport/title/UniformBlockCensus.h"
 
+#include "wiiuport/guest/ProbeInstallation.h"
 #include "wiiuport/title/JsonBody.h"
 
 #include <algorithm>
@@ -14,23 +15,6 @@ std::string hex(uint32_t value) {
     std::array<char, 11> text{};
     std::snprintf(text.data(), text.size(), "0x%08x", value);
     return {text.data()};
-}
-
-std::string_view installationName(std::optional<GuestCallProbes::Installation> value) {
-    if (!value.has_value()) {
-        return "pending";
-    }
-    switch (*value) {
-    case GuestCallProbes::Installation::Installed:
-        return "installed";
-    case GuestCallProbes::Installation::EntryHeldOther:
-        return "entryHeldOther";
-    case GuestCallProbes::Installation::EntryNotRelocatable:
-        return "entryNotRelocatable";
-    case GuestCallProbes::Installation::NoCodeSpace:
-        return "noCodeSpace";
-    }
-    return "unknown";
 }
 
 } // namespace
@@ -389,8 +373,8 @@ std::string UniformBlockCensus::json() const {
     JsonBody body;
     body.string("binder", hex(kBinder));
     body.string("binderSecond", hex(kBinderSecond));
-    body.string("probe", std::string(installationName(m_first.installation)));
-    body.string("probeSecond", std::string(installationName(m_second.installation)));
+    body.string("probe", std::string(guest::installationName(m_first.installation)));
+    body.string("probeSecond", std::string(guest::installationName(m_second.installation)));
     body.number("entries", kEntries);
     body.number("bindings", m_bindings.load());
     body.number("objects", m_objects);

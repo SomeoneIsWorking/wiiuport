@@ -1,5 +1,7 @@
 #include "wiiuport/guest/CallerCensus.h"
 
+#include "wiiuport/guest/ProbeInstallation.h"
+
 #include <algorithm>
 #include <charconv>
 #include <cstdio>
@@ -23,23 +25,6 @@ std::string hexText(uint32_t value) {
     std::array<char, 11> text{};
     std::snprintf(text.data(), text.size(), "0x%08x", value);
     return {text.data()};
-}
-
-std::string_view installationName(std::optional<GuestCallProbes::Installation> installation) {
-    if (!installation.has_value()) {
-        return "pending";
-    }
-    switch (*installation) {
-    case GuestCallProbes::Installation::Installed:
-        return "installed";
-    case GuestCallProbes::Installation::EntryHeldOther:
-        return "entryHeldOther";
-    case GuestCallProbes::Installation::EntryNotRelocatable:
-        return "entryNotRelocatable";
-    case GuestCallProbes::Installation::NoCodeSpace:
-        return "noCodeSpace";
-    }
-    return "unknown";
 }
 
 } // namespace
