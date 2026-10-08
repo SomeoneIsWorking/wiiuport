@@ -2,6 +2,7 @@
 
 #include <bit>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <span>
@@ -23,6 +24,20 @@ inline bool sameBits(float l, float r) {
 
 inline bool sameBits(std::span<const float> l, std::span<const float> r) {
     return l.size() == r.size() && std::memcmp(l.data(), r.data(), l.size_bytes()) == 0;
+}
+
+// The midpoint of two frames' values into `out`, written only if every value can be
+// blended; whether it was. A partial write would be a value from neither frame.
+inline bool midpoint(std::span<const float> from, std::span<const float> to, std::span<float> out) {
+    for (size_t i = 0; i < from.size(); i++) {
+        if (!isNumber(from[i]) || !isNumber(to[i])) {
+            return false;
+        }
+    }
+    for (size_t i = 0; i < from.size(); i++) {
+        out[i] = from[i] + 0.5f * (to[i] - from[i]);
+    }
+    return true;
 }
 
 // A value's two ends, N-2's and N's, bit for bit, as one key: the same move
