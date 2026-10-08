@@ -1,9 +1,9 @@
 #pragma once
 
 #include "Cafe/HW/Espresso/GuestCallProbes.h"
+#include "wiiuport/title/CommandStreamIdentity.h"
 #include "wiiuport/title/DrawAttributeCensus.h"
 #include "wiiuport/title/NodePoseLocator.h"
-#include "wiiuport/title/ObjectIdentityScope.h"
 #include "wiiuport/title/ObjectPoseHistory.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
 #include "wiiuport/title/UniformBlockAddress.h"
@@ -127,11 +127,9 @@ class UniformBlockCensus {
     // uniform buffer the game assembled for a named node's draw. Null is allowed and
     // reported as null, because a census that requires a locator cannot be built without
     // one and there is no reason it should have to be.
-    // Where a binding's object is published for the assembly hook to read, so a recorded
-    // assembly carries the node it belongs to rather than the addresses it happened to read.
-    // Null is allowed and means no publication, and a report then says so rather than implying
-    // the assemblies have no object.
-    void setIdentityScope(ObjectIdentityScope* scope);
+    // Where each binding's node is recorded against the command stream. Null records nothing and
+    // the report says so.
+    void setIdentity(CommandStreamIdentity* identity);
 
     // The draw attribute census, reported beside the pose search. Null is allowed and reported
     // as null, so a build that wires no census does not look like a run that found nothing.
@@ -295,7 +293,7 @@ class UniformBlockCensus {
     ObjectPoseHistory m_poseHistory;
     const ObjectPoseLocator* m_locator = nullptr;
     NodePoseLocator* m_nodes = nullptr;
-    ObjectIdentityScope* m_scope = nullptr;
+    CommandStreamIdentity* m_identity = nullptr;
     const DrawAttributeCensus* m_drawAttributes = nullptr;
     const VertexPoseHistory* m_vertexHistory = nullptr;
     UniformBlockRing* m_ring = nullptr;

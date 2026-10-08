@@ -18,7 +18,7 @@ void runPoseByShaderTests();
 void runPoseBlendTests();
 void runNodePoseLocatorTests();
 void runJsonBodyTests();
-void runObjectIdentityScopeTests();
+void runCommandStreamIdentityTests();
 void runDrawAttributeCensusTests();
 void runVertexPoseHistoryTests();
 void runUniformBlockAddressTests();

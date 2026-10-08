@@ -26,10 +26,10 @@ bool readFloat(const uint8_t* bytes, float* out) {
 
 } // namespace
 
-VertexPoseHistory::VertexPoseHistory(const ObjectIdentityScope* scope,
+VertexPoseHistory::VertexPoseHistory(const CommandStreamIdentity* identity,
                                      const DrawAttributeCensus* attributes,
                                      const std::atomic<uint64_t>* frames)
-    : m_scope(scope), m_attributes(attributes), m_frames(frames) {
+    : m_identity(identity), m_attributes(attributes), m_frames(frames) {
 }
 
 void VertexPoseHistory::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) {
@@ -76,7 +76,7 @@ void VertexPoseHistory::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw
         m_drawsOversize.fetch_add(1, std::memory_order_relaxed);
         return;
     }
-    const uint32_t node = m_scope == nullptr ? 0u : m_scope->current();
+    const uint32_t node = m_identity == nullptr ? 0u : m_identity->objectAt(draw.packet);
     if (node == 0) {
         m_drawsWithoutNode.fetch_add(1, std::memory_order_relaxed);
         return;

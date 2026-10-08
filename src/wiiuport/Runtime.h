@@ -16,11 +16,11 @@
 #include "wiiuport/guest/LineProbe.h"
 #include "wiiuport/guest/ParticleProbe.h"
 #include "wiiuport/input/InputDriver.h"
+#include "wiiuport/title/CommandStreamIdentity.h"
 #include "wiiuport/title/DrawAttributeCensus.h"
 #include "wiiuport/title/GlobalPoseCensus.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/NodePoseLocator.h"
-#include "wiiuport/title/ObjectIdentityScope.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
 #include "wiiuport/title/PoseBlend.h"
 #include "wiiuport/title/PoseByShader.h"
@@ -89,6 +89,9 @@ class Runtime {
     }
 
   private:
+    // GX2's write position on the calling core, for the binder probe.
+    static title::CommandPosition gx2WritePosition();
+
     inline static Runtime* s_instance{nullptr};
     inline static std::once_flag s_created;
 
@@ -110,17 +113,16 @@ class Runtime {
     // Which field of a node holds its pose. Registered first of the three, because it is
     // the one two measurements point at.
     title::NodePoseLocator m_nodePose{&GuestCallProbes::Register, &GuestPatching::ReadWords};
-    // Which object the title's own code is binding, published by the binder and read by the
-    // assembly hook. The node is one step from both and in neither, and this is the step.
-    title::ObjectIdentityScope m_objectScope;
+    // Which node each draw belongs to, joined by the binder's position in the command stream.
+    title::CommandStreamIdentity m_objectIdentity{&Runtime::gx2WritePosition};
     // Which of a draw's attributes is the position, measured from the title's own attribute
     // tables. The pose is not a transform anywhere, so the blend writes vertex bytes at the
     // game's own draw, and this is what tells it where they are.
-    title::DrawAttributeCensus m_drawAttributes{&m_objectScope};
+    title::DrawAttributeCensus m_drawAttributes{&m_objectIdentity};
     // Whether two ticks' position bytes exist to be blended, per node. The falsifier for the
     // vertex-stream blend, and it is a separate class because a history that also did the
     // blending could not be asked whether blending was possible.
-    title::VertexPoseHistory m_vertexHistory{&m_objectScope, &m_drawAttributes, nullptr};
+    title::VertexPoseHistory m_vertexHistory{&m_objectIdentity, &m_drawAttributes, nullptr};
     // Whether tick N-1's uniform block contents are still there when tick N paints. The
     // objective's own second question, and the census is the one place that knows which block a
     // binding names.

@@ -1,7 +1,7 @@
 #include "check.h"
+#include "command_stream.h"
 #include "suites.h"
 #include "wiiuport/title/NodePoseLocator.h"
-#include "wiiuport/title/ObjectIdentityScope.h"
 #include "wiiuport/title/UniformBlockAddress.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 
@@ -118,7 +118,7 @@ void writeEntry(FakeGuest& guest, uint32_t entry, uint32_t offset, uint32_t size
 void theOtherSlotIsReadAsWellAsTheBoundOne();
 void cursorSwitchesAreCountedAgainstTheBindsTheyCouldBeAmong();
 void theTwoAddressesABindingNamesAreBothFed();
-void aBindingPublishesItsObjectForTheAssemblyHook();
+void aBindingNamesTheDrawWrittenAfterIt();
 
 // **The word that reads as guest memory is the address, named by the mapping route.** A fake
 // whose record points one of its words at a block it has really mapped, so the word is an
@@ -235,7 +235,7 @@ void theBlockSizeIsPublishedWithTheRecord() {
 void wiiuport::tests::runBlockCensusTests() {
     theBlockSizeIsPublishedWithTheRecord();
     theTwoAddressesABindingNamesAreBothFed();
-    aBindingPublishesItsObjectForTheAssemblyHook();
+    aBindingNamesTheDrawWrittenAfterIt();
     theOtherSlotIsReadAsWellAsTheBoundOne();
     cursorSwitchesAreCountedAgainstTheBindsTheyCouldBeAmong();
     theWordThatReadsIsNamedAsTheAddress();
@@ -321,14 +321,10 @@ namespace {
 // The other slot, read whole -- because whether the previous tick's values are
 // still in memory when this tick binds is what a blend rests on, and a ring read
 // only where the cursor points cannot answer it.
-// **A binding publishes its object, and the publication happens before the scan.** The pose
-// locator's movement test needs the same object's assemblies to meet, and the fork's
-// `blockSources` never let them: one identity in 438,872 assemblies, because the uniform block
-// is re-uploaded at a new address each frame. The node is the fix and it is one step from the
-// binder, which this tests -- the census publishing, and the recorder reading back the same
-// address, with nothing in between that could reorder them.
-void aBindingPublishesItsObjectForTheAssemblyHook() {
-    wiiuport::title::ObjectIdentityScope scope;
+// A binding records its object at the command stream's write position, so the draw packet written
+// after it is named by it.
+void aBindingNamesTheDrawWrittenAfterIt() {
+    wiiuport::tests::CommandStream stream;
     g_fake = nullptr;
     FakeGuest guest;
     g_fake = &guest;
@@ -336,38 +332,18 @@ void aBindingPublishesItsObjectForTheAssemblyHook() {
     writeEntry(guest, 0, 0x40, 0x80);
 
     UniformBlockCensus census(&keepRegistration, &readWord, &readWords);
-    census.setIdentityScope(&scope);
+    census.setIdentity(&stream.identity());
     census.install();
     linked();
     bind(g_first, kObject);
 
-    check::isTrue(scope.current() == kObject,
-                  "the object a binding named is what the assembly hook would read back");
-    const wiiuport::title::ObjectIdentityScope::Report r = scope.report();
-    check::isTrue(r.binds == 1 && r.readsWithObject == 1,
-                  "one bind, one read, and the read found the object -- with the two sides of "
-                  "the join agreeing on the address rather than on a description of it");
-    // One, not zero, and the difference matters. The first read after a single binding sees
-    // exactly one write, and that write is the binding these assemblies belong to -- so the
-    // number is not an error count, it is the count of bindings the slot is standing for. A
-    // value above one would mean something else bound in between and the identity read here
-    // would be the wrong object's, which is worse than a missing one.
-    // And the census carries the correlation's own coverage and error rate, in the same report
-    // as the numbers it qualifies -- a reader who has to go and find it cannot check it.
+    check::isTrue(stream.identity().objectAt(stream.packet()) == kObject,
+                  "the draw written after a binding is named by the object it bound");
     const std::string body = census.json();
-    check::isTrue(body.find("\"objectIdentity\":{") != std::string::npos,
-                  "the census report carries the identity scope, so the correlation's error "
-                  "rate sits beside the counts it qualifies: " +
-                      body);
-    check::isTrue(body.find("\"identitySource\":\"binderObject\"") != std::string::npos &&
-                      body.find("\"readsWithObject\":1") != std::string::npos,
-                  "with the source named and the coverage counted, so a run where the slot was "
-                  "empty says so instead of implying the assemblies have no object");
-    check::isTrue(r.bindsSinceLastQuery == 1,
-                  "and the slot was written once since the previous read -- that one binding is "
-                  "what these assemblies belong to, and a count above one would mean the "
-                  "identity read is another object's: " +
-                      std::to_string(r.bindsSinceLastQuery));
+    check::isTrue(body.find("\"objectIdentity\":{") != std::string::npos &&
+                      body.find("\"identitySource\":\"commandStream\"") != std::string::npos &&
+                      body.find("\"lookupsNamed\":1") != std::string::npos,
+                  "and the census report carries the identity's coverage: " + body);
 }
 
 void theOtherSlotIsReadAsWellAsTheBoundOne() {

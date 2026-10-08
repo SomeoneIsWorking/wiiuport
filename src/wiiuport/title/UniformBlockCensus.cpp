@@ -129,16 +129,14 @@ void UniformBlockCensus::setBlockAddress(UniformBlockAddress* address) {
     m_address = address;
 }
 
-void UniformBlockCensus::setIdentityScope(ObjectIdentityScope* scope) {
-    m_scope = scope;
+void UniformBlockCensus::setIdentity(CommandStreamIdentity* identity) {
+    m_identity = identity;
 }
 
 void UniformBlockCensus::record(uint32_t object, bool second) {
-    // Publish the object before anything else, so the draw's own uniform uploads -- which
-    // follow this call, on this thread, inside this draw -- read the right one. A publication
-    // that happens after the scan below would be a publication too late to matter.
-    if (m_scope != nullptr) {
-        m_scope->bind(object);
+    // Recorded at the write position before this binder emits its packets.
+    if (m_identity != nullptr) {
+        m_identity->bind(object);
     }
     // Both of the two things this binding names, each scored in its own table.
     //
@@ -618,10 +616,10 @@ std::string UniformBlockCensus::json() const {
     // The correlation's own coverage and error rate, in the same report as the numbers it
     // qualifies. A reader who has to go and find it cannot check it, and a correlation whose
     // error rate is not beside its results is one that gets believed.
-    if (m_scope == nullptr) {
+    if (m_identity == nullptr) {
         body.raw("objectIdentity", "null");
     } else {
-        body.object("objectIdentity", m_scope->json());
+        body.object("objectIdentity", m_identity->json());
     }
     // The draw attribute census, served here because this is the report a reader already has
     // open when they ask where the position is: three places the pose was looked for, and the

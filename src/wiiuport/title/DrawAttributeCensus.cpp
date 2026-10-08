@@ -68,7 +68,7 @@ void DrawAttributeCensus::onDrawRecorded(const LatteFrameHooks::DrawPrepared& dr
     // The node this draw belongs to, from the slot the binder published. Read here as well as
     // at the uniform assembly: both are points where the title's own code knows which object it
     // is inside, and the report counts every read so its coverage is the coverage of both.
-    const uint32_t object = m_scope == nullptr ? 0u : m_scope->current();
+    const uint32_t object = m_identity == nullptr ? 0u : m_identity->objectAt(draw.packet);
     if (object == 0) {
         m_drawsWithoutIdentity.fetch_add(1, std::memory_order_relaxed);
     }
@@ -380,7 +380,7 @@ std::string DrawAttributeCensus::json() const {
     body.number("attributesOutOfRange", m_attributesOutOfRange.load());
     body.number("nodesTracked", nodes);
     body.number("nodesRefused", m_nodesRefused.load());
-    body.string("identitySource", m_scope == nullptr ? "none" : "binderObject");
+    body.string("identitySource", m_identity == nullptr ? "none" : "commandStream");
     // The bar, in numbers, so a reader can see what "believed" is worth before believing it.
     body.number("nodesNeeded", needed);
     body.number("positionBytesAccepted", kPositionBytes);

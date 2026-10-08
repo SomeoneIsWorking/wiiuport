@@ -2,7 +2,7 @@
 
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/RecordingObserver.h"
-#include "wiiuport/title/ObjectIdentityScope.h"
+#include "wiiuport/title/CommandStreamIdentity.h"
 
 #include <array>
 #include <atomic>
@@ -40,7 +40,7 @@ class DrawAttributeCensus final : public frame::DrawRecordedListener {
     // The node, so "recurs across objects" is a cross-object claim and not "recurs a lot".
     // Null is allowed and reported, and then the bar is over draws alone -- stated, because a
     // bar that silently changes its denominator is a bar nobody can check.
-    explicit DrawAttributeCensus(const ObjectIdentityScope* scope) : m_scope(scope) {
+    explicit DrawAttributeCensus(const CommandStreamIdentity* identity) : m_identity(identity) {
     }
 
     void onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) override;
@@ -204,7 +204,7 @@ class DrawAttributeCensus final : public frame::DrawRecordedListener {
     // Every stride seen with a position-sized attribute, with the lock already held.
     std::vector<uint32_t> stridesWithPositionLocked() const;
 
-    const ObjectIdentityScope* m_scope = nullptr;
+    const CommandStreamIdentity* m_identity = nullptr;
     std::atomic<uint64_t> m_draws{0};
     std::atomic<uint64_t> m_drawsWithoutAttributes{0};
     std::atomic<uint64_t> m_drawsWithoutIdentity{0};

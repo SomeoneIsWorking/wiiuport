@@ -67,10 +67,9 @@ void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly
     recorded.stageIndex = assembly.stageIndex;
     recorded.writesColour = assembly.writesColour;
     recorded.looksUpDepthMap = assembly.looksUpDepthMap;
-    // The node this assembly belongs to, from the binder the draw itself called. Read here, at
-    // the last point before the buffer is copied, because the slot names the object the draw
-    // is in the middle of and not one it has finished.
-    recorded.objectAddress = m_objectScope == nullptr ? 0u : m_objectScope->current();
+    // The node whose binder was written before this draw's packet.
+    recorded.objectAddress =
+        m_objectIdentity == nullptr ? 0u : m_objectIdentity->objectAt(assembly.packet);
     std::span<const uint32_t> sources = sourceWordsOf(assembly);
     recorded.blockSources.assign(sources.begin(), sources.end());
     std::span<const uint32_t> sizes = sourceSizeWordsOf(assembly);

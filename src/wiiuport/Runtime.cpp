@@ -18,6 +18,11 @@ bool requestFrameCapture(LatteFrameHooks::CaptureCallback&& callback, int count)
 
 } // namespace
 
+title::CommandPosition Runtime::gx2WritePosition() {
+    const LatteFrameHooks::CommandWritePosition at = LatteFrameHooks::GetCommandWritePosition();
+    return {at.bufferStart, at.bufferEnd, at.write};
+}
+
 Runtime::Runtime() : m_capture(&requestFrameCapture) {
     // Frame complete, before the guest's swap: everything that reads the frame first.
     m_recorder.addAssemblyRecordedListener(&m_poseLocator);
@@ -56,12 +61,8 @@ void Runtime::installHooks() {
     // The frame counter, wired before the install: the locator samples an object once per
     // frame, and a sample taken twice inside one frame cannot see a pose move.
     m_nodePose.setFrameCounter(&m_paint.paintCounter());
-    // The two ends of the correlation, and it is worth saying which is which: the census
-    // publishes the object a binding named, and the recorder reads it for each assembly. The
-    // node itself is never passed between them -- the binder and the GX2 hook are different
-    // call sites, and the slot is the whole of the join.
-    m_blocks.setIdentityScope(&m_objectScope);
-    m_recorder.setObjectScope(&m_objectScope);
+    m_blocks.setIdentity(&m_objectIdentity);
+    m_recorder.setObjectIdentity(&m_objectIdentity);
     m_recorder.addDrawRecordedListener(&m_drawAttributes);
     m_vertexHistory.setFrameCounter(&m_paint.paintCounter());
     m_recorder.addDrawRecordedListener(&m_vertexHistory);

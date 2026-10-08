@@ -3,7 +3,7 @@
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/frame/VertexChanges.h"
-#include "wiiuport/title/ObjectIdentityScope.h"
+#include "wiiuport/title/CommandStreamIdentity.h"
 #include "wiiuport/title/UniformBlockAddress.h"
 
 #include <array>
@@ -139,11 +139,11 @@ class VertexFilter {
 // about what to record or when to replay lives here.
 class RecordingObserver final : public LatteFrameHooks::Observer {
   public:
-    // Which object the title's own code last bound, so an assembly can be recorded with the
-    // node it belongs to. Null is the honest default: without it every assembly records zero
+    // Which node each draw belongs to, so an assembly can be recorded with it. Null is the honest
+    // default: without it every assembly records zero
     // and `RecordedUniformAssembly::objectAddress` reads as "unknown", which is what it is.
-    void setObjectScope(const title::ObjectIdentityScope* scope) {
-        m_objectScope = scope;
+    void setObjectIdentity(const title::CommandStreamIdentity* identity) {
+        m_objectIdentity = identity;
     }
 
     // Where the uniform block the draw sourced is, and which word of the descriptor record says
@@ -361,10 +361,8 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     std::vector<DrawRecordedListener*> m_drawListeners;
     FrameRecording m_inFlight;
     FrameRecording m_completed;
-    // The scope that names the object, or null. A member rather than a parameter on every
-    // hook, because it is the same answer for every assembly in the frame and the frame is
-    // hundreds of thousands of them.
-    const title::ObjectIdentityScope* m_objectScope = nullptr;
+    // Names each draw's node, or null.
+    const title::CommandStreamIdentity* m_objectIdentity = nullptr;
     title::UniformBlockAddress* m_blockAddress = nullptr;
     RecordedUniformAssembly m_assemblyScratch;
     FrameRecording m_previous;
