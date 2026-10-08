@@ -6,18 +6,9 @@
 #include "wiiuport/title/PoseByShader.h"
 #include "wiiuport/title/WindWakerPaint.h"
 #include <algorithm>
+#include <span>
 
 namespace wiiuport::title {
-
-namespace {
-
-// **The midpoint's weight, named.** It is 0.5 because the two paints are half a tick apart, so the
-// in-between frame is the exact middle of the two poses and not a fraction chosen for latency: a
-// weight other than a half would present a frame the game never was in, and the objective asks for
-// the lerp of N-1 to N rather than for a plausible in-between.
-constexpr float kHalf = 0.5f;
-
-} // namespace
 
 PoseBlend::Key PoseBlend::keyFor(uint32_t objectAddress, uint64_t shaderBaseHash) const {
     // **The node, where the title's own binder has said which node it is.** The fallback is the
@@ -73,16 +64,9 @@ void PoseBlend::onAssemblyAtOffset(float* words, size_t count, uint32_t byteOffs
         // matrix with a row from one frame and a row from another, which is not a pose the game was
         // ever in; refusing the whole write leaves the tick's own value in place, which is at least
         // a frame the title drew.
-        bool blendable = true;
-        for (size_t word = 0; word < kWords && blendable; word++) {
-            blendable = interp::isNumber(held->second[word]) && interp::isNumber(mine[word]);
-        }
-        if (!blendable) {
+        if (!interp::midpoint(held->second, mine, std::span<float>(at, kWords))) {
             ++m_tally.refusedUnblendable;
         } else {
-            for (size_t word = 0; word < kWords; word++) {
-                at[word] = held->second[word] + kHalf * (mine[word] - held->second[word]);
-            }
             ++m_tally.lerped;
             m_tally.wordsWritten += kWords;
         }
