@@ -247,7 +247,8 @@ void wiiuport::tests::runLogicGateTests() {
         // title: the tick's epilogue returns through the link register its second
         // instruction saved into the caller's frame, so a tick that skipped the
         // store returns through a register nobody saved.
-        check::isTrue(words[13] == (18u << 26) | ((LogicGate::kTickBody - branchAt) & 0x03fffffcu),
+        check::isTrue(words[13] ==
+                          ((18u << 26) | ((LogicGate::kTickBody - branchAt) & 0x03fffffcu)),
                       "and a call it lets through continues at the tick's own second instruction, "
                       "0x025d42f0, with the title running every instruction after it");
         // The displacement is measured from the word the branch stands in, which
@@ -273,8 +274,9 @@ void wiiuport::tests::runLogicGateTests() {
     {
         const auto direct = LogicGate::throughPayload(kBlock, 1);
         check::isTrue(direct.size() == 1, "the direct pass-through is one word");
-        check::isTrue(direct.size() == 1 && direct[0] == (18u << 26) |
-                                                ((LogicGate::kTickBody - kBlock) & 0x03fffffcu),
+        check::isTrue(direct.size() == 1 &&
+                          direct[0] ==
+                              ((18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu)),
                       "and it branches to the tick's own second instruction");
         for (int flavour = 1; flavour <= 2; flavour++) {
             const auto words = LogicGate::throughPayload(kBlock, flavour);

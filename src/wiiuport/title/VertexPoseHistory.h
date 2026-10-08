@@ -36,9 +36,8 @@ namespace wiiuport::title {
 // "identical" and from "blendable", and the report keeps them apart.
 //
 // The position attribute is not guessed here. It comes from `DrawAttributeCensus`, which named
-// it from the title's own attribute tables, and its `endianSwap` is carried into the report
-// because a byte-wise comparison is order-independent and a float lerp is not: a substitution
-// written against the wrong byte order produces a frame of plausible nonsense.
+// it from the title's own attribute tables; each component is decoded with the draw's own
+// `endianSwap` (VertexComponent).
 class VertexPoseHistory final : public frame::DrawRecordedListener {
   public:
     // The frame counter, so a node is sampled once per frame rather than once per binding.
@@ -133,6 +132,8 @@ class VertexPoseHistory final : public frame::DrawRecordedListener {
         struct Sample {
             uint64_t frame = 0;
             uint32_t stride = 0;
+            // LatteConst::VertexFetchEndianMode of the position attribute in this draw.
+            uint8_t endianSwap = 0;
             std::vector<uint8_t> bytes;
         };
 

@@ -71,6 +71,8 @@ add_library(wiiuport STATIC
   title/UniformBlockAddress.h
   title/UniformBlockRing.cpp
   title/UniformBlockRing.h
+  title/VertexComponent.cpp
+  title/VertexComponent.h
   title/VertexPoseHistory.cpp
   title/VertexPoseHistory.h
   title/TransformShape.cpp

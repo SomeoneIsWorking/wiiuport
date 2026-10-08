@@ -19,6 +19,7 @@ void runPoseBlendTests();
 void runNodePoseLocatorTests();
 void runJsonBodyTests();
 void runCommandStreamIdentityTests();
+void runVertexComponentTests();
 void runDrawAttributeCensusTests();
 void runVertexPoseHistoryTests();
 void runUniformBlockAddressTests();

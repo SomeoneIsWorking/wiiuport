@@ -1256,8 +1256,15 @@ the executed packet are the same host addresses.
 the rest are draws in buffers with no bind (`lookupsWithoutBuffer` 1.42M, `lookupsBeforeFirstBind`
 0.12M). With the correct identity `POST /pose` took 31 of 482 candidates and refused 390 as values
 shared across objects (was 71 of 386 and 210), so the uniform "per-object pose" candidates are
-camera/pass values, not poses. The vertex history still positions no draw (`drawsWithoutPosition`
-equals `drawsSeen`): the attribute census names no per-stride position, which is the next defect.
+camera/pass values, not poses.
+
+**Vertex byte order.** GX2 resolves each attribute's `endianSwap` before the draw, and the title's
+32-bit float attributes are `SWAP_U32` (big-endian). The census and the history read them as
+little-endian, so 65% of position components failed the plausibility bar and no layout was named.
+Both now decode through `title/VertexComponent`. Measured after: 5 of 8 layouts named (strides 28,
+32, 48, 64, 96), and the history positions 687k of 1.47M draws (was 0). It still pairs no node across
+frames: a node draws several differently sized meshes per frame and its eight samples fill within
+one frame, so every node reads `unpairedShapes` or `identical`. That sampling is the next defect.
 
 **Tests:** `tests/cxx/command_stream_identity_tests.cpp`; the census and history tests drive draws
 through `tests/cxx/command_stream.h`.

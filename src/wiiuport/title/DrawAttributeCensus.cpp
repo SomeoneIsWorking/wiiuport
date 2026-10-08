@@ -1,6 +1,7 @@
 #include "wiiuport/title/DrawAttributeCensus.h"
 
 #include "wiiuport/title/JsonBody.h"
+#include "wiiuport/title/VertexComponent.h"
 
 #include <algorithm>
 #include <array>
@@ -120,11 +121,9 @@ void DrawAttributeCensus::onDrawRecorded(const LatteFrameHooks::DrawPrepared& dr
             const auto* base = static_cast<const uint8_t*>(source.data) + attribute.offset;
             for (uint32_t vertex = 0; vertex < vertices && vertex < kMagnitudeSamples; vertex++) {
                 for (uint32_t component = 0; component < perVertex; component++) {
-                    uint32_t word = 0;
-                    std::memcpy(&word, base + (vertex * source.stride) + component * 4,
-                                sizeof(word));
-                    float value = 0.0f;
-                    std::memcpy(&value, &word, sizeof(value));
+                    const float value = VertexComponent::read(
+                        base + (static_cast<size_t>(vertex) * source.stride) + component * 4,
+                        attribute.endianSwap);
                     read++;
                     // Three ways a value is not a position. Above the ceiling: a projection
                     // constant. Non-finite: a byte pattern. Below the floor **and non-zero**: a

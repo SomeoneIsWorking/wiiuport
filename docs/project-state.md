@@ -9,8 +9,9 @@ joined through the command stream (`CommandStreamIdentity`, `docs/frame-interpol
 identity"): the single slot it replaced named draws after binds that came later in the stream, so
 every per-node measurement below that predates 2026-10-08 is suspect and is being retaken. With the
 correct identity the uniform candidates are shared across objects (390 of 482 refused as shared),
-so the pose is not in the assembled uniforms; the next step is the vertex-stream history, which
-positions no draw because the attribute census names no per-stride position.
+so the pose is not in the assembled uniforms. The vertex path now reads the title's big-endian
+positions (5 of 8 layouts named, 687k of 1.47M draws positioned); the next step is the history's
+sampling, which fills a node's samples within one frame and so never pairs two ticks.
 
 **The host-side statistical lerp is deleted, not deferred.** It identified the camera by
 searching shaders for a 3x4 that moved like one, matched each draw's identity across ticks by

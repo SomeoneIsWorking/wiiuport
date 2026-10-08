@@ -14,6 +14,7 @@
 #include "check.h"
 #include "command_stream.h"
 #include "suites.h"
+#include "wiiuport/title/VertexComponent.h"
 #include "wiiuport/title/VertexPoseHistory.h"
 
 #include <atomic>
@@ -64,6 +65,24 @@ Prepared aMeshDraw(const Mesh& mesh) {
     draw.vertexAttributes[0].endianSwap = 0;
     draw.vertexAttributes[0].semanticId = 0;
     draw.vertexAttributes[0].perInstance = false;
+    return draw;
+}
+
+// The mesh's floats with each word's bytes reversed, as a big-endian buffer holds them.
+Mesh bigEndian(Mesh mesh) {
+    for (float& value : mesh.positions) {
+        uint32_t word = 0;
+        std::memcpy(&word, &value, sizeof(word));
+        word =
+            (word >> 24) | ((word >> 8) & 0x0000ff00u) | ((word << 8) & 0x00ff0000u) | (word << 24);
+        std::memcpy(&value, &word, sizeof(value));
+    }
+    return mesh;
+}
+
+Prepared bigEndianDraw(const Mesh& mesh) {
+    Prepared draw = aMeshDraw(mesh);
+    draw.vertexAttributes[0].endianSwap = wiiuport::title::VertexComponent::kSwapU32;
     return draw;
 }
 
@@ -125,6 +144,24 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
         check::isTrue(field(body, "biggestComponentDelta") == "0.5",
                       "and the movement in the attribute's own units, which is a half-unit of "
                       "travel and not a count of differing bytes");
+    }
+
+    // The same movement stored big-endian, as GX2 lays out 32-bit floats: decoded in the fetch's
+    // byte order it is half a unit of travel, not the distance between two byte-swapped words.
+    {
+        wiiuport::tests::CommandStream scope;
+        std::atomic<uint64_t> frame{1};
+        VertexPoseHistory history(&scope.identity(), &aCensusWithPosition(), &frame);
+        scope.bind(0x43e00000u);
+        Mesh before = bigEndian(aMeshAt(0.0f));
+        Mesh after = bigEndian(aMeshAt(0.5f));
+        history.onDrawRecorded(scope.at(bigEndianDraw(before)));
+        frame.store(2);
+        history.onDrawRecorded(scope.at(bigEndianDraw(after)));
+        const std::string body = history.json();
+        check::isTrue(field(body, "blendable") == "1" &&
+                          field(body, "biggestComponentDelta") == "0.5",
+                      "a big-endian mesh moving half a unit is blendable by half a unit: " + body);
     }
 
     // **Identical is its own answer.** A node whose position bytes do not change between ticks
