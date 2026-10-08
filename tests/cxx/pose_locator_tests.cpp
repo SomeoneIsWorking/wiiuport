@@ -5,10 +5,10 @@
 /// a colour triple that looked like one, and a buffer too large to scan is not a buffer
 /// with no pose in it.
 #include "check.h"
+#include "json_check.h"
 #include "suites.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
 
-#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <string>
@@ -17,134 +17,8 @@
 namespace {
 
 using wiiuport::frame::RecordedUniformAssembly;
+using wiiuport::tests::firstJsonFault;
 using wiiuport::title::ObjectPoseLocator;
-
-// **A structural JSON validator, because this class's own header asks for one and its report
-// stopped parsing without it.** The header says: "the next change to this class should bring a
-// parser with it", and that change is this one -- so the parser arrives with it.
-//
-// A substring search is what the rest of this file uses and it cannot see a malformed body at
-// all: `mentions(body, "\"tooShortForAPose\":2")` passes on a body whose braces do not balance,
-// because the field it looks for is well formed. **A run then reports an I/O failure** -- the
-// client cannot decode the document -- and the report says nothing about which part is wrong.
-// That is exactly what happened: `GET /blocks` embeds this report, so a body that does not parse
-// takes the binder census, the vertex census and the whole `/blocks` route down with it.
-//
-// This walks the document the way a client does: strings with their escapes, objects, arrays,
-// numbers, and the three literals, and it returns the offset of the first thing a client would
-// refuse. It is not a general parser and does not pretend to be; it is the check that would have
-// caught this.
-std::string firstJsonFault(const std::string& text, size_t& at) {
-    const size_t n = text.size();
-    size_t i = 0;
-    auto skip = [&] {
-        while (i < n && (text[i] == ' ' || text[i] == '\t' || text[i] == '\r' || text[i] == '\n')) {
-            ++i;
-        }
-    };
-    // A named std::function rather than an `auto` lambda: a lambda that recurses through another
-    // lambda cannot deduce its own type, and the fix is the indirection the language asks for.
-    std::function<bool()> value = [&]() -> bool {
-        skip();
-        if (i >= n) {
-            return false;
-        }
-        const char c = text[i];
-        if (c == '"') {
-            ++i;
-            while (i < n) {
-                if (text[i] == '"') {
-                    ++i;
-                    return true;
-                }
-                if (text[i] == '\\') {
-                    i += 2;
-                    continue;
-                }
-                ++i;
-            }
-            at = n;
-            return false;
-        }
-        if (c == '{' || c == '[') {
-            const char close = c == '{' ? '}' : ']';
-            ++i;
-            skip();
-            if (i < n && text[i] == close) {
-                ++i;
-                return true;
-            }
-            while (true) {
-                if (close == '}') {
-                    skip();
-                    if (i >= n || text[i] != '"') {
-                        return false;
-                    }
-                    if (!value()) {
-                        return false;
-                    }
-                    skip();
-                    if (i >= n || text[i] != ':') {
-                        return false;
-                    }
-                    ++i;
-                }
-                if (!value()) {
-                    return false;
-                }
-                skip();
-                if (i < n && text[i] == ',') {
-                    ++i;
-                    skip();
-                    if (i < n && text[i] == close) {
-                        at = i;
-                        return false; // a trailing comma
-                    }
-                    continue;
-                }
-                if (i < n && text[i] == close) {
-                    ++i;
-                    return true;
-                }
-                return false;
-            }
-        }
-        size_t j = i;
-        while (j < n && text[j] != ',' && text[j] != '}' && text[j] != ']' && text[j] != '\n' &&
-               text[j] != '\r' && text[j] != ' ' && text[j] != '\t') {
-            ++j;
-        }
-        const std::string token = text.substr(i, j - i);
-        if (token == "true" || token == "false" || token == "null") {
-            i = j;
-            return true;
-        }
-        if (token.empty()) {
-            return false;
-        }
-        char* end = nullptr;
-        std::strtod(token.c_str(), &end);
-        if (end == token.c_str() || *end != '\0') {
-            at = i;
-            return false;
-        }
-        i = j;
-        return true;
-    };
-    if (!value()) {
-        if (at == std::string::npos) {
-            at = i;
-        }
-        return "the body stops being JSON here";
-    }
-    skip();
-    if (i != n) {
-        at = i;
-        return "the body continues after the value";
-    }
-    at = n;
-    return "";
-}
 
 std::string field(const std::string& body, const std::string& name) {
     const size_t at = body.find("\"" + name + "\":");

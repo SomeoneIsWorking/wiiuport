@@ -40,7 +40,8 @@ std::string poseJson(const std::array<uint32_t, ObjectPoseHistory::kPoseWords>& 
     for (size_t row = 0; row < ObjectPoseHistory::kPoseWords / 3; row++) {
         JsonBody line;
         for (size_t column = 0; column < 3; column++) {
-            line.raw(std::to_string(column), number(asFloat(words[row * 3 + column])));
+            line.raw(std::to_string(column),
+                     JsonBody::real(static_cast<double>(asFloat(words[row * 3 + column])), 6));
         }
         body.object(std::to_string(row), line.text());
     }
@@ -336,7 +337,7 @@ std::string ObjectPoseHistory::json() const {
         one.number("compared", entry.compared);
         one.number("changed", entry.changed);
         one.number("changedWords", entry.changedWords);
-        one.raw("biggestDelta", number(entry.biggestDelta));
+        one.raw("biggestDelta", JsonBody::real(static_cast<double>(entry.biggestDelta), 6));
         one.number("seenAsOther", entry.seenAsOther);
         one.number("otherMatched", entry.otherMatched);
         one.raw("pose", poseJson(entry.history[0]));

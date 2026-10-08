@@ -21,6 +21,7 @@
 ///   - a pose that never changes is a different finding from a pose nobody writes, so
 ///     the answer is a count against a denominator and `null` when there is none.
 #include "check.h"
+#include "json_check.h"
 #include "suites.h"
 #include "wiiuport/title/ObjectPoseHistory.h"
 
@@ -28,6 +29,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <string>
 
@@ -187,6 +189,21 @@ std::map<uint32_t, uint32_t> blankBlock(uint32_t block) {
 } // namespace
 
 void wiiuport::tests::runObjectPoseHistoryTests() {
+    {
+        // A pose read as NaN still reports as JSON: a bare -nan made /blocks unparsable.
+        auto words = blankBlock(0x200);
+        putNotPose(words, 0x200, std::numeric_limits<float>::quiet_NaN());
+        g_words = &words;
+        ObjectPoseHistory history(&readWords);
+        history.observe(7, 0x200, 0);
+        history.observe(7, 0x200, 0);
+        const std::string body = history.json();
+        g_words = nullptr;
+        size_t at = std::string::npos;
+        const std::string fault = wiiuport::tests::firstJsonFault(body, at);
+        check::isTrue(fault.empty(), "a NaN pose reports as JSON: " + fault + " at " +
+                                         std::to_string(at) + ": " + body);
+    }
     {
         // **A scaled pose is found, and the strict class misses it.** Rows 2, 0.5 and 3
         // long: `isRigid` rejects them by construction, and the loose class accepts them.
