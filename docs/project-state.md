@@ -9,9 +9,12 @@ joined through the command stream (`CommandStreamIdentity`, `docs/frame-interpol
 identity"): the single slot it replaced named draws after binds that came later in the stream, so
 every per-node measurement below that predates 2026-10-08 is suspect and is being retaken. With the
 correct identity the uniform candidates are shared across objects (390 of 482 refused as shared),
-so the pose is not in the assembled uniforms. The vertex path now reads the title's big-endian
-positions (5 of 8 layouts named, 687k of 1.47M draws positioned); the next step is the history's
-sampling, which fills a node's samples within one frame and so never pairs two ticks.
+so the pose is not in the assembled uniforms. RE of the uniform uploads settles where it is
+(`docs/frame-interpolation.md` "Where the pose is"): the model renderer uploads only projection, view
+(key 1, `ctx+0x70`) and material constants; static geometry is in world space and moves only with
+the view; moving models are CPU-transformed into `ca2d0854ee6b264d`'s positions, rewritten every
+frame. Next: blend the view as one global value, and pair `ca2d0854ee6b264d` position buffers across
+ticks (the history's sampling still fills within one frame and pairs nothing).
 
 **The host-side statistical lerp is deleted, not deferred.** It identified the camera by
 searching shaders for a 3x4 that moved like one, matched each draw's identity across ticks by
