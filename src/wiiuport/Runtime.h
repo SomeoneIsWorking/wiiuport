@@ -25,6 +25,7 @@
 #include "wiiuport/title/PoseBlend.h"
 #include "wiiuport/title/PoseByShader.h"
 #include "wiiuport/title/UniformBlockCensus.h"
+#include "wiiuport/title/ViewBlend.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
 namespace wiiuport {
@@ -153,6 +154,11 @@ class Runtime {
     title::WindWakerPaint m_paint{&GuestCallProbes::Register,      &GuestPatching::AllocateCode,
                                   &GuestPatching::WriteWord,       &GuestPatching::ReadWord,
                                   &GuestPatching::SetSwapInterval, &GuestPatching::SwapInterval};
+    // The camera's view, blended on the in-between paint.
+    title::ViewBlend m_viewBlend{&GuestCallProbes::Register, &GuestCallProbes::GuestBytes,
+                                 &Runtime::gx2WritePosition, [this] {
+                                     return m_paint.installed() && m_paint.inBetweenPaint();
+                                 }};
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
     frame::PresentPacing m_scanOut{&frame::PresentPacing::Clock::now};
@@ -171,6 +177,7 @@ class Runtime {
         .globalPose = m_globalPose,
         .poseByShader = m_poseByShader,
         .poseBlend = m_poseBlend,
+        .viewBlend = m_viewBlend,
         .logic = m_logic,
         .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,

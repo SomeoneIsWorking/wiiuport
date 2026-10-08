@@ -13,8 +13,10 @@ so the pose is not in the assembled uniforms. RE of the uniform uploads settles 
 (`docs/frame-interpolation.md` "Where the pose is"): the model renderer uploads only projection, view
 (key 1, `ctx+0x70`) and material constants; static geometry is in world space and moves only with
 the view; moving models are CPU-transformed into `ca2d0854ee6b264d`'s positions, rewritten every
-frame. Next: blend the view as one global value, and pair `ca2d0854ee6b264d` position buffers across
-ticks (the history's sampling still fills within one frame and pairs nothing).
+frame. The view is now blended at the register file (`title/ViewBlend`, `GET /view`: 2,673 lerps,
+2,565 moving, walking with the gate on). Next: pair `ca2d0854ee6b264d` position buffers across ticks
+(the history's sampling still fills within one frame and pairs nothing); until then moving models sit
+half a tick off the blended camera on the in-between paint.
 
 **The host-side statistical lerp is deleted, not deferred.** It identified the camera by
 searching shaders for a 3x4 that moved like one, matched each draw's identity across ticks by

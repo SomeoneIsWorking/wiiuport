@@ -46,6 +46,7 @@ int main(int argc, char** argv) {
     wiiuport::tests::runObjectPoseLocatorTests();
     wiiuport::tests::runPoseByShaderTests();
     wiiuport::tests::runPoseBlendTests();
+    wiiuport::tests::runViewBlendTests();
     wiiuport::tests::runNodePoseLocatorTests();
     wiiuport::tests::runJsonBodyTests();
     wiiuport::tests::runCommandStreamIdentityTests();
