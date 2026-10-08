@@ -1269,6 +1269,38 @@ one frame, so every node reads `unpairedShapes` or `identical`. That sampling is
 **Tests:** `tests/cxx/command_stream_identity_tests.cpp`; the census and history tests drive draws
 through `tests/cxx/command_stream.h`.
 
+## Where the pose is: the view in ALU constants, moving models in vertex bytes
+
+The model renderer's vertex constants come from a 200-byte shader context (constructor
+`0x02873d70`): a 4x4 at `+0x00`, 3x4s at `+0x40` and `+0x70`, the bound program at `+0xa8`.
+`0x02874024(ctx, key)` looks a uniform key up in the program's table (`program + 0x25c`) and returns
+its register.
+
+| key | uploaded by | what |
+|---|---|---|
+| 0 | `0x02874038`, 16 words from `ctx+0x00` | projection: 1 distinct value per window |
+| 1 | `0x02874074`, 12 words from `ctx+0x70` | view: ~1 value per few frames per context in gameplay |
+| 2-7, 0x11 | `0x0288285c` | material: texgen rows, colours |
+| 9, 0xe-0x10 | `0x02880f1c` | texture matrices |
+
+Key 1 is uploaded only while `ctx+0xb6` is clear, and `0x028740e4` (program change) is the only
+gameplay writer that clears it. Gameplay uses 3-4 contexts. **There is no per-object model matrix in
+these constants.** Static geometry (`6669a23d03806414`, `6a3a79e768f17158`, `48d25cda84f07f19`, ...)
+is stored in world space and reads unchanged vertex bytes every frame while the camera moves, so it
+needs the view blended and nothing else. Moving models are transformed on the CPU:
+`ca2d0854ee6b264d` (~72 draws a frame) rewrites its `32_32_32_FLOAT` positions every frame and no
+other attribute (`POST /draws?frames=60`, standing and walking).
+
+So the blend has two parts, neither per-object uniform: the **view** (key 1, one value for the
+frame) and **CPU-written positions** (`ca2d0854ee6b264d`'s vertex buffers, paired across ticks).
+The `PoseByShader` per-object uniform search cannot find either and its refusals ("shared") are the
+view.
+
+Evidence: the GX2 HLE's caller histogram (`GX2SetVertexUniformReg` link register, offset, size,
+distinct values; a temporary fork-side counter, not kept). A Ghidra caller search by the name
+`GX2SetVertexUniformReg` returns only effect passes and misses the whole `0x0287xxxx-0x0288xxxx`
+renderer, whose calls go to the import stub `0x028fadac`.
+
 ## The deleted mechanism, and where its evidence went
 
 The shipped mechanism used to be a host-side statistical lerp. It identified the camera by **searching
