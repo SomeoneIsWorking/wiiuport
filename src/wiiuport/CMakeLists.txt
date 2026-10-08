@@ -59,6 +59,7 @@ add_library(wiiuport STATIC
   guest/BufferWriters.h
   guest/CallerCensus.cpp
   guest/CallerCensus.h
+  guest/ProbeInstallation.h
   title/LogicGate.cpp
   title/LogicGate.h
   title/ObjectPoseHistory.cpp
