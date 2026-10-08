@@ -95,16 +95,6 @@ std::optional<QueryParameter> nextParameter(std::string_view& rest) {
     return QueryParameter{.key = pair.substr(0, equals), .value = pair.substr(equals + 1)};
 }
 
-// Enough digits that two transforms which differ are never printed the same.
-std::string floatText(float value) {
-    std::array<char, 32> text{};
-    auto written = std::snprintf(text.data(), text.size(), "%.9g", static_cast<double>(value));
-    if (written <= 0) {
-        return "0";
-    }
-    return std::string(text.data(), static_cast<size_t>(written));
-}
-
 std::string_view shownStageName(LatteFrameHooks::ShownStage stage) {
     switch (stage) {
     case LatteFrameHooks::ShownStage::QueueDone:

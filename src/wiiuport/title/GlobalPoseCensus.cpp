@@ -20,12 +20,6 @@ float asFloat(uint32_t word) {
     return value;
 }
 
-std::string number(float value) {
-    char text[32];
-    std::snprintf(text, sizeof(text), "%.6g", static_cast<double>(value));
-    return {text};
-}
-
 std::string hexValue(uint32_t value) {
     char text[16];
     std::snprintf(text, sizeof(text), "0x%08x", value);
