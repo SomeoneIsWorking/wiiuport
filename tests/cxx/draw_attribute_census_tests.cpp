@@ -10,16 +10,19 @@
 #include "command_stream.h"
 #include "suites.h"
 #include "wiiuport/title/DrawAttributeCensus.h"
+#include "wiiuport/title/VertexComponent.h"
 
 #include <cstddef>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
 
 using wiiuport::title::DrawAttributeCensus;
 using Prepared = LatteFrameHooks::DrawPrepared;
+using wiiuport::title::VertexComponent;
 
 std::string field(const std::string& body, const std::string& name) {
     const size_t at = body.find("\"" + name + "\":");
@@ -256,6 +259,27 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
                       "and the report says the magnitude bar passed rather than leaving the "
                       "reader to assume it: " +
                           body);
+    }
+
+    // Big-endian positions, as GX2 lays out 32-bit floats (SWAP_U32): read in the fetch's byte
+    // order they are positions; read as little-endian they are denormals and the layout is refused.
+    {
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
+        for (uint32_t object = 1; object <= 5; object++) {
+            scope.bind(0x43e58000u + object * 0x300u);
+            Prepared draw = aDrawWithPositions(20, 8, 1.0f);
+            for (size_t word = 0; word + 4 <= g_buffer.size(); word += 4) {
+                std::swap(g_buffer[word], g_buffer[word + 3]);
+                std::swap(g_buffer[word + 1], g_buffer[word + 2]);
+            }
+            addAttribute(draw, 0, 0x30, 12, 0);
+            draw.vertexAttributes[0].endianSwap = VertexComponent::kSwapU32;
+            census.onDrawRecorded(scope.at(draw));
+        }
+        check::isTrue(census.positionFor(20).known,
+                      "a big-endian layout is named from its declared byte order: " +
+                          census.json());
     }
 
     // The same layout, the same seven objects, and bytes that are not a position. The count is

@@ -1,6 +1,7 @@
 #include "wiiuport/title/VertexPoseHistory.h"
 
 #include "wiiuport/title/JsonBody.h"
+#include "wiiuport/title/VertexComponent.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,17 +11,9 @@ namespace wiiuport::title {
 
 namespace {
 
-// One component of a position, as a difference in the attribute's own units.
-//
-// The bytes are read in the byte order the draw declared. `endianSwap` is carried into the
-// report rather than guessed at here: a byte-wise count of differing bytes is
-// order-independent, but a magnitude read as a float is not, and a float read with the wrong
-// order is a plausible number describing nothing. So the magnitude is only reported when the
-// attribute is four bytes of little-endian float, and the report says which of the two it gave.
-bool readFloat(const uint8_t* bytes, float* out) {
-    uint32_t word = 0;
-    std::memcpy(&word, bytes, sizeof(word));
-    std::memcpy(out, &word, sizeof(*out));
+// One component of a position, in the byte order the draw's fetch declared.
+bool readFloat(const uint8_t* bytes, uint8_t endianSwap, float* out) {
+    *out = VertexComponent::read(bytes, endianSwap);
     return std::isfinite(*out);
 }
 
@@ -82,6 +75,14 @@ void VertexPoseHistory::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw
         return;
     }
     const uint64_t frame = m_frames == nullptr ? 0 : m_frames->load(std::memory_order_relaxed);
+    uint8_t endianSwap = 0;
+    for (uint32_t index = 0; index < draw.vertexAttributeCount; index++) {
+        const LatteFrameHooks::DrawPrepared::VertexAttribute& attribute =
+            draw.vertexAttributes[index];
+        if (attribute.buffer == at.buffer && attribute.offset == at.offset) {
+            endianSwap = attribute.endianSwap;
+        }
+    }
 
     // Copy while the draw's buffer is valid: the pointer is good only for this callback, and a
     // history that stored the address would be a history of addresses.
@@ -137,7 +138,7 @@ void VertexPoseHistory::onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw
     if (samples.size() >= kShapesPerNode * kSamplesPerShape) {
         return;
     }
-    samples.push_back(Node::Sample{frame, buffer.stride, std::move(bytes)});
+    samples.push_back(Node::Sample{frame, buffer.stride, endianSwap, std::move(bytes)});
     known->stride = buffer.stride;
     known->componentBytes = at.sizeInBytes;
     known->offset = at.offset;
@@ -153,7 +154,8 @@ VertexPoseHistory::Verdict VertexPoseHistory::verdictOf(const Node::Sample& befo
     // A mismatched pair cannot be reached through the pairing, which matches on shape, so this
     // is a guard rather than a verdict: if a future change lets two shapes meet here, the
     // answer is "nothing was compared" and not a number about unrelated bytes.
-    if (before.stride != after.stride || before.bytes.size() != after.bytes.size()) {
+    if (before.stride != after.stride || before.endianSwap != after.endianSwap ||
+        before.bytes.size() != after.bytes.size()) {
         return Verdict::UnpairedShapes;
     }
     for (size_t byte = 0; byte < after.bytes.size(); byte++) {
@@ -170,8 +172,8 @@ VertexPoseHistory::Verdict VertexPoseHistory::verdictOf(const Node::Sample& befo
                 float a = 0.0f;
                 float b = 0.0f;
                 const size_t at = vertex * componentBytes + offset;
-                if (!readFloat(before.bytes.data() + at, &a) ||
-                    !readFloat(after.bytes.data() + at, &b)) {
+                if (!readFloat(before.bytes.data() + at, before.endianSwap, &a) ||
+                    !readFloat(after.bytes.data() + at, after.endianSwap, &b)) {
                     continue;
                 }
                 const float difference = std::fabs(b - a);
