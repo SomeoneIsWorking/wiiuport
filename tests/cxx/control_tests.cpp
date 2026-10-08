@@ -83,6 +83,13 @@ struct Fixture {
     // Armed with the table it reads, because a blend with no table leaves every draw alone
     // and the route test would be reporting a blend that cannot happen.
     wiiuport::title::PoseBlend poseBlend{poseByShader};
+    wiiuport::title::ViewBlend viewBlend{&noRegistration, &noGuestBytes,
+                                         [] {
+                                             return wiiuport::title::CommandPosition{};
+                                         },
+                                         [] {
+                                             return false;
+                                         }};
     // The data-area scan, with readers that refuse: a channel built with readers that say no is how
     // every refusal in this file is exercised, and a scan wired with a reader that answers would
     // never reach the refusal it exists to report.
@@ -108,6 +115,7 @@ struct Fixture {
         .globalPose = globalPose,
         .poseByShader = poseByShader,
         .poseBlend = poseBlend,
+        .viewBlend = viewBlend,
         .logic = logic,
         .guestBytes = &noGuestBytes,
         .snapshot = snapshot,

@@ -1296,6 +1296,26 @@ frame) and **CPU-written positions** (`ca2d0854ee6b264d`'s vertex buffers, paire
 The `PoseByShader` per-object uniform search cannot find either and its refusals ("shared") are the
 view.
 
+### The view blend
+
+**Owner:** `title/ViewBlend`. The probe on `uploadView` runs on the display thread: unless
+`ctx+0xb6` is set it records GX2's write position (the packet the upload will become), the context
+and `WindWakerPaint::inBetweenPaint()`. On the Latte thread the fork hands every `IT_SET_ALU_CONST`
+packet to `OnAluConstants` after its values reach the register file; the matching packet is the
+view. On the tick's own paint the view is held for its context; on the in-between paint the twelve
+registers are replaced by `interp::midpoint(held, view)`, so every draw after the upload reads the
+blended view whatever its uniform mode. The parity is taken at the probe, because the display
+thread can start the next paint before Latte executes this one's packets.
+
+**Measured** (gameplay, paint mode 13, `POST /logic?on=1`, walking): 25,033 calls, 22,533 packets
+matched, 0 of another size; 19,860 held and 2,673 lerped across 4 contexts, of which 2,565 moved
+(the two ends differed), so the gate's tick lands before the in-between paint. About 1% of uploads
+are still in flight at any sample. With the gate on this headless run painted ~3 times a second
+against ~30 with it off; that rate is the gate's, not the blend's.
+
+**Not yet:** moving models (`ca2d0854ee6b264d` positions) are still the tick's own on the in-between
+paint, so with the view blended they sit half a tick off the camera there.
+
 Evidence: the GX2 HLE's caller histogram (`GX2SetVertexUniformReg` link register, offset, size,
 distinct values; a temporary fork-side counter, not kept). A Ghidra caller search by the name
 `GX2SetVertexUniformReg` returns only effect passes and misses the whole `0x0287xxxx-0x0288xxxx`

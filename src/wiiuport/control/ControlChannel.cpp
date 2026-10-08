@@ -35,7 +35,7 @@ namespace {
 // pacing's own summary rather than with the interpolated frame's counts.
 const char* const kRoutes = "GET /counters, GET /capture, "
                             "GET /controllers, GET /setup, "
-                            "GET /recordings, GET /draws, GET /memory, GET /callers, "
+                            "GET /recordings, GET /draws, GET /memory, GET /callers, GET /view, "
                             "GET /paint, GET /blocks, GET /logic, GET /gate, GET /pose, "
                             "POST /global-pose, POST /pose, POST /capture, POST /pacing, "
                             "POST /draws, POST /recordings, POST /paint, POST /logic, POST /input "
@@ -140,10 +140,10 @@ ControlChannel::ControlChannel(const Sources& sources)
     : m_recorder(sources.recorder), m_input(sources.input), m_capture(sources.capture),
       m_shapeLog(sources.shapeLog), m_writers(sources.writers), m_callers(sources.callers),
       m_paint(sources.paint), m_blocks(sources.blocks), m_poses(sources.poses),
-      m_poseByShader(sources.poseByShader), m_poseBlend(sources.poseBlend), m_logic(sources.logic),
-      m_globalPose(sources.globalPose), m_guestBytes(sources.guestBytes),
-      m_snapshot(sources.snapshot), m_pacing(sources.pacing), m_scanOut(sources.scanOut),
-      m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
+      m_poseByShader(sources.poseByShader), m_poseBlend(sources.poseBlend),
+      m_viewBlend(sources.viewBlend), m_logic(sources.logic), m_globalPose(sources.globalPose),
+      m_guestBytes(sources.guestBytes), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
+      m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -893,6 +893,9 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
                 "and let K frames end.\n");
         }
         return lucent::http::Response::binary(200, "OK", "application/octet-stream", framed);
+    }
+    if (request.path() == "/view") {
+        return lucent::http::Response::json(200, "OK", m_viewBlend.json());
     }
     if (request.path() == "/callers") {
         return lucent::http::Response::json(200, "OK", m_callers.json());

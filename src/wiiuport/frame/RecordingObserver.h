@@ -60,6 +60,14 @@ class AssemblyBeforeDrawListener {
                                       uint64_t shaderAuxHash, uint32_t node) = 0;
 };
 
+// Each ALU constant packet as it reaches the register file, on the Latte thread. Returns whether
+// it rewrote the values.
+class AluConstantsListener {
+  public:
+    virtual ~AluConstantsListener() = default;
+    virtual bool onAluConstants(const LatteFrameHooks::AluConstants& constants) = 0;
+};
+
 // Notified after the guest's swap has shown the frame most recently recorded.
 // Separate from FrameEndListener because some measurements are defined by
 // what is already on screen: a null diff captures the guest's present and
@@ -166,6 +174,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw,
                         LatteFrameHooks::VertexReplacements& replacements) override;
     void OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) override;
+    bool OnAluConstants(const LatteFrameHooks::AluConstants& constants) override;
 
     // Empty by default, so a build that installs no listener behaves as a
     // pure recorder. More than one thing acts on a published frame -- replay
@@ -189,6 +198,12 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void addAssemblyBeforeDrawListener(AssemblyBeforeDrawListener* listener) {
         if (listener != nullptr) {
             m_beforeDrawListeners.push_back(listener);
+        }
+    }
+
+    void addAluConstantsListener(AluConstantsListener* listener) {
+        if (listener != nullptr) {
+            m_aluConstantsListeners.push_back(listener);
         }
     }
 
@@ -354,6 +369,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     std::vector<FrameEndListener*> m_listeners;
     std::vector<AssemblyRecordedListener*> m_assemblyListeners;
     std::vector<AssemblyBeforeDrawListener*> m_beforeDrawListeners;
+    std::vector<AluConstantsListener*> m_aluConstantsListeners;
     std::vector<FrameShownListener*> m_shownListeners;
     std::vector<PresentListener*> m_presentListeners;
     std::vector<DisplayedListener*> m_displayedListeners;
