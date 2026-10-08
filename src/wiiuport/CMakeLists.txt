@@ -75,8 +75,8 @@ add_library(wiiuport STATIC
   title/VertexPoseHistory.h
   title/TransformShape.cpp
   title/TransformShape.h
-  title/ObjectIdentityScope.cpp
-  title/ObjectIdentityScope.h
+  title/CommandStreamIdentity.cpp
+  title/CommandStreamIdentity.h
   title/ObjectPoseLocator.cpp
   title/PoseBlend.cpp
   title/PoseByShader.cpp

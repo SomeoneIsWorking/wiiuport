@@ -12,6 +12,7 @@
 /// blendable, and uncomparable. A report that collapsed the last two would claim a blend it
 /// cannot do.
 #include "check.h"
+#include "command_stream.h"
 #include "suites.h"
 #include "wiiuport/title/VertexPoseHistory.h"
 
@@ -23,7 +24,6 @@
 namespace {
 
 using wiiuport::title::DrawAttributeCensus;
-using wiiuport::title::ObjectIdentityScope;
 using wiiuport::title::VertexPoseHistory;
 using Prepared = LatteFrameHooks::DrawPrepared;
 
@@ -80,13 +80,13 @@ Mesh aMeshAt(float x) {
 // A census that has settled a position, built by feeding it the same draw the history will see,
 // so the history is never asked to guess one.
 DrawAttributeCensus& aCensusWithPosition() {
-    static ObjectIdentityScope scope;
-    static DrawAttributeCensus census(&scope);
+    static wiiuport::tests::CommandStream scope;
+    static DrawAttributeCensus census(&scope.identity());
     static bool settled = false;
     if (!settled) {
         for (uint32_t object = 1; object <= 3; object++) {
             scope.bind(0x43e00000u + object * 0x1000u);
-            census.onDrawRecorded(aMeshDraw(aMeshAt(0.0f)));
+            census.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(0.0f))));
         }
         settled = true;
     }
@@ -101,13 +101,13 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
     // and cannot invent: the stride, the vertex count, the byte length, and how far the value
     // moved.
     {
-        ObjectIdentityScope scope;
+        wiiuport::tests::CommandStream scope;
         std::atomic<uint64_t> frame{1};
-        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        VertexPoseHistory history(&scope.identity(), &aCensusWithPosition(), &frame);
         scope.bind(0x43e00000u);
-        history.onDrawRecorded(aMeshDraw(aMeshAt(0.0f)));
+        history.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(0.0f))));
         frame.store(2);
-        history.onDrawRecorded(aMeshDraw(aMeshAt(0.5f)));
+        history.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(0.5f))));
         const std::string body = history.json();
         check::isTrue(field(body, "blendable") == "1",
                       "one node whose position bytes moved between two frames is blendable: " +
@@ -131,13 +131,13 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
     // is a static mesh, and a blend of it would be its own input: the check that a stationary
     // object stays stationary, not evidence that blending does anything.
     {
-        ObjectIdentityScope scope;
+        wiiuport::tests::CommandStream scope;
         std::atomic<uint64_t> frame{1};
-        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        VertexPoseHistory history(&scope.identity(), &aCensusWithPosition(), &frame);
         scope.bind(0x43e00000u);
-        history.onDrawRecorded(aMeshDraw(aMeshAt(3.0f)));
+        history.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(3.0f))));
         frame.store(2);
-        history.onDrawRecorded(aMeshDraw(aMeshAt(3.0f)));
+        history.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(3.0f))));
         const std::string body = history.json();
         check::isTrue(field(body, "identical") == "1" && field(body, "blendable") == "0",
                       "a node whose positions did not move is identical, and is not counted as "
@@ -155,17 +155,17 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
     // the second was a mesh. Matching by the draw's own shape is the fix, and this is the test
     // for it: a placeholder and a mesh in each of two frames, with the *mesh* moving.
     {
-        ObjectIdentityScope scope;
+        wiiuport::tests::CommandStream scope;
         std::atomic<uint64_t> frame{1};
-        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        VertexPoseHistory history(&scope.identity(), &aCensusWithPosition(), &frame);
         scope.bind(0x43e00000u);
         Mesh placeholder;
         placeholder.positions = {0.0f, 0.0f, 0.0f};
         placeholder.stride = 32;
         for (int tick = 0; tick < 2; tick++) {
             frame.store(static_cast<uint64_t>(tick) + 1);
-            history.onDrawRecorded(aMeshDraw(placeholder));
-            history.onDrawRecorded(aMeshDraw(aMeshAt(0.5f * static_cast<float>(tick))));
+            history.onDrawRecorded(scope.at(aMeshDraw(placeholder)));
+            history.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(0.5f * static_cast<float>(tick)))));
         }
         const std::string body = history.json();
         check::isTrue(field(body, "blendable") == "1",
@@ -184,11 +184,11 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
     // "checked, found static" when nothing was checked. The shapes it did sample are listed, so
     // a reader can tell "under-sampled" from "sampled one shape of one".
     {
-        ObjectIdentityScope scope;
+        wiiuport::tests::CommandStream scope;
         std::atomic<uint64_t> frame{1};
-        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        VertexPoseHistory history(&scope.identity(), &aCensusWithPosition(), &frame);
         scope.bind(0x43e00000u);
-        history.onDrawRecorded(aMeshDraw(aMeshAt(0.0f)));
+        history.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(0.0f))));
         const std::string body = history.json();
         check::isTrue(field(body, "unpairedShapes") == "1" && field(body, "identical") == "0" &&
                           field(body, "blendable") == "0",
@@ -210,11 +210,11 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
     // difference in the low mantissa bits, not a pose. Kept apart from `identical` -- the bytes
     // really did differ and a reader needs to know that -- and apart from `blendable`.
     {
-        ObjectIdentityScope scope;
+        wiiuport::tests::CommandStream scope;
         std::atomic<uint64_t> frame{1};
-        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        VertexPoseHistory history(&scope.identity(), &aCensusWithPosition(), &frame);
         scope.bind(0x43e00000u);
-        history.onDrawRecorded(aMeshDraw(aMeshAt(1.0f)));
+        history.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(1.0f))));
         frame.store(2);
         Mesh nudged = aMeshAt(1.0f);
         // One part in 10^7 of a unit -- the float epsilon at 1.0 is 1.19e-7, so this is the
@@ -222,7 +222,7 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
         // 1.0f and the test would have measured identical bytes rather than an unmoved
         // position, which is the opposite case.
         nudged.positions[0] += 1e-7f;
-        history.onDrawRecorded(aMeshDraw(nudged));
+        history.onDrawRecorded(scope.at(aMeshDraw(nudged)));
         const std::string body = history.json();
         check::isTrue(field(body, "valueUnchanged") == "1" && field(body, "blendable") == "0",
                       "a shape whose bytes differ but whose values agree is valueUnchanged, and "
@@ -242,9 +242,9 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
     // shapes. So a node with a moving 4-vertex shape and a still 1000-vertex shape reports the
     // 4-vertex geometry, because that is the shape the verdict came from.
     {
-        wiiuport::title::ObjectIdentityScope scope;
+        wiiuport::tests::CommandStream scope;
         std::atomic<uint64_t> frame{1};
-        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        VertexPoseHistory history(&scope.identity(), &aCensusWithPosition(), &frame);
         scope.bind(0x43e00000u);
         Mesh small = aMeshAt(0.0f);
         Mesh large = aMeshAt(0.0f);
@@ -252,8 +252,8 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
         for (int tick = 0; tick < 2; tick++) {
             frame.store(static_cast<uint64_t>(tick) + 1);
             small.positions[0] = 0.5f * static_cast<float>(tick);
-            history.onDrawRecorded(aMeshDraw(small));
-            history.onDrawRecorded(aMeshDraw(large));
+            history.onDrawRecorded(scope.at(aMeshDraw(small)));
+            history.onDrawRecorded(scope.at(aMeshDraw(large)));
         }
         const std::string body = history.json();
         check::isTrue(field(body, "vertices") == "4" && field(body, "stride") == "12",
@@ -272,19 +272,19 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
     // and the verdict says the magnitude is not believable, rather than a number that looks
     // like evidence being printed as evidence.
     {
-        ObjectIdentityScope scope;
+        wiiuport::tests::CommandStream scope;
         std::atomic<uint64_t> frame{1};
-        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        VertexPoseHistory history(&scope.identity(), &aCensusWithPosition(), &frame);
         scope.bind(0x43e00000u);
         Mesh absurd = aMeshAt(0.0f);
         // A plausible byte pattern that is not a position: large exponents.
         const float wild[3] = {3.0e38f, -2.0e38f, 1.0e38f};
         std::memcpy(absurd.positions.data(), wild, sizeof(wild));
-        history.onDrawRecorded(aMeshDraw(absurd));
+        history.onDrawRecorded(scope.at(aMeshDraw(absurd)));
         frame.store(2);
         Mesh moved = absurd;
         moved.positions[0] = 3.1e38f;
-        history.onDrawRecorded(aMeshDraw(moved));
+        history.onDrawRecorded(scope.at(aMeshDraw(moved)));
         const std::string body = history.json();
         check::isTrue(body.find("\"magnitudeBelievable\":false") != std::string::npos,
                       "a component delta of 10^38 is counted and the magnitude is marked "
@@ -307,12 +307,12 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
     // node scan had, where "0 moved, delta 0" was indistinguishable from a same-frame
     // schedule until the schedule was made explicit.
     {
-        ObjectIdentityScope scope;
+        wiiuport::tests::CommandStream scope;
         std::atomic<uint64_t> frame{7};
-        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        VertexPoseHistory history(&scope.identity(), &aCensusWithPosition(), &frame);
         scope.bind(0x43e00000u);
         for (int draw = 0; draw < 40; draw++) {
-            history.onDrawRecorded(aMeshDraw(aMeshAt(0.25f * static_cast<float>(draw))));
+            history.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(0.25f * static_cast<float>(draw)))));
         }
         const std::string body = history.json();
         check::isTrue(field(body, "unpairedShapes") == "1" && field(body, "drawsSeen") == "40",
@@ -327,12 +327,12 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
     // A draw with no settled position samples nothing, and says so. A history that guessed one
     // would be a history of numbers it made up.
     {
-        ObjectIdentityScope scope;
+        wiiuport::tests::CommandStream scope;
         std::atomic<uint64_t> frame{1};
         DrawAttributeCensus blind(nullptr);
-        VertexPoseHistory history(&scope, &blind, &frame);
+        VertexPoseHistory history(&scope.identity(), &blind, &frame);
         scope.bind(0x43e00000u);
-        history.onDrawRecorded(aMeshDraw(aMeshAt(0.0f)));
+        history.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(0.0f))));
         const std::string body = history.json();
         check::isTrue(field(body, "drawsWithoutPosition") == "1" &&
                           field(body, "nodesTracked") == "0",
@@ -344,13 +344,13 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
     // A stride that cannot hold the attribute is refused, not walked: a copy that steps by
     // less than it reads overlaps itself and produces numbers that look like a mesh.
     {
-        ObjectIdentityScope scope;
+        wiiuport::tests::CommandStream scope;
         std::atomic<uint64_t> frame{1};
-        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        VertexPoseHistory history(&scope.identity(), &aCensusWithPosition(), &frame);
         scope.bind(0x43e00000u);
         Mesh mesh = aMeshAt(0.0f);
         mesh.stride = 8; // shorter than the twelve-byte position
-        history.onDrawRecorded(aMeshDraw(mesh));
+        history.onDrawRecorded(scope.at(aMeshDraw(mesh)));
         const std::string body = history.json();
         check::isTrue(field(body, "drawsWithoutPosition") == "1" &&
                           field(body, "nodesTracked") == "0",
@@ -366,13 +366,13 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
     // property of the title, so it is a stated number and the refusals are reported beside the
     // belief rather than beside a claim.
     {
-        ObjectIdentityScope scope;
+        wiiuport::tests::CommandStream scope;
         std::atomic<uint64_t> frame{1};
-        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        VertexPoseHistory history(&scope.identity(), &aCensusWithPosition(), &frame);
         const uint64_t offered = VertexPoseHistory::kNodes * VertexPoseHistory::kObjectStride + 3;
         for (uint64_t object = 1; object <= offered; object++) {
             scope.bind(0x43e00000u + static_cast<uint32_t>(object) * 0x100u);
-            history.onDrawRecorded(aMeshDraw(aMeshAt(0.0f)));
+            history.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(0.0f))));
         }
         const std::string body = history.json();
         check::isTrue(field(body, "nodesTracked") == std::to_string(VertexPoseHistory::kNodes),
@@ -392,14 +392,14 @@ void wiiuport::tests::runVertexPoseHistoryTests() {
     // The stride is per ARRIVAL, not per address: a reused address must not be sampled once and
     // then never again, which is what a pointer-based stride would do.
     {
-        ObjectIdentityScope scope;
+        wiiuport::tests::CommandStream scope;
         std::atomic<uint64_t> frame{1};
-        VertexPoseHistory history(&scope, &aCensusWithPosition(), &frame);
+        VertexPoseHistory history(&scope.identity(), &aCensusWithPosition(), &frame);
         for (uint64_t round = 0; round < VertexPoseHistory::kObjectStride * 2; round++) {
             scope.bind(0x43e00000u);
-            history.onDrawRecorded(aMeshDraw(aMeshAt(0.0f)));
+            history.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(0.0f))));
             scope.bind(0x43e00100u);
-            history.onDrawRecorded(aMeshDraw(aMeshAt(0.0f)));
+            history.onDrawRecorded(scope.at(aMeshDraw(aMeshAt(0.0f))));
         }
         const std::string body = history.json();
         check::isTrue(field(body, "nodesTracked") == "2",

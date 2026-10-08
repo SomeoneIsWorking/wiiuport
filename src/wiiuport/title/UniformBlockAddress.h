@@ -27,7 +27,7 @@ namespace wiiuport::title {
 // most recent record and paired it with the next assembly to arrive, which paired 77,274 of
 // 855,599 -- a 9% lottery, where a wrong pairing lowers every word's hit rate equally and a right
 // one is invisible. The assembly names the object the draw is in the middle of
-// (`ObjectIdentityScope::current()`), and the binder named the same object, so the pair is exact.
+// (`CommandStreamIdentity::objectAt`), and the binder named the same object, so the pair is exact.
 // Identity here is the title's own, read from its own binder; nothing is matched by occurrence
 // index, by address similarity, or by a host-side guess.
 //

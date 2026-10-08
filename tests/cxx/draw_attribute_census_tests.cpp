@@ -7,6 +7,7 @@
 /// not by reading a semantic index out of a GX2 header, which would be a guess about a title
 /// nobody has disassembled.
 #include "check.h"
+#include "command_stream.h"
 #include "suites.h"
 #include "wiiuport/title/DrawAttributeCensus.h"
 
@@ -110,13 +111,13 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // The position is named because a majority of distinct objects carry the same signature,
     // and the histogram is in the report so the choice is visible rather than asserted.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         for (uint32_t object = 1; object <= 5; object++) {
             scope.bind(0x43e00000u + object * 0x1000u);
             Prepared draw = aMeshDraw();
-            census.onDrawRecorded(draw);
-            census.onDrawRecorded(draw);
+            census.onDrawRecorded(scope.at(draw));
+            census.onDrawRecorded(scope.at(draw));
         }
         const DrawAttributeCensus::Position at = census.position();
         const std::string body = census.json();
@@ -142,14 +143,14 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // said "the smallest position-sized attribute" would name the normal, and every
     // substituted frame would be a frame of normals.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         for (uint32_t object = 1; object <= 4; object++) {
             scope.bind(0x43e10000u + object * 0x800u);
             Prepared draw = aDraw(48, 48 * 120);
             addAttribute(draw, 8, 0x14, 12, 0);  // normal first, in the stride
             addAttribute(draw, 7, 0x14, 16, 12); // position, padded to four components
-            census.onDrawRecorded(draw);
+            census.onDrawRecorded(scope.at(draw));
         }
         const std::string body = census.json();
         const DrawAttributeCensus::Position at = census.position();
@@ -172,14 +173,14 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // counted both. Here the same semantic, format, size and buffer appear at two strides with
     // two different offsets, and each is named for its own layout.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         for (uint32_t object = 1; object <= 4; object++) {
             scope.bind(0x43e00000u + object * 0x200u);
             Prepared wide = aDraw(32, 32 * 20);
             addAttribute(wide, 0, 0x30, 12, 0);
             addAttribute(wide, 6, 0x1e, 8, 12);
-            census.onDrawRecorded(wide);
+            census.onDrawRecorded(scope.at(wide));
             // **The same offset in both layouts**, which is the collision the stride's absence
             // from the key caused. With different offsets the two signatures differ anyway and
             // the test proves nothing -- which is how the first version of this test passed
@@ -187,7 +188,7 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
             Prepared narrow = aDraw(20, 20 * 20);
             addAttribute(narrow, 0, 0x30, 12, 0);
             addAttribute(narrow, 6, 0x1e, 8, 12);
-            census.onDrawRecorded(narrow);
+            census.onDrawRecorded(scope.at(narrow));
         }
         const DrawAttributeCensus::Position at32 = census.positionFor(32);
         const DrawAttributeCensus::Position at20 = census.positionFor(20);
@@ -219,11 +220,11 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // A stride nobody has two objects for names nothing, rather than falling back to the
     // global answer -- a fallback would be the bug again, wearing a different hat.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         for (uint32_t object = 1; object <= 4; object++) {
             scope.bind(0x43e40000u + object * 0x200u);
-            census.onDrawRecorded(aMeshDraw());
+            census.onDrawRecorded(scope.at(aMeshDraw()));
         }
         check::isTrue(!census.positionFor(999).known,
                       "a stride with no objects of its own names nothing");
@@ -239,13 +240,13 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // components have ever read as something a position is not is not named, and the report
     // says how many so a layout that fails this reads as unsolved rather than as empty.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         for (uint32_t object = 1; object <= 5; object++) {
             scope.bind(0x43e50000u + object * 0x300u);
             Prepared draw = aDrawWithPositions(20, 8, 1.0f);
             addAttribute(draw, 0, 0x30, 12, 0);
-            census.onDrawRecorded(draw);
+            census.onDrawRecorded(scope.at(draw));
         }
         const DrawAttributeCensus::Position clean = census.positionFor(20);
         const std::string body = census.json();
@@ -260,8 +261,8 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // The same layout, the same seven objects, and bytes that are not a position. The count is
     // identical -- which is the whole point -- and the answer is different.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         for (uint32_t object = 1; object <= 5; object++) {
             scope.bind(0x43e60000u + object * 0x300u);
             Prepared draw = aDrawWithPositions(20, 8, 1.0f);
@@ -269,7 +270,7 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
             // One component in 10^38: the signature is untouched, the values are not positions.
             const float wild = 3.0e38f;
             std::memcpy(g_buffer.data() + sizeof(float), &wild, sizeof(wild));
-            census.onDrawRecorded(draw);
+            census.onDrawRecorded(scope.at(draw));
         }
         const DrawAttributeCensus::Position dirty = census.positionFor(20);
         const std::string body = census.json();
@@ -290,15 +291,15 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // and it is the same mistake as the loose class being too loose. So the bar is a stated
     // SHARE of the components read, and both directions are tested here.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         // 200 draws of good positions, then ONE with a component at 1e38.
         for (uint32_t object = 1; object <= 5; object++) {
             scope.bind(0x43e70000u + object * 0x300u);
             for (uint32_t draw = 0; draw < 40; draw++) {
                 Prepared good = aDrawWithPositions(20, 8, 1.0f);
                 addAttribute(good, 0, 0x30, 12, 0);
-                census.onDrawRecorded(good);
+                census.onDrawRecorded(scope.at(good));
             }
         }
         // One bad read across the whole title's sample.
@@ -307,7 +308,7 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
         addAttribute(bad, 0, 0x30, 12, 0);
         const float wild = 3.0e38f;
         std::memcpy(g_buffer.data() + sizeof(float), &wild, sizeof(wild));
-        census.onDrawRecorded(bad);
+        census.onDrawRecorded(scope.at(bad));
 
         const std::string body = census.json();
         check::isTrue(census.positionFor(20).known,
@@ -323,8 +324,8 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // The other direction: a layout that is mostly arithmetic is refused, and the share says by
     // how much -- so "unresolved" carries a number rather than only a verdict.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         for (uint32_t object = 1; object <= 5; object++) {
             scope.bind(0x43e80000u + object * 0x300u);
             for (uint32_t draw = 0; draw < 4; draw++) {
@@ -334,7 +335,7 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
                 const float wild = 3.0e38f;
                 std::memcpy(g_buffer.data() + sizeof(float), &wild, sizeof(wild));
                 std::memcpy(g_buffer.data() + 2 * sizeof(float), &wild, sizeof(wild));
-                census.onDrawRecorded(bad);
+                census.onDrawRecorded(scope.at(bad));
             }
         }
         const std::string body = census.json();
@@ -353,8 +354,8 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // map. So the lowest semantic index wins, the rule is in the report as `tieBreak`, and every
     // candidate that cleared is listed beside the one chosen.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         for (uint32_t object = 1; object <= 5; object++) {
             scope.bind(0x43e90000u + object * 0x300u);
             Prepared draw = aDrawWithPositions(32, 8, 1.0f);
@@ -362,7 +363,7 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
             // holding positions, because the bytes are the same bytes.
             addAttribute(draw, 0, 0x30, 12, 0);
             addAttribute(draw, 4, 0x30, 12, 12);
-            census.onDrawRecorded(draw);
+            census.onDrawRecorded(scope.at(draw));
         }
         const DrawAttributeCensus::Position at = census.positionFor(32);
         const std::string body = census.json();
@@ -382,14 +383,14 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // arrived without a non-zero clause and refused every layout whose geometry sat at the
     // origin, which is most of a title's. Zero is exactly zero and is a perfectly good position.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         for (uint32_t object = 1; object <= 5; object++) {
             scope.bind(0x43ea0000u + object * 0x300u);
             Prepared draw = aDraw(32, 32 * 8);
             addAttribute(draw, 0, 0x30, 12, 0);
             std::memset(g_buffer.data(), 0, g_buffer.size());
-            census.onDrawRecorded(draw);
+            census.onDrawRecorded(scope.at(draw));
         }
         check::isTrue(census.positionFor(32).known,
                       "every vertex at the origin still names a position, because zero is a "
@@ -398,8 +399,8 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
 
     // A denormal is not, and the two are told apart by being non-zero.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         for (uint32_t object = 1; object <= 5; object++) {
             scope.bind(0x43eb0000u + object * 0x300u);
             Prepared draw = aDraw(32, 32 * 8);
@@ -409,7 +410,7 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
             for (uint32_t vertex = 0; vertex < 8; vertex++) {
                 std::memcpy(g_buffer.data() + vertex * 32, &denormal, sizeof(denormal));
             }
-            census.onDrawRecorded(draw);
+            census.onDrawRecorded(scope.at(draw));
         }
         check::isTrue(!census.positionFor(32).known,
                       "and a layout whose every vertex is a denormal names nothing, which is the "
@@ -418,11 +419,11 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
 
     // One object cannot agree with another, so nothing is named however many times it is drawn.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         scope.bind(0x43e20000u);
         for (int draw = 0; draw < 5; draw++) {
-            census.onDrawRecorded(aMeshDraw());
+            census.onDrawRecorded(scope.at(aMeshDraw()));
         }
         const std::string body = census.json();
         check::isTrue(!census.position().known,
@@ -456,14 +457,14 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // geometry needed to size a substitution is not there, and a signature with a stride of
     // zero is a signature nobody could act on.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         for (uint32_t object = 1; object <= 3; object++) {
             scope.bind(0x43e30000u + object * 0x400u);
             Prepared draw = aDraw(32, 32 * 10);
             addAttribute(draw, 7, 0x14, 12, 0);
             addAttribute(draw, 7, 0x14, 12, 0, 5); // buffer 5 of a one-buffer draw
-            census.onDrawRecorded(draw);
+            census.onDrawRecorded(scope.at(draw));
         }
         const std::string body = census.json();
         check::isTrue(field(body, "attributesOutOfRange") == "3",
@@ -475,10 +476,10 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // A draw with no attributes is counted separately, because a draw with an empty attribute
     // table is not a draw whose position is unknown -- it is a draw with nothing to read.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         scope.bind(0x43e40000u);
-        census.onDrawRecorded(aDraw(32, 32 * 4));
+        census.onDrawRecorded(scope.at(aDraw(32, 32 * 4)));
         const std::string body = census.json();
         check::isTrue(field(body, "drawsWithoutAttributes") == "1" &&
                           field(body, "attributesRead") == "0",
@@ -488,11 +489,11 @@ void wiiuport::tests::runDrawAttributeCensusTests() {
     // The tracked set is bounded, and the refusal counted: a census that grew with the scene
     // would be a list of every object the title has ever drawn.
     {
-        wiiuport::title::ObjectIdentityScope scope;
-        DrawAttributeCensus census(&scope);
+        wiiuport::tests::CommandStream scope;
+        DrawAttributeCensus census(&scope.identity());
         for (uint32_t object = 1; object <= DrawAttributeCensus::kNodes + 4; object++) {
             scope.bind(0x43e00000u + object * 0x100u);
-            census.onDrawRecorded(aMeshDraw());
+            census.onDrawRecorded(scope.at(aMeshDraw()));
         }
         const std::string body = census.json();
         check::isTrue(field(body, "nodesTracked") == std::to_string(DrawAttributeCensus::kNodes),

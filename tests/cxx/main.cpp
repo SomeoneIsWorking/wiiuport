@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
     wiiuport::tests::runPoseBlendTests();
     wiiuport::tests::runNodePoseLocatorTests();
     wiiuport::tests::runJsonBodyTests();
-    wiiuport::tests::runObjectIdentityScopeTests();
+    wiiuport::tests::runCommandStreamIdentityTests();
     wiiuport::tests::runDrawAttributeCensusTests();
     wiiuport::tests::runUniformBlockAddressTests();
     wiiuport::tests::runUniformBlockRingTests();

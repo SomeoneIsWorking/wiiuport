@@ -3,15 +3,14 @@
 Factual capability inventory. Epic intent is in `docs/project-goals.md`.
 Every item is `verified`, `partial`, `blocked`, or `missing`.
 
-**Current focus.** ST-OBJECTS -- the blend. The picture rate is already measured at 59.99 a
-second from the title's own paint path with its logic held at thirty (ST-GUESTPAINT), and the
-pose and the identity are located: the node is the identity, tick N-1's uniform block is still
-present when tick N paints in 16 of 16 comparisons, and the pose is per-object rather than
-global. What is not built is the lerp between them, and where it is written is not yet measured:
-the view matrix is excluded from the per-draw uniforms, from the module's `.data`/`.bss` and
-from `0x15800000`, and the fourth candidate -- written through the registration by
-`FUN_02786520` across 21,488 addresses -- is the next read, as a *range* taken from the guest
-block addresses each draw sourced rather than as a search.
+**Current focus.** ST-OBJECTS -- the blend. The picture rate is measured at 59.99 a second from
+the title's own paint path with its logic held at thirty (ST-GUESTPAINT). Draw identity is now
+joined through the command stream (`CommandStreamIdentity`, `docs/frame-interpolation.md` "Draw
+identity"): the single slot it replaced named draws after binds that came later in the stream, so
+every per-node measurement below that predates 2026-10-08 is suspect and is being retaken. With the
+correct identity the uniform candidates are shared across objects (390 of 482 refused as shared),
+so the pose is not in the assembled uniforms; the next step is the vertex-stream history, which
+positions no draw because the attribute census names no per-stride position.
 
 **The host-side statistical lerp is deleted, not deferred.** It identified the camera by
 searching shaders for a 3x4 that moved like one, matched each draw's identity across ticks by
@@ -43,7 +42,7 @@ presents at 30 Hz. Every item below states its difference from that baseline.
 | ST-GUESTPAINT | The title paints its own world at the display's rate, logic held at thirty, and the
 in-between frame is the title's own draw at the lerped pose | partial | **The picture rate is measured, from the title's own paint path.** `title::WindWakerPaint` writes an eleven-word stand-in for the display frame at `0x0274c264` into guest code space from `RPLLoader_AllocateTrampolineCodeSpace` and reaches it by rewriting vtable slot `0xcc` (`0x10004f54`), so the display thread runs the title's own frame body twice and re-reads the frame from the title's own vtable; `display+0x50` is set to 1, the field the title's single `GX2SetSwapInterval` call at `0x0274bafc` passes and the same field `0x0274c874` tests to decide whether to wait for the flip. The eleven words are lifted verbatim from the image (`819f0024 800c00cc 7c0903a6 7fe3fb78 4e800421` twice, then `4e800020`) in `kLoop*` from the loop's own dispatch at `0x0274c020`; `kReservedWords` sizes the reservation for the payload rather than a fixed seven words, and `payload()` refuses a mode whose words do not fit, with a test enumerating every mode (put the old seven back and it fails 9 of 13). Measured, adjacent 8.00 s windows on the real disc through the control channel: unmodded 240 and 241 paints = **30.00 and 30.12 a second**; mode 13, 480 and 478 = **59.99 and 59.73 a second**. The pass rate does not change (240 against 241 passes): the stand-in adds a paint inside a pass, not a pass. Logic tick rate, from the gate's own counters in guest memory: unmodded 241 paints / 241 tick calls / 120 ticks run in 8.00 s; mode 13 window 1, 474 / 474 / 237 = 29.62 a second, **below the 29.9-30.0 band and reported as a failure**; mode 13 window 2, 480 / 480 / 240 = **30.00 a second, inside the band**. **The logic does double** -- one tick per paint, one for one -- so it was slaved to the flip, and the gate at `0x025d42ec` holds it at thirty: 30.0 calls a second in, 15.0 ticks a second out over 3.0 s, against the host probe's 90 calls. The gate is not a backstop, it is what the finding required. The null-interpolation discriminator now runs against the guest path instead of a replay: two consecutive presents differ by 53,634 and 52,911 of 6,220,800 bytes (0.86% and 0.85%), largest delta 3, every differing byte within 4 -- against 32.45% and 34.90% with deltas 164 and 221 for a genuinely different frame, so the second paint is the title's own frame and the discriminator can tell the two cases apart. **Exact gaps: the picture is the title's own frame twice over, so nothing moves at 60 Hz until the blend is built (ST-OBJECTS); the stand-in is the loop's dispatch and a constant, so it paints the same tree twice and the second paint is one flip behind, which is what the in-between frame has to replace.** | **The in-between frame is the title's own draw at the lerped pose**, and that is measured too: `PoseBlend` holds each node's twelve words from tick N-1 and writes the midpoint into the assembled buffer at the title's own draw, before the buffer is copied, and **1,415 of 1,415 in-between draws were written in eight seconds on the real title with the tick's own paint held unwritten beside it (1,404 of them)**. With the display stand-in out the blend wrote nothing across 70,152 assemblies, which is the falsifier and the guard it found. See ST-OBJECTS for the coverage, which is 2% to 37% of draws.
 | ST-OBJECTS | Actors, objects, and effects move at the display's rate, each blended by the node
-that is its own identity | partial | **The pose is located, the blend runs on the title, and most of
+that is its own identity | partial | **2026-10-08: the node identity used by every measurement in this row was wrong** -- a single slot read on the Latte thread after later binds; replaced by `CommandStreamIdentity` (75.3% of lookups named, the rest named nothing rather than a wrong node). Retaken with it, `POST /pose` takes 31 of 482 candidates and refuses 390 as shared across objects, so the per-object uniform pose claims below do not hold; the vertex history positions 0 of 2.44M draws. **The pose is located, the blend runs on the title, and most of
 the frame's draws are not in it.** The identity is the **node** (`0x027ff88c` / `0x027ff9c0`, 195,581
 bindings over 590 objects). The pose is **twelve words in the title's assembled uniforms**, at an
 offset that is a property of the shader that read it -- offset 12 in shader `0x1557c18f92f3bcb9` and

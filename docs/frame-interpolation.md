@@ -1182,7 +1182,7 @@ every run.
 
 - **per draw**, and the draw is the title's own -- the objective's "blend at the game's own draw";
 - **writable at exactly one moment**, after the guest's values are read and before the GPU sees them;
-- **already carrying the node's identity** through `ObjectIdentityScope`, which the binder feeds;
+- **already carrying the node's identity** through `CommandStreamIdentity` (see "Draw identity" below);
 - and it needs **no guest memory write at all**, so nothing has to be put back afterwards.
 
 **The mechanism, restated against the measurement.** The host holds, per node, the twelve words the
@@ -1228,6 +1228,39 @@ pointer the range is where the assembled bytes came from.** The data-area scan t
   refuses, and the test enumerates every mode.
 - It is not the OpenGL renderer. The assembly site is the Vulkan renderer's, and OpenGL presents at the
   guest's own rate.
+
+## Draw identity: joined through the command stream
+
+**Owner:** `title/CommandStreamIdentity`. **Inputs:** the binder probe (`UniformBlockCensus`, guest
+thread) calls `bind(node)`, which records the node at GX2's current write position
+(`LatteFrameHooks::GetCommandWritePosition`: buffer start, end and write pointer, host addresses).
+**Output:** `objectAt(packet)` on the Latte thread, where `packet` is the draw packet being executed
+(`UniformAssembly::packet`, `DrawPrepared::packet`, set by `LatteFrameHooks::DrawPacketScope` in the
+command processor's draw handlers). The answer is the last bind written before that packet in the
+same buffer, or zero.
+
+**Why not a slot.** The binder runs while the guest *writes* the command buffer; the draw runs when
+Latte *executes* it, after more binds. The single-slot `ObjectIdentityScope` this replaces returned
+the last bind at execution time. Measured on the title (gameplay, paint mode 13): of 1.83M binds only
+187k were followed by a draw-time read before the next bind, 423k reads came after 2-7 binds and 19k
+after 8-63, so at most ~34% of bound nodes were ever named to a draw and burst draws took a later
+node's identity. Every per-node measurement taken before this change (pose offsets, "per-object"
+refusals, coverage) rests on that misattribution and has to be retaken.
+
+**Invariants.** Records live per buffer; a bind whose write pointer goes backwards restarts that
+buffer; a buffer whose range overlaps a newer one is dropped; at most `kBuffers` (64) are kept. GX2
+submits the guest's buffer by address (`IT_INDIRECT_BUFFER_PRIV`, no copy), so the write pointer and
+the executed packet are the same host addresses.
+
+**Measured after.** 75.3% of draw-time lookups named (4.70M of 6.24M), 0 binds outside a buffer;
+the rest are draws in buffers with no bind (`lookupsWithoutBuffer` 1.42M, `lookupsBeforeFirstBind`
+0.12M). With the correct identity `POST /pose` took 31 of 482 candidates and refused 390 as values
+shared across objects (was 71 of 386 and 210), so the uniform "per-object pose" candidates are
+camera/pass values, not poses. The vertex history still positions no draw (`drawsWithoutPosition`
+equals `drawsSeen`): the attribute census names no per-stride position, which is the next defect.
+
+**Tests:** `tests/cxx/command_stream_identity_tests.cpp`; the census and history tests drive draws
+through `tests/cxx/command_stream.h`.
 
 ## The deleted mechanism, and where its evidence went
 

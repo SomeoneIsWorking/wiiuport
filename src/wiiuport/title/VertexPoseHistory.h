@@ -2,8 +2,8 @@
 
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/RecordingObserver.h"
+#include "wiiuport/title/CommandStreamIdentity.h"
 #include "wiiuport/title/DrawAttributeCensus.h"
-#include "wiiuport/title/ObjectIdentityScope.h"
 
 #include <atomic>
 #include <cstdint>
@@ -45,7 +45,7 @@ class VertexPoseHistory final : public frame::DrawRecordedListener {
     // Four samples taken inside one frame are four samples of one instant, and the first
     // version of the node scan had exactly that fault: "0 moved, delta 0" was
     // indistinguishable from a static field until the schedule was made explicit.
-    VertexPoseHistory(const ObjectIdentityScope* scope, const DrawAttributeCensus* attributes,
+    VertexPoseHistory(const CommandStreamIdentity* identity, const DrawAttributeCensus* attributes,
                       const std::atomic<uint64_t>* frames);
 
     // The frame counter, once the paint path exists to give one. Separate from the constructor
@@ -179,7 +179,7 @@ class VertexPoseHistory final : public frame::DrawRecordedListener {
                       uint64_t* outOfRange, uint32_t* stride, uint32_t* vertices) const;
     static const char* nameOf(Verdict verdict);
 
-    const ObjectIdentityScope* m_scope = nullptr;
+    const CommandStreamIdentity* m_identity = nullptr;
     const DrawAttributeCensus* m_attributes = nullptr;
     const std::atomic<uint64_t>* m_frames = nullptr;
     std::atomic<uint64_t> m_drawsSeen{0};
