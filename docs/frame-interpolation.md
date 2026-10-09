@@ -549,6 +549,14 @@ blends over 202 ticks, 9 respawned, 2 wrapped, 0 unblendable, unreadable or fail
 write restored; whole-frame pixels changed between presents, off `7920, 11, 9116, 0`, on `6364,
 4278, 7388, 5266`.
 
+**Material animation, found so far.** HD's `J3DFrameCtrl` has no vtable and is reordered: rate f32
+`+0`, frame f32 `+4`, start s16 `+8`, end s16 `+0xa`, loop s16 `+0xc`, attribute u8 `+0xe`, state u8
+`+0xf`. `init` `0x027f2bc0`, `update` `0x027f2fc4`, `checkPass` `0x027f2bf8`; `0x025e742c` is the
+360-caller `update`-then-`isStop` (`mDoExt_baseAnm::play`). Not yet found: HD's `mDoExt_b{tk,rk,pk}Anm::entry`
+(TWW's `mpAnm->setFrame(frame)` shape, `stfs f1,0x8(anm)`, does not occur), which is where a draw
+phase's material frame could be set to the midpoint; joint (`bck`) controllers go through the same
+`play`, so a blend at the controller would double the pose blend for models calculated in the draw.
+
 Not interpolated, so still stepping at the tick rate: anything a draw method takes from state other
 than these inputs (material and texture animation; a particle's rotation, scale and colour; the sea's
 texture scroll, held to one step a tick), and camera cuts
