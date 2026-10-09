@@ -37,7 +37,7 @@ const char* const kRoutes =
     "GET /counters, GET /capture, "
     "GET /controllers, GET /setup, "
     "GET /recordings, GET /draws, GET /memory, GET /callers, "
-    "GET /interpolation, GET /particles, "
+    "GET /interpolation, GET /particles, GET /sea, "
     "GET /paint, GET /logic, GET /gate, "
     "POST /capture, POST /pacing, "
     "POST /draws, POST /recordings, POST /paint, POST /logic, POST /interpolation, POST /input "
@@ -142,7 +142,8 @@ ControlChannel::ControlChannel(const Sources& sources)
     : m_recorder(sources.recorder), m_input(sources.input), m_capture(sources.capture),
       m_shapeLog(sources.shapeLog), m_callers(sources.callers), m_paint(sources.paint),
       m_drawInterpolation(sources.drawInterpolation),
-      m_particleInterpolation(sources.particleInterpolation), m_logic(sources.logic),
+      m_particleInterpolation(sources.particleInterpolation),
+      m_seaInterpolation(sources.seaInterpolation), m_logic(sources.logic),
       m_guestBytes(sources.guestBytes), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
       m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
 }
@@ -677,6 +678,9 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
     }
     if (request.path() == "/particles") {
         return lucent::http::Response::json(200, "OK", m_particleInterpolation.json());
+    }
+    if (request.path() == "/sea") {
+        return lucent::http::Response::json(200, "OK", m_seaInterpolation.json());
     }
     if (request.path() == "/interpolation") {
         return lucent::http::Response::json(200, "OK", m_drawInterpolation.json());

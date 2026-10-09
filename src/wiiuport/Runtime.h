@@ -15,6 +15,7 @@
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/ParticleInterpolation.h"
+#include "wiiuport/title/SeaInterpolation.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
 namespace wiiuport {
@@ -98,6 +99,8 @@ class Runtime {
         {.registerProbe = &GuestCallProbes::Register,
          .readWords = &GuestPatching::ReadWords,
          .writeWords = &GuestPatching::WriteDataWords}};
+    title::SeaInterpolation m_seaInterpolation{
+        {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
     title::DrawInterpolation m_drawInterpolation{{.registerProbe = &GuestCallProbes::Register,
                                                   .readWords = &GuestPatching::ReadWords,
                                                   .writeWords = &GuestPatching::WriteDataWords,
@@ -105,7 +108,8 @@ class Runtime {
                                                       [this] {
                                                           return m_logic.enabled();
                                                       },
-                                                  .midPaint = &m_particleInterpolation}};
+                                                  .midPaint = {&m_particleInterpolation},
+                                                  .drawPhase = {&m_seaInterpolation}}};
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
     frame::PresentPacing m_scanOut{&frame::PresentPacing::Clock::now};
@@ -120,6 +124,7 @@ class Runtime {
         .paint = m_paint,
         .drawInterpolation = m_drawInterpolation,
         .particleInterpolation = m_particleInterpolation,
+        .seaInterpolation = m_seaInterpolation,
         .logic = m_logic,
         .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,

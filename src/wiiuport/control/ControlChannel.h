@@ -16,6 +16,7 @@
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/ParticleInterpolation.h"
+#include "wiiuport/title/SeaInterpolation.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
 #include <atomic>
@@ -68,6 +69,7 @@ class ControlChannel {
         title::WindWakerPaint& paint;
         title::DrawInterpolation& drawInterpolation;
         const title::ParticleInterpolation& particleInterpolation;
+        const title::SeaInterpolation& seaInterpolation;
         title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
@@ -192,6 +194,7 @@ class ControlChannel {
     title::WindWakerPaint& m_paint;
     title::DrawInterpolation& m_drawInterpolation;
     const title::ParticleInterpolation& m_particleInterpolation;
+    const title::SeaInterpolation& m_seaInterpolation;
     title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;
