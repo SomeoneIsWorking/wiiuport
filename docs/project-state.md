@@ -11,11 +11,12 @@ every per-node measurement below that predates 2026-10-08 is suspect and is bein
 correct identity the uniform candidates are shared across objects (390 of 482 refused as shared),
 so the pose is not in the assembled uniforms. RE of the uniform uploads settles where it is
 (`docs/frame-interpolation.md` "Where the pose is"): the model renderer uploads only projection, view
-(key 1, `ctx+0x70`) and material constants; static geometry is in world space and moves only with
-the view; moving models are CPU-transformed into `ca2d0854ee6b264d`'s positions, rewritten every
-frame. The view is blended at the register file (`title/ViewBlend`, `GET /view`: 2,673 lerps,
-2,565 moving, walking with the gate on) and the CPU-written quads at the draw (`title/QuadBlend`,
-`GET /quads`: 5,007 blends, all moving, one per object per tick). The low headless paint rate is not the
+(key 1, `ctx+0x70`, a per-draw model-view) and material constants; the CPU-written quads are
+`ca2d0854ee6b264d`'s positions, rewritten every frame. The quads are blended at the draw
+(`title/QuadBlend`, `GET /quads`: 5,007 blends, all moving, one per object per tick). The view
+blend is retired: it held key 1 per context, but key 1 is a model-view (~30 per paint per context),
+so it paired unrelated matrices and broke the HUD on in-between paints. Blending key 1 needs each
+upload's object identity, which is open. The low headless paint rate is not the
 gate's: unmodded paints at the same rate, and `perf` put 29% of the product's samples in the retired
 `UniformBlockAddress` instrument on the Latte thread (deleted; 7 to 12-15 paints/s unmodded). The
 rest of the always-on census family (`ObjectPoseLocator`, `UniformBlockCensus` binders,

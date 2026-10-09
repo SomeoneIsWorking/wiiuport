@@ -16,7 +16,6 @@ void runGlobalPoseCensusTests();
 void runObjectPoseLocatorTests();
 void runPoseByShaderTests();
 void runPoseBlendTests();
-void runViewBlendTests();
 void runQuadBlendTests();
 void runNodePoseLocatorTests();
 void runJsonBodyTests();

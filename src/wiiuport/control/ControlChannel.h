@@ -20,7 +20,6 @@
 #include "wiiuport/title/PoseByShader.h"
 #include "wiiuport/title/QuadBlend.h"
 #include "wiiuport/title/UniformBlockCensus.h"
-#include "wiiuport/title/ViewBlend.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
 #include <atomic>
@@ -85,7 +84,6 @@ class ControlChannel {
         // The blend the table feeds, so a caller that armed the table can see whether any
         // draw was actually blended rather than having to ask a second route.
         const title::PoseBlend& poseBlend;
-        const title::ViewBlend& viewBlend;
         const title::QuadBlend& quadBlend;
         title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
@@ -235,7 +233,6 @@ class ControlChannel {
     title::GlobalPoseCensus& m_globalPose;
     title::PoseByShader& m_poseByShader;
     const title::PoseBlend& m_poseBlend;
-    const title::ViewBlend& m_viewBlend;
     const title::QuadBlend& m_quadBlend;
     title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;

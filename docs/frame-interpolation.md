@@ -1269,7 +1269,7 @@ one frame, so every node reads `unpairedShapes` or `identical`. That sampling is
 **Tests:** `tests/cxx/command_stream_identity_tests.cpp`; the census and history tests drive draws
 through `tests/cxx/command_stream.h`.
 
-## Where the pose is: the view in ALU constants, moving models in vertex bytes
+## Where the pose is: model-views in ALU constants, CPU quads in vertex bytes
 
 The model renderer's vertex constants come from a 200-byte shader context (constructor
 `0x02873d70`): a 4x4 at `+0x00`, 3x4s at `+0x40` and `+0x70`, the bound program at `+0xa8`.
@@ -1279,39 +1279,36 @@ its register.
 | key | uploaded by | what |
 |---|---|---|
 | 0 | `0x02874038`, 16 words from `ctx+0x00` | projection: 1 distinct value per window |
-| 1 | `0x02874074`, 12 words from `ctx+0x70` | view: ~1 value per few frames per context in gameplay |
+| 1 | `0x02874074`, 12 words from `ctx+0x70` | model-view: ~30 distinct values per paint per context |
 | 2-7, 0x11 | `0x0288285c` | material: texgen rows, colours |
 | 9, 0xe-0x10 | `0x02880f1c` | texture matrices |
 
-Key 1 is uploaded only while `ctx+0xb6` is clear, and `0x028740e4` (program change) is the only
-gameplay writer that clears it. Gameplay uses 3-4 contexts. **There is no per-object model matrix in
-these constants.** Static geometry (`6669a23d03806414`, `6a3a79e768f17158`, `48d25cda84f07f19`, ...)
-is stored in world space and reads unchanged vertex bytes every frame while the camera moves, so it
-needs the view blended and nothing else. Moving models are transformed on the CPU:
-`ca2d0854ee6b264d` (~72 draws a frame) rewrites its `32_32_32_FLOAT` positions every frame and no
-other attribute (`POST /draws?frames=60`, standing and walking).
+Key 1 is uploaded only while `ctx+0xb6` is clear, and `0x028740e4` (program change, from the
+material set `0x02883ab4`) is the only gameplay writer that clears it; the upload runs inside the
+material applies `0x02880f1c` and `0x02880e90`. **Key 1 is a model-view, not the camera's view.**
+One context uploads about 30 distinct matrices a paint, often in runs of 3-4; HUD and 2D elements
+carry translation z = -989.1. No static store to `ctx+0x70` exists in the renderer
+(`0x02870000`-`0x028c0000`); `0x0288285c` only reads it, so it is written through a pointer and
+which object it belongs to is not known. `CommandStreamIdentity` does not name these uploads: its
+node changes every 4 uploads, unrelated to the matrices.
 
-So the blend has two parts, neither per-object uniform: the **view** (key 1, one value for the
-frame) and **CPU-written positions** (`ca2d0854ee6b264d`'s vertex buffers, paired across ticks).
-The `PoseByShader` per-object uniform search cannot find either and its refusals ("shared") are the
-view.
+Static geometry (`6669a23d03806414`, `6a3a79e768f17158`, `48d25cda84f07f19`, ...) is stored in
+world space and reads unchanged vertex bytes every frame while the camera moves. Moving particles,
+sea waves and sky clouds are CPU-written into `ca2d0854ee6b264d`'s positions every frame
+(`POST /draws?frames=60`, standing and walking). The `PoseByShader` per-object uniform search
+refuses key 1 as "shared" because the same registers carry every object's model-view.
 
-### The view blend
+### The view blend: retired
 
-**Owner:** `title/ViewBlend`. The probe on `uploadView` runs on the display thread: unless
-`ctx+0xb6` is set it records GX2's write position (the packet the upload will become), the context
-and `WindWakerPaint::inBetweenPaint()`. On the Latte thread the fork hands every `IT_SET_ALU_CONST`
-packet to `OnAluConstants` after its values reach the register file; the matching packet is the
-view. On the tick's own paint the view is held for its context; on the in-between paint the twelve
-registers are replaced by `interp::midpoint(held, view)`, so every draw after the upload reads the
-blended view whatever its uniform mode. The parity is taken at the probe, because the display
-thread can start the next paint before Latte executes this one's packets.
-
-**Measured** (gameplay, paint mode 13, `POST /logic?on=1`, walking): 25,033 calls, 22,533 packets
-matched, 0 of another size; 19,860 held and 2,673 lerped across 4 contexts, of which 2,565 moved
-(the two ends differed), so the gate's tick lands before the in-between paint. About 1% of uploads
-are still in flight at any sample. With the gate on this headless run painted ~3 times a second
-against ~30 with it off; that rate is the gate's, not the blend's.
+A blend of key 1 per context, holding the tick's own upload and writing the midpoint at the
+register file on the in-between paint, paired unrelated model-views: on in-between paints the
+hearts moved and HUD fragments were drawn in the world (`POST /paint` mode 13, gate on, walking),
+and with the blend off the HUD was intact while the quad blend still ran. It was deleted with the
+fork's `OnAluConstants` hook. Blending key 1 needs the identity of the object whose model-view each
+upload carries, which is open: `0x02874d54` calls `0x02880f1c` with its object at `+0x3c`, but the
+callers of `0x02880e90` (`0x02879694`, `0x02879d60`, `0x0287a6b8`, `0x0287b8d4`, `0x0287be14`,
+`0x0287c740`, `0x0287cc80`) pass stack matrices, and who fills `ctx+0x70` needs a runtime watch on
+the address.
 
 ### The quad blend
 

@@ -117,14 +117,6 @@ void RecordingObserver::OnRuntimeSubmission(const LatteFrameHooks::SubmissionSum
     }
 }
 
-bool RecordingObserver::OnAluConstants(const LatteFrameHooks::AluConstants& constants) {
-    bool rewritten = false;
-    for (AluConstantsListener* listener : m_aluConstantsListeners) {
-        rewritten |= listener->onAluConstants(constants);
-    }
-    return rewritten;
-}
-
 void RecordingObserver::OnFrameComplete() {
     m_framesObserved++;
     m_vertexChanges.onFrameComplete();
