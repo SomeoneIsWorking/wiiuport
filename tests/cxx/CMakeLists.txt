@@ -15,6 +15,7 @@ add_executable(wiiuport_tests
   pose_blend_tests.cpp
   quad_blend_tests.cpp
   buffered_blocks_tests.cpp
+  guest_call_probe_tests.cpp
   pose_by_shader_tests.cpp
   pose_locator_tests.cpp
   paint_tests.cpp
