@@ -37,3 +37,10 @@ rather than work around it by reusing a directory.
   place the fault outside this fork entirely.
 - Whether a fresh *real* user-data directory crashes, or only one built by the
   harness.
+
+## Second symptom (2026-10-09)
+
+The first run in a fresh `scratch/drawphase/` stopped at boot with signal 5: `cemu_assert(false)` in
+`VulkanRenderer::draw_execute_continued` (`VulkanRendererCore.cpp:1770`, no active vertex
+descriptor set), from `LatteCP_processCommandBuffer_continuousDrawPass`. The next three runs in the
+same directory, same binary, reached gameplay.

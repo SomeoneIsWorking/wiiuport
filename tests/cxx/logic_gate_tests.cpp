@@ -100,7 +100,11 @@ LogicGate makeGate(FakeGuest& guest) {
     g_probe = nullptr;
     g_registrations.clear();
     g_resume = 0;
-    return LogicGate(&keepRegistration, &allocateCode, &allocateData, &writeWord, &readWord);
+    return LogicGate({.registerProbe = &keepRegistration,
+                      .allocateCode = &allocateCode,
+                      .allocateData = &allocateData,
+                      .writeWord = &writeWord,
+                      .readWord = &readWord});
 }
 
 // The moment the fork reports the title is linked, which is where the gate's
@@ -124,8 +128,6 @@ constexpr uint32_t kBranchAt = kBlock + 4 * LogicGate::kBranchWord;
 // the displacement from the block rather than an absolute address, because the block's address is
 // chosen at link time.
 constexpr uint32_t kPassThroughAt = (18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu);
-
-} // namespace
 
 // The report is read by a JSON parser and by nothing else, so "it has the field"
 // is not the claim: "it parses" is. One unquoted word -- which `raw` writes
@@ -154,22 +156,24 @@ void theReportParsesAsJson() {
                   "and the body is one object that ends");
 }
 
+} // namespace
+
 void wiiuport::tests::runLogicGateTests() {
     theReportParsesAsJson();
     // The gate's words, one at a time, because every one is lifted from the
     // title and a payload this size is mostly the cost of being sure.
     {
-        const auto words = LogicGate::payload(kBlock, kCounters);
-        check::isTrue(words.size() == LogicGate::kGateWords, "the gate is fourteen words");
+        const auto words = LogicGate::payload({.code = kBlock, .counters = kCounters});
+        check::isTrue(words.size() == LogicGate::kGateWords, "the gate is thirty-two words");
         if (words.size() != LogicGate::kGateWords) {
             return;
         }
         // In the data block, which is where the payload counts and where the
         // report says the counters are.
-        const uint32_t calls = kCallsAt;
-        const uint32_t ticks = kTicksAt;
-        const uint32_t through = kThroughAt;
-        const uint32_t branchAt = kBranchAt;
+        uint32_t calls = kCallsAt;
+        uint32_t ticks = kTicksAt;
+        uint32_t through = kThroughAt;
+        uint32_t branchAt = kBranchAt;
         // Every word below is written as opcode, then source in bits 21-25, then
         // destination in bits 16-20, then the immediate -- the order the
         // encodings actually have. The two that were got wrong first time are
@@ -201,11 +205,11 @@ void wiiuport::tests::runLogicGateTests() {
         // 0x0274c964 all carry 0x4082....
         {
             const uint32_t branch = words[6];
-            const uint32_t opcode = branch >> 26;
-            const uint32_t bo = (branch >> 21) & 0x1fu;
-            const uint32_t bi = (branch >> 16) & 0x1fu;
-            const uint32_t absolute = (branch >> 11) & 1u;
-            const uint32_t link = branch & 1u;
+            uint32_t opcode = branch >> 26;
+            uint32_t bo = (branch >> 21) & 0x1fu;
+            uint32_t bi = (branch >> 16) & 0x1fu;
+            uint32_t absolute = (branch >> 11) & 1u;
+            uint32_t link = branch & 1u;
             check::isTrue(opcode == 16u,
                           "the branch that skips is a conditional branch, opcode 16");
             check::isTrue(bo == 4u, "with BO=4, which branches when the bit BI names is false");
@@ -221,9 +225,9 @@ void wiiuport::tests::runLogicGateTests() {
                 "and the word is the title's own bne with the displacement to the through "
                 "path, which is 0x4082....");
         }
-        // A skipped call returns with the link register as the caller left it:
-        // the gate has not touched r0 or r1 on this path.
-        check::isTrue(words[7] == 0x4e800020, "and a skipped call returns: blr");
+        auto skippedDisplacement = static_cast<uint32_t>(4 * (LogicGate::kSkippedDrawWord - 7));
+        check::isTrue(words[7] == ((18u << 26) | (skippedDisplacement & 0x03fffffcu)),
+                      "and a skipped call branches to the skipped draw");
         // The through path begins *after* that return, and the ticks counter is
         // in it. It used to be on the skipped path, so the count the report calls
         // ticks counted the calls that did not run -- and a gate letting every
@@ -262,24 +266,54 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(LogicGate::kBranchWord == 13, "the branch stands at word thirteen");
         check::isTrue(LogicGate::kThroughWord < LogicGate::kBranchWord,
                       "and the through path starts before it, so the path is what the branch ends");
-        const uint32_t landed = branchAt + ((words[13] & 0x03fffffcu));
+        uint32_t landed = branchAt + ((words[13] & 0x03fffffcu));
         check::isTrue(landed == LogicGate::kTickBody,
                       "read back the way the guest would, the branch lands on the tick's own "
                       "second instruction and nowhere else");
+    }
+    // A skipped call runs MtxInit and fpcDw_Handler(fpcM_DrawIterater, fpcM_Draw) in a
+    // frame of its own, saving the link register the stub's `mflr r0` left in r0.
+    {
+        const auto words = LogicGate::payload({.code = kBlock, .counters = kCounters});
+        size_t at = LogicGate::kSkippedDrawWord;
+        const auto loads = [&words](size_t index, uint32_t reg, uint32_t address) {
+            return words.at(index) == (0x3c000000u | (reg << 21) | (address >> 16)) &&
+                   words.at(index + 1) ==
+                       (0x60000000u | (reg << 21) | (reg << 16) | (address & 0xffffu));
+        };
+        check::isTrue(words.size() == at + 18,
+                      "the skipped draw is the gate's last eighteen words");
+        if (words.size() != at + 18) {
+            return;
+        }
+        check::isTrue(words[at] == 0x9421fff0 && words[at + 1] == 0x90010014,
+                      "it opens a frame and saves the caller's link register");
+        check::isTrue(loads(at + 2, 12, 0x0200fac4) && words[at + 4] == 0x7d8903a6 &&
+                          words[at + 5] == 0x4e800421,
+                      "calls MtxInit through r12");
+        check::isTrue(loads(at + 6, 3, 0x025df908) && loads(at + 8, 4, 0x025de2cc),
+                      "passes fpcM_DrawIterater and fpcM_Draw");
+        check::isTrue(loads(at + 10, 12, 0x025de37c) && words[at + 12] == 0x7d8903a6 &&
+                          words[at + 13] == 0x4e800421,
+                      "to fpcDw_Handler");
+        check::isTrue(words[at + 14] == 0x80010014 && words[at + 15] == 0x7c0803a6 &&
+                          words[at + 16] == 0x38210010 && words[at + 17] == 0x4e800020,
+                      "and returns to the caller through the saved link register");
     }
     // The pass-through control has to reach the same instruction the gate's own
     // through path does. The indirect flavour used to load the *block's* address,
     // which branches the payload to itself: a loop with no exit, measured as the
     // display painting 0 times in an 8-second window.
     {
-        const auto direct = LogicGate::throughPayload(kBlock, 1);
+        const auto direct = LogicGate::throughPayload(kBlock, LogicGate::Through::Direct);
         check::isTrue(direct.size() == 1, "the direct pass-through is one word");
         check::isTrue(direct.size() == 1 &&
                           direct[0] ==
                               ((18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu)),
                       "and it branches to the tick's own second instruction");
         for (int flavour = 1; flavour <= 2; flavour++) {
-            const auto words = LogicGate::throughPayload(kBlock, flavour);
+            const auto words =
+                LogicGate::throughPayload(kBlock, static_cast<LogicGate::Through>(flavour));
             check::isTrue(!words.empty(), "the pass-through control is built");
             if (words.empty()) {
                 continue;
@@ -288,9 +322,8 @@ void wiiuport::tests::runLogicGateTests() {
             // The direct form is a primary branch: the target is the block plus
             // its displacement. The indirect form loads the address in two
             // instructions, so the target is the half in each of them.
-            const uint32_t target = (flavour == 1)
-                                        ? kBlock + (words[0] & 0x03fffffc)
-                                        : ((words[0] & 0xffffu) << 16) | (words[1] & 0xffffu);
+            uint32_t target = (flavour == 1) ? kBlock + (words[0] & 0x03fffffc)
+                                             : ((words[0] & 0xffffu) << 16) | (words[1] & 0xffffu);
             check::isTrue(target != kBlock,
                           "no pass-through flavour branches to the block it lives in, which "
                           "would be a loop with no exit");
@@ -302,7 +335,7 @@ void wiiuport::tests::runLogicGateTests() {
     // A block the tick and the gate cannot both reach is refused rather than
     // written with a displacement that lands elsewhere.
     {
-        check::isTrue(LogicGate::payload(0x40000000, kCounters).empty(),
+        check::isTrue(LogicGate::payload({.code = 0x40000000, .counters = kCounters}).empty(),
                       "a gate too far from the tick is refused");
     }
     // Installing, and putting it back.
@@ -335,7 +368,7 @@ void wiiuport::tests::runLogicGateTests() {
                           word == ((18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu)),
                       "and the gate's block is a bare pass-through to the tick's own body before "
                       "the gate is ever enabled");
-        const uint32_t passThrough = kPassThroughAt;
+        uint32_t passThrough = kPassThroughAt;
         check::isTrue(gate.enable().empty(), "the gate installs");
         check::isTrue(readWord(kBlock, word) && word != passThrough,
                       "and enabling it puts the counting payload there instead of the "
@@ -345,7 +378,8 @@ void wiiuport::tests::runLogicGateTests() {
         // first cannot reach the gate at all -- the second enable answers "already
         // on" -- and the report says the gate is in while the block holds the
         // control, which is a measurement of the control called a gate.
-        const std::vector<uint32_t> counting = LogicGate::payload(kBlock, kCounters);
+        const std::vector<uint32_t> counting =
+            LogicGate::payload({.code = kBlock, .counters = kCounters});
         check::isTrue(gate.enable().empty(), "enabling it again is not a refusal");
         check::isTrue(readWord(kBlock, word) && word == counting[0],
                       "and leaves the same payload in place");

@@ -82,7 +82,15 @@ class LogicGate {
     // a single word, and one is not one when it is six.
     static constexpr size_t kThroughWord = 8;
     static constexpr size_t kBranchWord = 13;
-    static constexpr size_t kGateWords = 14;
+    // A skipped call runs the draw phase alone, so the in-between paint is drawn from the
+    // tick's state by the title's own draw methods.
+    static constexpr size_t kSkippedDrawWord = 14;
+    static constexpr size_t kGateWords = 32;
+    // fpcM_Management's draw half: MtxInit, then fpcDw_Handler(fpcM_DrawIterater, fpcM_Draw).
+    static constexpr uint32_t kMatrixInit = 0x0200fac4;
+    static constexpr uint32_t kDrawHandler = 0x025de37c;
+    static constexpr uint32_t kDrawIterator = 0x025df908;
+    static constexpr uint32_t kDrawProcess = 0x025de2cc;
     // The code block holds only the sixteen instructions; the two counters the
     // guest writes are in a block of their own, in memory it may write.
     static constexpr size_t kBlockWords = kGateWords;
@@ -116,8 +124,26 @@ class LogicGate {
     // For the report: the call the gate replaced, and the counter's address.
     using Where = std::string (*)();
 
-    LogicGate(Register registerProbe, AllocateCode allocateCode, AllocateData allocateData,
-              WriteWord writeWord, ReadWord readWord);
+    struct Seams {
+        Register registerProbe;
+        AllocateCode allocateCode;
+        AllocateData allocateData;
+        WriteWord writeWord;
+        ReadWord readWord;
+    };
+
+    // The gate's two blocks: instructions the guest executes and counters it writes.
+    struct Memory {
+        uint32_t code = 0;
+        uint32_t counters = 0;
+    };
+
+    enum class Through : uint8_t {
+        Direct = 1,
+        Counter = 2
+    };
+
+    explicit LogicGate(Seams seams);
 
     // Registers the probe, which is also the moment the title's modules are
     // linked and the gate's memory can be taken.
@@ -136,7 +162,7 @@ class LogicGate {
     // The pass-through control: a payload of one word (direct branch) or four
     // (through the count register) that does nothing but let the tick run. Which
     // one is the experiment, and the census is the observer.
-    static std::vector<uint32_t> throughPayload(uint32_t blockAddress, int flavour);
+    static std::vector<uint32_t> throughPayload(uint32_t blockAddress, Through flavour);
 
     // Puts the gate's block back to its pass-through word, so the tick runs on
     // every call again. The title's own code is not touched: the probe holds the
@@ -160,7 +186,7 @@ class LogicGate {
     // Sixteen words for `blockAddress` to branch to, counting in
     // `countersAddress`: two addresses because the two are different kinds of
     // memory, instructions the guest executes and words it writes.
-    static std::vector<uint32_t> payload(uint32_t blockAddress, uint32_t countersAddress);
+    static std::vector<uint32_t> payload(Memory memory);
 
     std::string json() const;
 
