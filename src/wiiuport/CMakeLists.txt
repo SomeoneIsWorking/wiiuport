@@ -70,6 +70,8 @@ add_library(wiiuport STATIC
   title/NodePoseLocator.h
   title/UniformBlockRing.cpp
   title/UniformBlockRing.h
+  title/BufferedBlocks.cpp
+  title/BufferedBlocks.h
   title/QuadBlend.cpp
   title/QuadBlend.h
   title/VertexComponent.cpp

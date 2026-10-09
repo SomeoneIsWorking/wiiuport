@@ -83,6 +83,7 @@ struct Fixture {
     // Armed with the table it reads, because a blend with no table leaves every draw alone
     // and the route test would be reporting a blend that cannot happen.
     wiiuport::title::PoseBlend poseBlend{poseByShader};
+    wiiuport::title::BufferedBlocks bufferedBlocks{&noRegistration, &noGuestBytes};
     wiiuport::title::QuadBlend quadBlend{writers, [] {
                                              return false;
                                          }};
@@ -111,6 +112,7 @@ struct Fixture {
         .poseByShader = poseByShader,
         .poseBlend = poseBlend,
         .quadBlend = quadBlend,
+        .bufferedBlocks = bufferedBlocks,
         .logic = logic,
         .guestBytes = &noGuestBytes,
         .snapshot = snapshot,
@@ -444,6 +446,7 @@ void everyReportIsOneJsonDocument() {
                                                           {"GET", "/gate"},
                                                           {"GET", "/blocks"},
                                                           {"GET", "/quads"},
+                                                          {"GET", "/buffered"},
                                                           {"POST", "/pacing"},
                                                           {"POST", "/pose"}}) {
         lucent::http::Request read;

@@ -17,6 +17,7 @@ void runObjectPoseLocatorTests();
 void runPoseByShaderTests();
 void runPoseBlendTests();
 void runQuadBlendTests();
+void runBufferedBlocksTests();
 void runNodePoseLocatorTests();
 void runJsonBodyTests();
 void runCommandStreamIdentityTests();
