@@ -317,11 +317,9 @@ LatteFrameHooks::DrawPrepared preparedDraw(uint64_t vertexShader, bool vertexUni
     return draw;
 }
 
-// Hands a draw to the observer as the fork does, with nowhere for new
-// vertices to go.
+// Hands a draw to the observer as the fork does.
 void prepare(RecordingObserver& observer, const LatteFrameHooks::DrawPrepared& draw) {
-    LatteFrameHooks::VertexReplacements replacements;
-    observer.OnDrawPrepared(draw, replacements);
+    observer.OnDrawPrepared(draw);
 }
 
 void aDrawWhoseVertexShaderReadsNoUniformsIsCountedAsOneNoBlendMoves() {

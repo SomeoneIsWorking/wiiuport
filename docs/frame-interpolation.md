@@ -1349,29 +1349,24 @@ the hearts moved and HUD fragments were drawn in the world (`POST /paint` mode 1
 walking). It was deleted with the fork's `OnAluConstants` hook. Key 1 was never the camera; a pane
 blend would key on the pane at `LoadMtx`.
 
-### The quad blend
+### The CPU-written quads: writers
 
-**Owner:** `title/QuadBlend`, fed by `guest/BufferWriters`. `ca2d0854ee6b264d`'s draws are the
-quads the particle, sea-wave and sky-cloud writers fill on the CPU each paint: four corners at stride
-20, a big-endian `32_32_32_FLOAT` position then 8 bytes of UV, in one of the object's two
-alternating buffers. Each write is recorded with the same object's write before it. At the draw, the
-fork's `OnDrawPrepared` offers the buffers with the vertex count read by index (Latte's read size,
-92 bytes for a quad, would make a fifth vertex of the UVs); the blend hands back a copy whose
-positions are `interp::midpoint(before, now)`, and the guest's buffer is not written.
+`ca2d0854ee6b264d`'s draws are quads the particle, sea-wave and sky-cloud writers fill on the CPU each
+paint: four corners at stride 20, a big-endian `32_32_32_FLOAT` position then 8 bytes of UV, in one of
+the object's two alternating buffers. 3D lines are stride 152, 10-12 vertices. The writers, for the
+game-side blend of each:
 
-With the gate in, the title writes the same bytes on both paints of a tick. **The write that changes
-an object's bytes is the tick's first, and is blended; the repeat is drawn as written.** Paint parity
-does not say which paint that is: in one run of four the quads' in-between writes repeated the own
-paint's while the view's moved, so the gated tick landed between the paint's quad writes and its view
-upload. In that phase the quads trail the view by one paint. A particle's age is the same on both
-writes of a tick, so `GuestObject::continuesAs` takes an equal age as the same object.
+| writer | guest | what |
+|---|---|---|
+| particle commit | `0x02825158` | called by the ripple draw and every JPA draw executor; vertex store `+0xe0`, buffer stride `0x254`, flip `+0x950` |
+| vertex-buffer flush | `0x027b5e94` (`lwz r12,0x140(r3)`) | buffer vertices at `+0x140` |
+| sea waves | flush returns to `0x02575488` | packet in r30, wave index in r23, waves at `+0xa0` stride `0x38`, counter `+0x24` |
+| sky clouds | flush returns to `0x02576ff4`, `0x02577040` | flip in r31, card buffer stride `0x254` |
+| 3D lines | double-buffer helper `0x027ff1d8` (`stwu r1,-0x20(r1)`), returns `0x025edb2c`, `0x025ed110` | |
 
-3D lines (stride 152, 10-12 vertices, a second three-float attribute) are longer than the 80 bytes a
-write is checked by and are refused as `longerThanWritten`.
-
-**Measured** (gameplay, mode 13, gate on, standing then walking, gated period): 5,007 blends, all
-moved; 4,992 repeats; 32 first sights; 12,456 line buffers refused; 0 without a position, ambiguous
-or unblendable.
+A GPU-side quad blend (`title/QuadBlend`, fed by probes on the three writers) blended the copy of each
+buffer at the draw. It was deleted with the fork's vertex-replacement hook: it is the wrong side of the
+game for the reason below, and blending a written vertex cannot tell what the writer derived it from.
 
 Evidence: the GX2 HLE's caller histogram (`GX2SetVertexUniformReg` link register, offset, size,
 distinct values; a temporary fork-side counter, not kept). A Ghidra caller search by the name
@@ -1383,8 +1378,7 @@ renderer, whose calls go to the import stub `0x028fadac`.
 Direction: the in-between picture is drawn by the title's own draw phase, run a second time with
 midpoint inputs, rather than blended per value at the GPU. A GPU-side blend only covers the values
 it identifies (the view block also carries view-space lights; billboards, culling and particles are
-derived in game code), and it cannot list what it missed. The quad blend above is GPU-side and is to
-be replaced by this.
+derived in game code), and it cannot list what it missed.
 
 The tick is TWW's `fpcM_Management` (`f_pc_manager.cpp`), which already separates advancing the
 world from deriving its picture:

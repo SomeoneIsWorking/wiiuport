@@ -34,7 +34,6 @@ Runtime::Runtime() : m_capture(&requestFrameCapture) {
     // arithmetic.
     m_poseBlend.setPaint(&m_paint);
     m_recorder.addAssemblyBeforeDrawListener(&m_poseBlend);
-    m_recorder.setVertexReplacer(&m_quadBlend);
     m_recorder.addDisplayedListener(&m_pacing);
     m_recorder.addScanOutListener(&m_scanOut);
     m_recorder.addFrameEndListener(&m_shapeLog);
@@ -56,9 +55,6 @@ void Runtime::installHooks() {
     }
     LatteFrameHooks::SetObserver(&m_recorder);
     VPADInputHooks::SetSource(&m_input);
-    m_particleProbe.install();
-    m_environmentProbe.install();
-    m_lineProbe.install();
     m_bufferedBlocks.install();
     m_drawInterpolation.install();
     // The frame counter, wired before the install: the locator samples an object once per

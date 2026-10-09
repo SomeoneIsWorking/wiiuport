@@ -13,7 +13,6 @@ add_executable(wiiuport_tests
   command_stream_identity_tests.cpp
   vertex_component_tests.cpp
   pose_blend_tests.cpp
-  quad_blend_tests.cpp
   buffered_blocks_tests.cpp
   draw_interpolation_tests.cpp
   guest_call_probe_tests.cpp
@@ -22,7 +21,6 @@ add_executable(wiiuport_tests
   paint_tests.cpp
   frame_tests.cpp
   input_tests.cpp
-  buffer_writers_tests.cpp
   capture_tests.cpp
   selection_tests.cpp
   product_tests.cpp

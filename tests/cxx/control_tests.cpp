@@ -75,7 +75,6 @@ struct Fixture {
     wiiuport::input::InputDriver input;
     wiiuport::frame::FrameCapture capture{&refuseCapture};
     wiiuport::frame::FrameShapeLog shapeLog;
-    wiiuport::guest::BufferWriters writers;
     wiiuport::guest::CallerCensus callers{&noRegistration, &noGuestBytes};
     wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord, &noReadWords};
     wiiuport::title::ObjectPoseLocator poses;
@@ -88,9 +87,6 @@ struct Fixture {
                                                           .readWords = &noReadWords,
                                                           .writeWords = nullptr,
                                                           .gated = nullptr}};
-    wiiuport::title::QuadBlend quadBlend{writers, [] {
-                                             return false;
-                                         }};
     // The data-area scan, with readers that refuse: a channel built with readers that say no is how
     // every refusal in this file is exercised, and a scan wired with a reader that answers would
     // never reach the refusal it exists to report.
@@ -118,7 +114,6 @@ struct Fixture {
         .globalPose = globalPose,
         .poseByShader = poseByShader,
         .poseBlend = poseBlend,
-        .quadBlend = quadBlend,
         .bufferedBlocks = bufferedBlocks,
         .drawInterpolation = drawInterpolation,
         .logic = logic,
@@ -453,7 +448,6 @@ void everyReportIsOneJsonDocument() {
                                                           {"GET", "/logic"},
                                                           {"GET", "/gate"},
                                                           {"GET", "/blocks"},
-                                                          {"GET", "/quads"},
                                                           {"GET", "/buffered"},
                                                           {"GET", "/interpolation"},
                                                           {"POST", "/interpolation"},

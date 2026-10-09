@@ -36,7 +36,7 @@ namespace {
 const char* const kRoutes =
     "GET /counters, GET /capture, "
     "GET /controllers, GET /setup, "
-    "GET /recordings, GET /draws, GET /memory, GET /callers, GET /quads, "
+    "GET /recordings, GET /draws, GET /memory, GET /callers, "
     "GET /buffered, GET /interpolation, "
     "GET /paint, GET /blocks, GET /logic, GET /gate, GET /pose, "
     "POST /global-pose, POST /pose, POST /capture, POST /pacing, "
@@ -142,7 +142,7 @@ ControlChannel::ControlChannel(const Sources& sources)
     : m_recorder(sources.recorder), m_input(sources.input), m_capture(sources.capture),
       m_shapeLog(sources.shapeLog), m_callers(sources.callers), m_paint(sources.paint),
       m_blocks(sources.blocks), m_poses(sources.poses), m_poseByShader(sources.poseByShader),
-      m_poseBlend(sources.poseBlend), m_quadBlend(sources.quadBlend),
+      m_poseBlend(sources.poseBlend),
       m_bufferedBlocks(sources.bufferedBlocks), m_drawInterpolation(sources.drawInterpolation),
       m_logic(sources.logic), m_globalPose(sources.globalPose), m_guestBytes(sources.guestBytes),
       m_snapshot(sources.snapshot), m_pacing(sources.pacing), m_scanOut(sources.scanOut),
@@ -906,9 +906,6 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
     }
     if (request.path() == "/buffered") {
         return lucent::http::Response::json(200, "OK", m_bufferedBlocks.json());
-    }
-    if (request.path() == "/quads") {
-        return lucent::http::Response::json(200, "OK", m_quadBlend.json());
     }
     if (request.path() == "/callers") {
         return lucent::http::Response::json(200, "OK", m_callers.json());
