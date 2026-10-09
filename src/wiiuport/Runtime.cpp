@@ -43,6 +43,7 @@ void Runtime::installHooks() {
     VPADInputHooks::SetSource(&m_input);
     m_drawInterpolation.install();
     m_particleInterpolation.install();
+    m_materialInterpolation.install();
     m_paint.install();
     m_logic.install();
     m_hooksInstalled = true;

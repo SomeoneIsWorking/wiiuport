@@ -453,7 +453,9 @@ doubled particles).
 Draw methods that still advance state, from the decomp (874 draw functions scanned): the Z-target
 cursor's animation (`dAttention_c::runDrawProc`, in the scene's attention draw), Puppet Ganon's
 smoothing (`d_a_bgn`), fireflies (`d_a_ff`), the grappling rope (`d_a_himo2`) and Jabun's cave
-flash timer (`d_a_obj_ajav`). On the in-between paint these run a second time per tick.
+flash timer (`d_a_obj_ajav`). On the in-between paint these run a second time per tick. Material
+animations played in an actor's draw (two a tick on Outset) are held to one step a tick by
+`title/MaterialInterpolation`, below.
 
 **Ordering.** A draw phase can only show a tick it has, so the picture lags one tick: the tick's own
 draw phase shows the midpoint of the previous and current inputs, and the in-between frame's draw
@@ -549,17 +551,34 @@ blends over 202 ticks, 9 respawned, 2 wrapped, 0 unblendable, unreadable or fail
 write restored; whole-frame pixels changed between presents, off `7920, 11, 9116, 0`, on `6364,
 4278, 7388, 5266`.
 
-**Material animation, found so far.** HD's `J3DFrameCtrl` has no vtable and is reordered: rate f32
-`+0`, frame f32 `+4`, start s16 `+8`, end s16 `+0xa`, loop s16 `+0xc`, attribute u8 `+0xe`, state u8
-`+0xf`. `init` `0x027f2bc0`, `update` `0x027f2fc4`, `checkPass` `0x027f2bf8`; `0x025e742c` is the
-360-caller `update`-then-`isStop` (`mDoExt_baseAnm::play`). Not yet found: HD's `mDoExt_b{tk,rk,pk}Anm::entry`
-(TWW's `mpAnm->setFrame(frame)` shape, `stfs f1,0x8(anm)`, does not occur), which is where a draw
-phase's material frame could be set to the midpoint; joint (`bck`) controllers go through the same
-`play`, so a blend at the controller would double the pose blend for models calculated in the draw.
+**Material animation.** HD's `J3DFrameCtrl` has no vtable and is reordered: rate f32 `+0`, frame
+f32 `+4`, start s16 `+8`, end s16 `+0xa`, loop s16 `+0xc`, attribute u8 `+0xe` (2 loops from end back
+to loop), state u8 `+0xf`; `init` `0x027f2bc0`, `update` `0x027f2fc4`, `checkPass` `0x027f2bf8`.
+Each `mDoExt_b*Anm` embeds its controller at `+0`; `0x025e742c` is `play` (`update`, then
+`isStop`; 360 callers). In the draw, the caller loads the controller's frame into f1 and calls the
+animation's entry (animation in r3), which stores the frame back and evaluates the materials from it
+there (`daObjYgush00`'s draw, `0x023bd924`, shows the shape). Entries by the material-table slot they
+set: bpk `0x025e779c` (`+0x40`), btp `0x025e7b3c` (`+0x38`, s16 frame), btk `0x025e7fc4` and
+`0x025e80d0` (`+0x44`), brk `0x025e83fc` and `0x025e8480` (`+0x48`), bck `0x025e86b8`.
+
+`title/MaterialInterpolation` probes the bpk, btk and brk entries and remembers, per actor, each
+animation its draw entered (with the J3D animation it held, to tell a replaced one). In the next
+gated draw phase, at that actor's `fopAc_Draw` (`DrawPhaseListener::onActorDraw`), each such
+controller's frame is set to the midpoint of its last two ticks' frames, across the wrap for a loop;
+a step larger than the rate otherwise is a jump and is drawn as it is. btp and bva are discrete; bck
+is the joints, which the pose blend covers. An actor that plays its animation in its own draw stepped
+it in both draw phases, twice a tick; `play` is probed too, and in the gated draw phase an entered
+animation's frame is set half a step back before it plays, so it plays to the midpoint, and put back
+after, so it steps once a tick (restores run last first, so a play after a blend composes).
+
+**Measured** (Link idle on Outset's pier): about 14 entries a tick, 1,080 blends and 10 loop wraps
+over 216 ticks, 436 draw plays, 0 jumps, every write restored. A loop of 270 frames at rate 1 played
+in its actor's draw (`scratch/drawphase/material_speed.py`): 216 steps in 4 s with interpolation off,
+115.5 over 116 gated ticks with it on.
 
 Not interpolated, so still stepping at the tick rate: anything a draw method takes from state other
-than these inputs (material and texture animation; a particle's rotation, scale and colour; the sea's
-texture scroll, held to one step a tick), and camera cuts
+than these inputs (a particle's rotation, scale and colour; the sea's texture scroll, held to one
+step a tick; texture-pattern and visibility animation, which are discrete), and camera cuts
 and actor teleports, which blend across the cut for one present. The game has no cut flag:
 `dCamera_c::Set` is called every frame by event cameras and `Reset` by a handful of actors, so a cut
 is not told apart from a fast move.

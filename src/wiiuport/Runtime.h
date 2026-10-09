@@ -15,6 +15,7 @@
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/EnvironmentInterpolation.h"
 #include "wiiuport/title/LogicGate.h"
+#include "wiiuport/title/MaterialInterpolation.h"
 #include "wiiuport/title/ParticleInterpolation.h"
 #include "wiiuport/title/SeaInterpolation.h"
 #include "wiiuport/title/WindWakerPaint.h"
@@ -102,6 +103,10 @@ class Runtime {
          .writeWords = &GuestPatching::WriteDataWords}};
     title::EnvironmentInterpolation m_environmentInterpolation{
         {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
+    title::MaterialInterpolation m_materialInterpolation{
+        {.registerProbe = &GuestCallProbes::Register,
+         .readWords = &GuestPatching::ReadWords,
+         .writeWords = &GuestPatching::WriteDataWords}};
     title::SeaInterpolation m_seaInterpolation{
         {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
     title::DrawInterpolation m_drawInterpolation{
@@ -113,7 +118,7 @@ class Runtime {
                  return m_logic.enabled();
              },
          .midPaint = {&m_particleInterpolation, &m_environmentInterpolation},
-         .drawPhase = {&m_seaInterpolation}}};
+         .drawPhase = {&m_seaInterpolation, &m_materialInterpolation}}};
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
     frame::PresentPacing m_scanOut{&frame::PresentPacing::Clock::now};
@@ -129,6 +134,7 @@ class Runtime {
         .drawInterpolation = m_drawInterpolation,
         .particleInterpolation = m_particleInterpolation,
         .seaInterpolation = m_seaInterpolation,
+        .materialInterpolation = m_materialInterpolation,
         .environmentInterpolation = m_environmentInterpolation,
         .logic = m_logic,
         .guestBytes = &GuestCallProbes::GuestBytes,

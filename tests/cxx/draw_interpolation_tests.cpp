@@ -339,6 +339,12 @@ class DrawPhaseWindow final : public DrawInterpolation::DrawPhaseListener {
         ended++;
         eyeAtEnd = value((*words)[kCamera + 0xdc]);
     }
+
+    void onActorDraw(uint32_t actor) override {
+        actors.push_back(actor);
+    }
+
+    std::vector<uint32_t> actors;
 };
 
 void theInBetweenDrawPhaseIsOpenedAndClosedForItsListeners() {
@@ -354,7 +360,9 @@ void theInBetweenDrawPhaseIsOpenedAndClosedForItsListeners() {
     check::isTrue(window.begun == std::vector<uint64_t>{1} && window.ended == 0,
                   "the tick's draw phase is opened at its start, with the tick");
     draw.onCameraDraw(kCamera);
+    draw.onActorDraw(kActor);
     draw.onAfterDraw();
+    check::isTrue(window.actors == std::vector<uint32_t>{kActor}, "with each actor it draws");
     check::isTrue(window.ended == 1 && paint.begun.size() == 1,
                   "and closed at its end, before the in-between paint");
     guest.camera({.fovy = 60.0f, .eyeX = 200.0f, .bank = 0});
@@ -364,8 +372,9 @@ void theInBetweenDrawPhaseIsOpenedAndClosedForItsListeners() {
     draw.onAfterDraw();
     check::isTrue(window.eyeAtEnd == 200.0f, "once the draw phase's own inputs are back");
     draw.onBeforeDraw();
+    draw.onActorDraw(kActor);
     draw.onAfterDraw();
-    check::isTrue(window.begun.size() == 2 && window.ended == 2,
+    check::isTrue(window.begun.size() == 2 && window.ended == 2 && window.actors.size() == 1,
                   "the skipped call's draw phase is not one");
     guest.gated = false;
     draw.onManagement();

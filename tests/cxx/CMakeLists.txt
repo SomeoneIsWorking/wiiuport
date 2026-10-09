@@ -5,6 +5,7 @@ add_executable(wiiuport_tests
   json_body_tests.cpp
   draw_interpolation_tests.cpp
   environment_interpolation_tests.cpp
+  material_interpolation_tests.cpp
   particle_interpolation_tests.cpp
   sea_interpolation_tests.cpp
   guest_call_probe_tests.cpp

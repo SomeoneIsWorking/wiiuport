@@ -157,6 +157,9 @@ void DrawInterpolation::onActorDraw(uint32_t actor) {
         return;
     }
     m_actorDraws++;
+    for (DrawPhaseListener* listener : m_drawPhase) {
+        listener->onActorDraw(actor);
+    }
     uint32_t condition = 0;
     std::array<uint32_t, kPlacementWords> words{};
     if (!m_readWords(actor + kCondition, &condition, 1) ||

@@ -92,6 +92,8 @@ class DrawInterpolation {
         virtual ~DrawPhaseListener() = default;
         virtual void onDrawPhaseBegin(uint64_t tick) = 0;
         virtual void onDrawPhaseEnd() = 0;
+        // Each actor the gated draw phase draws, before its draw method runs.
+        virtual void onActorDraw(uint32_t actor) = 0;
     };
 
     struct Seams {

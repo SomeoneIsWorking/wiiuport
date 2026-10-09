@@ -41,6 +41,9 @@ class SeaInterpolation final : public DrawInterpolation::DrawPhaseListener {
     void onDrawPhaseBegin(uint64_t tick) override;
     void onDrawPhaseEnd() override;
 
+    void onActorDraw(uint32_t /*actor*/) override {
+    }
+
     std::string json() const;
 
   private:
