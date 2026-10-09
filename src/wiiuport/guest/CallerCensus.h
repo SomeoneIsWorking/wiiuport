@@ -48,9 +48,10 @@ class CallerCensus {
         : m_register(registerProbe), m_guestBytes(guestBytes) {
     }
 
-    // The chain a call entering a function with `stackPointer` and `returnAddress` came by,
-    // walked up the EABI back chain; frames past an unreadable one are zero.
-    static Chain chainOf(uint32_t stackPointer, uint32_t returnAddress, GuestBytes guestBytes);
+    // The chain a call entering a function with registers `gpr` and `returnAddress` came by,
+    // walked up the EABI back chain from r1; frames past an unreadable one are zero.
+    static Chain chainOf(std::span<const uint32_t, 32> gpr, uint32_t returnAddress,
+                         GuestBytes guestBytes);
 
     struct Target {
         uint32_t entry = 0;
