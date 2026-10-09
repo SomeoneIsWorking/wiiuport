@@ -76,7 +76,7 @@ struct Fixture {
     wiiuport::frame::FrameCapture capture{&refuseCapture};
     wiiuport::frame::FrameShapeLog shapeLog;
     wiiuport::guest::BufferWriters writers;
-    wiiuport::guest::CallerCensus callers{&noRegistration};
+    wiiuport::guest::CallerCensus callers{&noRegistration, &noGuestBytes};
     wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord, &noReadWords};
     wiiuport::title::ObjectPoseLocator poses;
     wiiuport::title::PoseByShader poseByShader;
@@ -255,6 +255,35 @@ void aCensusTakesEntriesWithTheirFirstInstructionAndRefusesAnythingElse() {
                   "as is one that is not hex");
     check::isTrue(!CallerCensus::parse("1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9", refusal).has_value(),
                   "and a ninth target");
+}
+
+// A guest stack of three frames, big-endian: each frame's back chain, then the link register saved
+// in it. The innermost frame is at kStackPointer; the outermost's back chain ends the walk.
+constexpr uint32_t kStackPointer = 0x1000;
+constexpr std::array<uint8_t, 24> kGuestStack{
+    0x00, 0x00, 0x10, 0x08, 0x02, 0x87, 0x4d, 0x58, // 0x1000: back chain, (own saved LR)
+    0x00, 0x00, 0x10, 0x10, 0x02, 0x87, 0xb2, 0xa4, // 0x1008: caller's frame
+    0x00, 0x00, 0x00, 0x00, 0x02, 0x0b, 0x00, 0x10, // 0x1010: outermost, chain ends
+};
+
+const void* guestStack(uint32_t address, uint32_t size) {
+    if (address < kStackPointer || address + size > kStackPointer + kGuestStack.size()) {
+        return nullptr;
+    }
+    return kGuestStack.data() + (address - kStackPointer);
+}
+
+void aCallsChainIsItsReturnAddressThenEachSavedLinkRegister() {
+    using wiiuport::guest::CallerCensus;
+    const CallerCensus::Chain chain = CallerCensus::chainOf(kStackPointer, 0x02880fa0, &guestStack);
+    check::equal(chain[0], uint32_t{0x02880fa0}, "the call's own return address first");
+    check::equal(chain[1], uint32_t{0x0287b2a4},
+                 "then the link register its caller's caller saved");
+    check::equal(chain[2], uint32_t{0x020b0010}, "and the next frame out");
+    check::equal(chain[3], uint32_t{0}, "a zero back chain ends the walk");
+    const CallerCensus::Chain unmapped = CallerCensus::chainOf(0x9000, 0x02880fa0, &guestStack);
+    check::isTrue(unmapped[0] == 0x02880fa0 && unmapped[1] == 0,
+                  "an unreadable stack leaves the return address alone");
 }
 
 void anIdleCensusReportsNoEntriesRatherThanNothing() {
@@ -749,6 +778,7 @@ void runControlTests() {
     aQuitWithNoHostRunningIsRefusedAndAQuitWithOneReachesIt();
     anUnstartedChannelIsNotRunning();
     aCensusTakesEntriesWithTheirFirstInstructionAndRefusesAnythingElse();
+    aCallsChainIsItsReturnAddressThenEachSavedLinkRegister();
     anIdleCensusReportsNoEntriesRatherThanNothing();
     aMemoryReadNamesItsRangeAndIsBounded();
     thePoseTableIsFedByAPostAndReadByAGet();
