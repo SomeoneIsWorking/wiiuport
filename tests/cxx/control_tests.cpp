@@ -76,6 +76,8 @@ struct Fixture {
     wiiuport::frame::FrameCapture capture{&refuseCapture};
     wiiuport::frame::FrameShapeLog shapeLog;
     wiiuport::guest::CallerCensus callers{&noRegistration, &noGuestBytes};
+    wiiuport::title::ParticleInterpolation particleInterpolation{
+        {.registerProbe = &noRegistration, .readWords = &noReadWords, .writeWords = nullptr}};
     wiiuport::title::DrawInterpolation drawInterpolation{{.registerProbe = &noRegistration,
                                                           .readWords = &noReadWords,
                                                           .writeWords = nullptr,
@@ -99,6 +101,7 @@ struct Fixture {
         .callers = callers,
         .paint = paint,
         .drawInterpolation = drawInterpolation,
+        .particleInterpolation = particleInterpolation,
         .logic = logic,
         .guestBytes = &noGuestBytes,
         .snapshot = snapshot,
@@ -431,6 +434,7 @@ void everyReportIsOneJsonDocument() {
                                                           {"GET", "/logic"},
                                                           {"GET", "/gate"},
                                                           {"GET", "/interpolation"},
+                                                          {"GET", "/particles"},
                                                           {"POST", "/interpolation"},
                                                           {"POST", "/pacing"}}) {
         lucent::http::Request read;

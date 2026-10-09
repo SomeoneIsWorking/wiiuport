@@ -4,6 +4,7 @@ add_executable(wiiuport_tests
   logic_gate_tests.cpp
   json_body_tests.cpp
   draw_interpolation_tests.cpp
+  particle_interpolation_tests.cpp
   guest_call_probe_tests.cpp
   paint_tests.cpp
   frame_tests.cpp

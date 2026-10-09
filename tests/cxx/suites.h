@@ -11,6 +11,7 @@ void runControlTests();
 void runPaintTests();
 void runLogicGateTests();
 void runDrawInterpolationTests();
+void runParticleInterpolationTests();
 void runGuestCallProbeTests();
 void runJsonBodyTests();
 void runInputTests();

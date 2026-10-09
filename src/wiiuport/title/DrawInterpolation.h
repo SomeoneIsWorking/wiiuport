@@ -76,12 +76,22 @@ class DrawInterpolation {
     using WriteWords = std::function<bool(uint32_t address, const uint32_t* words, uint32_t count)>;
     using Gated = std::function<bool()>;
 
+    // Told when the paint drawn from a tick's draw phase, the in-between one, begins and ends:
+    // what the paint itself reads is blended for that window.
+    class MidPaintListener {
+      public:
+        virtual ~MidPaintListener() = default;
+        virtual void onMidPaintBegin(uint64_t tick) = 0;
+        virtual void onMidPaintEnd() = 0;
+    };
+
     struct Seams {
         Register registerProbe;
         ReadWords readWords;
         WriteWords writeWords;
         // Whether the logic gate is in: without it there is no in-between paint to draw.
         Gated gated;
+        MidPaintListener* midPaint = nullptr;
     };
 
     explicit DrawInterpolation(Seams seams);
@@ -163,6 +173,7 @@ class DrawInterpolation {
     ReadWords m_readWords;
     WriteWords m_writeWords;
     Gated m_gated;
+    MidPaintListener* m_midPaint;
     Entry m_management{*this, Event::Management};
     Entry m_cameraDraw{*this, Event::CameraDraw};
     Entry m_actorDraw{*this, Event::ActorDraw};
@@ -174,6 +185,7 @@ class DrawInterpolation {
     bool m_enabled = true;
     bool m_inTick = false;
     bool m_inDraw = false;
+    bool m_inMidPaint = false;
     uint64_t m_tick = 0;
     std::map<uint32_t, Seen<kCameraWords>> m_cameras;
     std::map<uint32_t, Seen<2>> m_shapes;

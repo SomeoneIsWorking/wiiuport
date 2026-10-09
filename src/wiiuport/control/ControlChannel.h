@@ -15,6 +15,7 @@
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/LogicGate.h"
+#include "wiiuport/title/ParticleInterpolation.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
 #include <atomic>
@@ -66,6 +67,7 @@ class ControlChannel {
         const guest::CallerCensus& callers;
         title::WindWakerPaint& paint;
         title::DrawInterpolation& drawInterpolation;
+        const title::ParticleInterpolation& particleInterpolation;
         title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
@@ -189,6 +191,7 @@ class ControlChannel {
     const guest::CallerCensus& m_callers;
     title::WindWakerPaint& m_paint;
     title::DrawInterpolation& m_drawInterpolation;
+    const title::ParticleInterpolation& m_particleInterpolation;
     title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;

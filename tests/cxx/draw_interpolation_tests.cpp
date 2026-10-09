@@ -8,6 +8,7 @@
 #include <bit>
 #include <cstdint>
 #include <map>
+#include <vector>
 
 namespace {
 
@@ -60,7 +61,7 @@ class Guest {
     std::map<uint32_t, uint32_t> words;
     bool gated = true;
 
-    DrawInterpolation interpolation() {
+    DrawInterpolation interpolation(DrawInterpolation::MidPaintListener* midPaint = nullptr) {
         return DrawInterpolation{{.registerProbe = &noRegistration,
                                   .readWords =
                                       [this](uint32_t address, uint32_t* out, uint32_t count) {
@@ -79,7 +80,8 @@ class Guest {
                                   .gated =
                                       [this] {
                                           return gated;
-                                      }}};
+                                      },
+                                  .midPaint = midPaint}};
     }
 
     // fovy, aspect, eye.x, then the bank in the high half.
@@ -268,6 +270,56 @@ void aModelSeenForTheFirstTimeIsDrawnAsItIs() {
     draw.onAfterDraw();
 }
 
+// The window the paint drawn from the tick's draw phase falls in.
+class PaintWindow final : public DrawInterpolation::MidPaintListener {
+  public:
+    std::vector<uint64_t> begun;
+    uint64_t ended = 0;
+    // The camera as the paint would read it when the window opens.
+    float eyeAtBegin = 0.0f;
+    std::map<uint32_t, uint32_t>* words = nullptr;
+
+    void onMidPaintBegin(uint64_t tick) override {
+        begun.push_back(tick);
+        eyeAtBegin = value((*words)[kCamera + 0xdc]);
+    }
+
+    void onMidPaintEnd() override {
+        ended++;
+    }
+};
+
+void theInBetweenPaintIsTheOneAfterTheTicksDrawPhase() {
+    Guest guest;
+    PaintWindow window;
+    window.words = &guest.words;
+    DrawInterpolation draw = guest.interpolation(&window);
+    guest.camera({.fovy = 60.0f, .eyeX = 100.0f, .bank = 0});
+    draw.onManagement();
+    draw.onBeforeDraw();
+    draw.onCameraDraw(kCamera);
+    draw.onAfterDraw();
+    check::isTrue(window.begun == std::vector<uint64_t>{1},
+                  "the tick's draw phase opens the in-between paint, with the tick");
+    guest.camera({.fovy = 60.0f, .eyeX = 200.0f, .bank = 0});
+    draw.onManagement();
+    draw.onBeforeDraw();
+    check::isTrue(window.ended == 1, "and the next draw phase closes it");
+    draw.onCameraDraw(kCamera);
+    draw.onAfterDraw();
+    check::isTrue(window.eyeAtBegin == 200.0f,
+                  "after the draw phase's own inputs are put back, so the paint's are its own");
+    draw.onBeforeDraw();
+    draw.onAfterDraw();
+    check::isTrue(window.begun.size() == 2 && window.ended == 2,
+                  "the skipped call's draw phase opens none");
+    guest.gated = false;
+    draw.onManagement();
+    draw.onBeforeDraw();
+    draw.onAfterDraw();
+    check::isTrue(window.begun.size() == 2, "nor does a tick without the gate");
+}
+
 } // namespace
 
 void wiiuport::tests::runDrawInterpolationTests() {
@@ -278,4 +330,5 @@ void wiiuport::tests::runDrawInterpolationTests() {
     aModelIsDrawnWithItsAnimationAndPlacementBlendedApart();
     aBaseFromTheDrawsInputsIsNotBlendedTwice();
     aModelSeenForTheFirstTimeIsDrawnAsItIs();
+    theInBetweenPaintIsTheOneAfterTheTicksDrawPhase();
 }
