@@ -85,13 +85,23 @@ class DrawInterpolation {
         virtual void onMidPaintEnd() = 0;
     };
 
+    // Told when the gated draw phase, the in-between one, begins and ends: what the draw phase
+    // reads beyond the camera, actors and models is blended for that window.
+    class DrawPhaseListener {
+      public:
+        virtual ~DrawPhaseListener() = default;
+        virtual void onDrawPhaseBegin(uint64_t tick) = 0;
+        virtual void onDrawPhaseEnd() = 0;
+    };
+
     struct Seams {
         Register registerProbe;
         ReadWords readWords;
         WriteWords writeWords;
         // Whether the logic gate is in: without it there is no in-between paint to draw.
         Gated gated;
-        MidPaintListener* midPaint = nullptr;
+        std::vector<MidPaintListener*> midPaint;
+        std::vector<DrawPhaseListener*> drawPhase;
     };
 
     explicit DrawInterpolation(Seams seams);
@@ -173,7 +183,8 @@ class DrawInterpolation {
     ReadWords m_readWords;
     WriteWords m_writeWords;
     Gated m_gated;
-    MidPaintListener* m_midPaint;
+    std::vector<MidPaintListener*> m_midPaint;
+    std::vector<DrawPhaseListener*> m_drawPhase;
     Entry m_management{*this, Event::Management};
     Entry m_cameraDraw{*this, Event::CameraDraw};
     Entry m_actorDraw{*this, Event::ActorDraw};

@@ -12,6 +12,7 @@ void runPaintTests();
 void runLogicGateTests();
 void runDrawInterpolationTests();
 void runParticleInterpolationTests();
+void runSeaInterpolationTests();
 void runGuestCallProbeTests();
 void runJsonBodyTests();
 void runInputTests();

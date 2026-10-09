@@ -516,9 +516,25 @@ its age grew (a lower age is a slot the pool reused); the next draw phase gets t
 `0, 11259, 0, 10271`, on `8098, 9191, 7783, 9386`. Walk: 316 particle blends over 313 ticks, 17 first
 seen, 18 reused slots, 0 unblendable, unreadable or failed writes, every write restored.
 
+**The sea surface.** HD's sea is built in the draw phase, not the paint as in TWW. `daSea_Draw`
+(`0x0246caec`) calls the vertex fill `0x0246c5e8`, which writes 65 x 65 vertices from the grid corner
+`mDrawMinX/Z` (`+0x1fc`, `+0x200`) and the height table (`*(+0x20c)`) that `daSea_packet_c::execute`
+(`0x0246c088`) fills about the player each tick, then `0x0246c7c8`, which steps the texture scroll
+counter `mAnimCounter` (s16 `+0x22c`, wraps past 300) every call, culled or not. The packet's address
+is held at `0x1046d8b0`; `mInitFlag` and `mCullStopFlag` are bytes `+0x220` and `+0x221`. With two
+draw phases a tick the counter stepped twice a tick: `scratch/drawphase/sea_counter.py` read 240
+steps over 120 gated ticks.
+
+`DrawInterpolation` tells `DrawPhaseListener`s when the gated draw phase begins (its BeforeOfDraw)
+and ends (its AfterOfDraw, after its own restores). For it `title/SeaInterpolation` sets the grid
+corner and every height to the midpoint of the last two ticks', unless the corner moved 800 or more
+(a warp), and puts the counter back afterwards so it steps once a tick. Measured: 120 steps over 120
+gated ticks, every hold restored. The grid blend is covered by `tests/cxx/sea_interpolation_tests.cpp`
+only: the test save's sea is culled where Link stands, so it has not yet been seen live.
+
 Not interpolated, so still stepping at the tick rate: anything a draw method takes from state other
-than these inputs (material and texture animation; a particle's rotation, scale and colour), sea waves
-and sky clouds (CPU-written by the paint, "The CPU-written quads: writers"), and camera cuts
+than these inputs (material and texture animation; a particle's rotation, scale and colour; the sea's
+texture scroll, held to one step a tick), sea waves and sky clouds (CPU-written by the paint, "The CPU-written quads: writers"), and camera cuts
 and actor teleports, which blend across the cut for one present. The game has no cut flag:
 `dCamera_c::Set` is called every frame by event cameras and `Reset` by a handful of actors, so a cut
 is not told apart from a fast move.

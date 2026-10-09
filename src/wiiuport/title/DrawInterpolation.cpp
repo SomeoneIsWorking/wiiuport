@@ -79,7 +79,7 @@ void DrawInterpolation::Entry::OnCall(std::span<const uint32_t, 32> gpr,
 DrawInterpolation::DrawInterpolation(Seams seams)
     : m_register(seams.registerProbe), m_readWords(std::move(seams.readWords)),
       m_writeWords(std::move(seams.writeWords)), m_gated(std::move(seams.gated)),
-      m_midPaint(seams.midPaint) {
+      m_midPaint(std::move(seams.midPaint)), m_drawPhase(std::move(seams.drawPhase)) {
 }
 
 void DrawInterpolation::install() {
@@ -353,7 +353,14 @@ void DrawInterpolation::onBeforeDraw() {
     m_viewedInDraw.clear();
     if (m_inMidPaint) {
         m_inMidPaint = false;
-        m_midPaint->onMidPaintEnd();
+        for (MidPaintListener* listener : m_midPaint) {
+            listener->onMidPaintEnd();
+        }
+    }
+    if (m_inTick) {
+        for (DrawPhaseListener* listener : m_drawPhase) {
+            listener->onDrawPhaseBegin(m_tick);
+        }
     }
 }
 
@@ -379,15 +386,18 @@ void DrawInterpolation::onAfterDraw() {
         }
     }
     m_restores.clear();
+    for (DrawPhaseListener* listener : m_drawPhase) {
+        listener->onDrawPhaseEnd();
+    }
     std::erase_if(m_shapes, [this](const auto& entry) {
         return entry.second.tick < m_tick;
     });
     std::erase_if(m_cameras, [this](const auto& entry) {
         return entry.second.tick < m_tick;
     });
-    if (m_midPaint != nullptr) {
-        m_inMidPaint = true;
-        m_midPaint->onMidPaintBegin(m_tick);
+    m_inMidPaint = true;
+    for (MidPaintListener* listener : m_midPaint) {
+        listener->onMidPaintBegin(m_tick);
     }
 }
 

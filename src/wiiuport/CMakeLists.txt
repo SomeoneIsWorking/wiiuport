@@ -64,6 +64,8 @@ add_library(wiiuport STATIC
   title/DrawInterpolation.h
   title/ParticleInterpolation.cpp
   title/ParticleInterpolation.h
+  title/SeaInterpolation.cpp
+  title/SeaInterpolation.h
   title/WindWakerPaint.cpp
   title/WindWakerPaint.h
     input/InputDriver.cpp
