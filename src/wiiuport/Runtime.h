@@ -16,6 +16,7 @@
 #include "wiiuport/guest/LineProbe.h"
 #include "wiiuport/guest/ParticleProbe.h"
 #include "wiiuport/input/InputDriver.h"
+#include "wiiuport/title/BufferedBlocks.h"
 #include "wiiuport/title/CommandStreamIdentity.h"
 #include "wiiuport/title/DrawAttributeCensus.h"
 #include "wiiuport/title/GlobalPoseCensus.h"
@@ -135,6 +136,8 @@ class Runtime {
     guest::EnvironmentProbe m_environmentProbe{m_writers};
     guest::LineProbe m_lineProbe{m_writers};
     guest::CallerCensus m_callers{&GuestCallProbes::Register, &GuestCallProbes::GuestBytes};
+    title::BufferedBlocks m_bufferedBlocks{&GuestCallProbes::Register,
+                                           &GuestCallProbes::GuestBytes};
     title::LogicGate m_logic{&GuestCallProbes::Register, &GuestPatching::AllocateCode,
                              &GuestPatching::AllocateData, &GuestPatching::WriteWord,
                              &GuestPatching::ReadWord};
@@ -175,6 +178,7 @@ class Runtime {
         .poseByShader = m_poseByShader,
         .poseBlend = m_poseBlend,
         .quadBlend = m_quadBlend,
+        .bufferedBlocks = m_bufferedBlocks,
         .logic = m_logic,
         .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,

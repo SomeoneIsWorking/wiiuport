@@ -13,6 +13,7 @@
 #include "wiiuport/frame/VertexChanges.h"
 #include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/input/InputDriver.h"
+#include "wiiuport/title/BufferedBlocks.h"
 #include "wiiuport/title/GlobalPoseCensus.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
@@ -85,6 +86,7 @@ class ControlChannel {
         // draw was actually blended rather than having to ask a second route.
         const title::PoseBlend& poseBlend;
         const title::QuadBlend& quadBlend;
+        const title::BufferedBlocks& bufferedBlocks;
         title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
@@ -234,6 +236,7 @@ class ControlChannel {
     title::PoseByShader& m_poseByShader;
     const title::PoseBlend& m_poseBlend;
     const title::QuadBlend& m_quadBlend;
+    const title::BufferedBlocks& m_bufferedBlocks;
     title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;

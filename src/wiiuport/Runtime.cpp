@@ -59,6 +59,7 @@ void Runtime::installHooks() {
     m_particleProbe.install();
     m_environmentProbe.install();
     m_lineProbe.install();
+    m_bufferedBlocks.install();
     // The frame counter, wired before the install: the locator samples an object once per
     // frame, and a sample taken twice inside one frame cannot see a pose move.
     m_nodePose.setFrameCounter(&m_paint.paintCounter());
