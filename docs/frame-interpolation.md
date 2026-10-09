@@ -1378,6 +1378,35 @@ distinct values; a temporary fork-side counter, not kept). A Ghidra caller searc
 `GX2SetVertexUniformReg` returns only effect passes and misses the whole `0x0287xxxx-0x0288xxxx`
 renderer, whose calls go to the import stub `0x028fadac`.
 
+## The game-side in-between frame
+
+Direction: the in-between picture is drawn by the title's own draw phase, run a second time with
+midpoint inputs, rather than blended per value at the GPU. A GPU-side blend only covers the values
+it identifies (the view block also carries view-space lights; billboards, culling and particles are
+derived in game code), and it cannot list what it missed. The quad blend above is GPU-side and is to
+be replaced by this.
+
+The tick is TWW's `fpcM_Management` (`f_pc_manager.cpp`), which already separates advancing the
+world from deriving its picture:
+
+| guest | TWW | role |
+|---|---|---|
+| `0x025d42ec` | `mDoMain` frame callback | the gated tick: `fpcM_Management(0, 0x025d42c4)` |
+| `0x025df948` | `fpcM_Management` | `MtxInit` `0x0200fac4`, `fpcDt` `0x025de024`, `fpcPi` `0x025e0ee4`, `fpcCt` `0x025ddac4`, then Ex, Dw, callback 2 |
+| `0x025df5c0(0x025df940)` | `fpcEx_Handler(fpcM_Execute)` | actor logic: advances state |
+| `0x025de37c(0x025df908, 0x025de2cc)` | `fpcDw_Handler(fpcM_DrawIterater, fpcM_Draw)` | actor draw: derives the picture |
+| `0x025d4654` | `fpcDw_Execute` | one process's draw method (`*(process+0xf0)`) |
+| `0x025e2de0`/`0x025e2e5c` → `0x025e2bf4` | `mDoExt_modelUpdateDL`-style | per model: save the J3D view `0x104b45f8`, copy in the view object's camera (`+0x84`, or `*(+0x48)`; projection from `+0x4c`/`+0x164` into `0x104b470c`), model calc `0x027f55fc`, restore |
+
+Runtime census (gameplay, walking): every model calc and view pass (`0x027f55fc`, `0x027f53cc`,
+`0x027fda54`) runs under `0x025d4654`, called from actor draw methods; none from the paint. The
+default view object is `*(*(0x101f95d0 + 0x1024))`, the second entry when `+0x1020` > 1.
+
+The in-between frame is therefore a second `fpcDw_Handler` between ticks, with the view object's
+camera and each actor's pose set to midpoints and restored after, then a paint. Not yet known:
+where the draw lists it fills are reset and consumed, which draw methods change state, and where
+each actor keeps its previous pose (TWW's `fopAc_ac_c::old`).
+
 ## The deleted mechanism, and where its evidence went
 
 The shipped mechanism used to be a host-side statistical lerp. It identified the camera by **searching
