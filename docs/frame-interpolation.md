@@ -532,9 +532,26 @@ corner and every height to the midpoint of the last two ticks', unless the corne
 gated ticks, every hold restored. The grid blend is covered by `tests/cxx/sea_interpolation_tests.cpp`
 only: the test save's sea is culled where Link stands, so it has not yet been seen live.
 
+**Sea waves and sky clouds.** The weather effects move them in execute (`dKyeff_c::execute`'s
+`wave_move`, `dKyeff2_c::execute`'s `vrkumo_move`) and the paint draws them from two packets the
+environment (`g_env_light` `0x10475a68`, TWW's layout `0x80` later) holds: waves at `*(env+0xaa0)`,
+`WAVE_EFF[300]` from `+0xa0`, stride `0x38` (`mPos`, `mBasePos +0xc`, `mCounter +0x24`, `mAlpha
++0x28`, `mStatus` s8 `+0x34`), as many as the s16 at `env+0x9f8`, respawned within the radius at
+`env+0x9e0`; clouds at `*(env+0xa94)`, `VRKUMO_EFF[100]` from `+0xa4`, stride `0x2c` (`mStatus` s8
+`+0`, `mPosition +4`, `mAlpha +0x20`), wrapped past 15000 from the centre. In the in-between paint
+`title/EnvironmentInterpolation` (a `MidPaintListener`) sets each wave's position, counter and alpha
+and each cloud's position and alpha to the midpoint of the last two ticks', skipping a wave whose
+base changed, whose status is 0 or which moved past the spawn radius, and a cloud whose status
+changed or which moved past the wrap radius.
+
+**Measured** (Link idle on Outset's pier, 300 waves and 100 clouds live): 60,291 wave and 20,098 cloud
+blends over 202 ticks, 9 respawned, 2 wrapped, 0 unblendable, unreadable or failed writes, every
+write restored; whole-frame pixels changed between presents, off `7920, 11, 9116, 0`, on `6364,
+4278, 7388, 5266`.
+
 Not interpolated, so still stepping at the tick rate: anything a draw method takes from state other
 than these inputs (material and texture animation; a particle's rotation, scale and colour; the sea's
-texture scroll, held to one step a tick), sea waves and sky clouds (CPU-written by the paint, "The CPU-written quads: writers"), and camera cuts
+texture scroll, held to one step a tick), and camera cuts
 and actor teleports, which blend across the cut for one present. The game has no cut flag:
 `dCamera_c::Set` is called every frame by event cameras and `Reset` by a handful of actors, so a cut
 is not told apart from a fast move.
