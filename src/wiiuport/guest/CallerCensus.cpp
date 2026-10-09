@@ -1,5 +1,6 @@
 #include "wiiuport/guest/CallerCensus.h"
 
+#include "wiiuport/guest/GuestWords.h"
 #include "wiiuport/guest/ProbeInstallation.h"
 
 #include <algorithm>
@@ -57,7 +58,7 @@ std::optional<std::vector<CallerCensus::Target>> CallerCensus::parse(std::string
 
 void CallerCensus::install(std::span<const Target> targets) {
     for (const Target& target : targets) {
-        m_entries.push_back(std::make_unique<Entry>(target));
+        m_entries.push_back(std::make_unique<Entry>(target, m_guestBytes));
         m_register(target.entry, target.firstInstruction, *m_entries.back(), true, 0);
     }
 }
@@ -75,17 +76,42 @@ void CallerCensus::Entry::OnInstall(GuestCallProbes::Installation installation) 
     m_installation = installation;
 }
 
-void CallerCensus::Entry::OnCall(std::span<const uint32_t, 32> /*gpr*/, uint32_t returnAddress) {
+CallerCensus::Chain CallerCensus::chainOf(uint32_t stackPointer, uint32_t returnAddress,
+                                          GuestBytes guestBytes) {
+    Chain chain{};
+    chain[0] = returnAddress;
+    // Each frame's word 0 is its caller's frame, whose word 1 holds the link register saved there.
+    uint32_t frame = stackPointer;
+    for (size_t depth = 1; depth < kChainDepth; ++depth) {
+        const void* back = guestBytes(frame, sizeof(uint32_t));
+        if (back == nullptr) {
+            break;
+        }
+        frame = guestWord(back, 0);
+        const void* saved = frame == 0 ? nullptr : guestBytes(frame, 2 * sizeof(uint32_t));
+        if (saved == nullptr) {
+            break;
+        }
+        chain[depth] = guestWord(saved, sizeof(uint32_t));
+    }
+    return chain;
+}
+
+void CallerCensus::Entry::OnCall(std::span<const uint32_t, 32> gpr, uint32_t returnAddress) {
+    const Chain chain = chainOf(gpr[1], returnAddress, m_guestBytes);
     std::scoped_lock lock(m_mutex);
     ++m_callsByReturn[returnAddress];
+    ++m_callsByChain[chain];
 }
 
 std::string CallerCensus::Entry::json() const {
     std::vector<std::pair<uint32_t, uint64_t>> callers;
+    std::vector<std::pair<Chain, uint64_t>> chains;
     std::string installation;
     {
         std::scoped_lock lock(m_mutex);
         callers.assign(m_callsByReturn.begin(), m_callsByReturn.end());
+        chains.assign(m_callsByChain.begin(), m_callsByChain.end());
         installation = installationName(m_installation);
     }
     std::ranges::sort(callers, [](const auto& one, const auto& other) {
@@ -98,8 +124,22 @@ std::string CallerCensus::Entry::json() const {
         list += (list.empty() ? "" : ",") + std::string("{\"returnAddress\":\"") +
                 hexText(returnAddress) + "\",\"calls\":" + std::to_string(count) + "}";
     }
+    std::ranges::sort(chains, [](const auto& one, const auto& other) {
+        return one.second > other.second;
+    });
+    std::string chainList;
+    for (size_t i = 0; i < chains.size() && i < kReportedChains; ++i) {
+        std::string frames;
+        for (uint32_t frame : chains[i].first) {
+            frames += (frames.empty() ? "\"" : ",\"") + hexText(frame) + "\"";
+        }
+        chainList += (chainList.empty() ? "" : ",") + std::string("{\"frames\":[") + frames +
+                     "],\"calls\":" + std::to_string(chains[i].second) + "}";
+    }
     return "{\"entry\":\"" + hexText(m_target.entry) + "\",\"installation\":\"" + installation +
-           "\",\"calls\":" + std::to_string(calls) + ",\"callers\":[" + list + "]}";
+           "\",\"calls\":" + std::to_string(calls) + ",\"callers\":[" + list +
+           "],\"distinctChains\":" + std::to_string(chains.size()) + ",\"chains\":[" + chainList +
+           "]}";
 }
 
 } // namespace wiiuport::guest

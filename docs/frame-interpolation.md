@@ -1269,46 +1269,50 @@ one frame, so every node reads `unpairedShapes` or `identical`. That sampling is
 **Tests:** `tests/cxx/command_stream_identity_tests.cpp`; the census and history tests drive draws
 through `tests/cxx/command_stream.h`.
 
-## Where the pose is: model-views in ALU constants, CPU quads in vertex bytes
+## Where the pose is: layout panes in ALU constants, CPU quads in vertex bytes
 
-The model renderer's vertex constants come from a 200-byte shader context (constructor
-`0x02873d70`): a 4x4 at `+0x00`, 3x4s at `+0x40` and `+0x70`, the bound program at `+0xa8`.
-`0x02874024(ctx, key)` looks a uniform key up in the program's table (`program + 0x25c`) and returns
-its register.
+The ALU-constant uploads through `0x02874024(ctx, key)` (a key looked up in the program's table at
+`program + 0x25c`) belong to the **NintendoWare layout library** (`nw::lyt`): the HUD, menus and
+other 2D screens. The context is its `DrawInfo` (constructor `0x02873d70`): a 4x4 projection at
+`+0x00`, a 3x4 view at `+0x40`, the pane's model-view at `+0x70`, the bound program at `+0xa8` and
+the model-view-loaded flag at `+0xb6`.
 
 | key | uploaded by | what |
 |---|---|---|
 | 0 | `0x02874038`, 16 words from `ctx+0x00` | projection: 1 distinct value per window |
-| 1 | `0x02874074`, 12 words from `ctx+0x70` | model-view: ~30 distinct values per paint per context |
+| 1 | `0x02874074`, 12 words from `ctx+0x70` | the drawing pane's model-view |
 | 2-7, 0x11 | `0x0288285c` | material: texgen rows, colours |
 | 9, 0xe-0x10 | `0x02880f1c` | texture matrices |
 
-Key 1 is uploaded only while `ctx+0xb6` is clear, and `0x028740e4` (program change, from the
-material set `0x02883ab4`) is the only gameplay writer that clears it; the upload runs inside the
-material applies `0x02880f1c` and `0x02880e90`. **Key 1 is a model-view, not the camera's view.**
-One context uploads about 30 distinct matrices a paint, often in runs of 3-4; HUD and 2D elements
-carry translation z = -989.1. No static store to `ctx+0x70` exists in the renderer
-(`0x02870000`-`0x028c0000`); `0x0288285c` only reads it, so it is written through a pointer and
-which object it belongs to is not known. `CommandStreamIdentity` does not name these uploads: its
-node changes every 4 uploads, unrelated to the matrices.
+| guest | what |
+|---|---|
+| `0x02877100` | `Pane::Draw(pane, drawInfo)`: if visible, `DrawSelf` (vtable `+0x94`), then each child's `Draw` (`+0x8c`) |
+| `0x028766cc` | `Pane::CalculateMtx` (vtable `+0x84`): the pane's global 3x4 at `pane+0x48` |
+| `0x028771b8` | `Pane::LoadMtx` (vtable `+0x9c`): copies `pane+0x48` to `drawInfo+0x70` and clears `+0xb6` |
+| `0x0287d2cc` | `Picture::DrawSelf`: `LoadMtx`, then the quad by kind (`0x0287b180`, `0x0287c358`, `0x0287d1c4`) |
+| `0x02883ab4` | material set (vtable): program change `0x028740e4`, then the material constants |
 
-Static geometry (`6669a23d03806414`, `6a3a79e768f17158`, `48d25cda84f07f19`, ...) is stored in
-world space and reads unchanged vertex bytes every frame while the camera moves. Moving particles,
-sea waves and sky clouds are CPU-written into `ca2d0854ee6b264d`'s positions every frame
-(`POST /draws?frames=60`, standing and walking). The `PoseByShader` per-object uniform search
-refuses key 1 as "shared" because the same registers carry every object's model-view.
+Key 1 is uploaded once per pane, at its material apply (`0x02880f1c`, `0x02880e90`), while
+`+0xb6` is clear. **Every key-1 upload in gameplay is a layout pane**: a call-chain census
+(`WIIUPORT_CALLER_CENSUS=02874074:7c0802a6,...`, `GET /callers`, walking) put all 62,703 calls, in
+16 chains, under `Pane::Draw`'s recursion. A pane's identity is `r3` at `LoadMtx`. HUD panes carry
+translation z = -989.1. `CalculateMtx` writes the global matrix in place, so `LoadMtx` has no static
+store to `ctx+0x70` and Ghidra had not disassembled it.
+
+**The 3D world's camera view is not in these constants.** Static geometry (`6669a23d03806414`,
+`6a3a79e768f17158`, `48d25cda84f07f19`, ...) is stored in world space and reads unchanged vertex
+bytes every frame while the camera moves, so its view reaches the shader another way; the uniform
+candidates `PoseByShader` refuses as shared across objects are the lead. Moving particles, sea
+waves and sky clouds are CPU-written into `ca2d0854ee6b264d`'s positions every frame
+(`POST /draws?frames=60`, standing and walking).
 
 ### The view blend: retired
 
 A blend of key 1 per context, holding the tick's own upload and writing the midpoint at the
-register file on the in-between paint, paired unrelated model-views: on in-between paints the
-hearts moved and HUD fragments were drawn in the world (`POST /paint` mode 13, gate on, walking),
-and with the blend off the HUD was intact while the quad blend still ran. It was deleted with the
-fork's `OnAluConstants` hook. Blending key 1 needs the identity of the object whose model-view each
-upload carries, which is open: `0x02874d54` calls `0x02880f1c` with its object at `+0x3c`, but the
-callers of `0x02880e90` (`0x02879694`, `0x02879d60`, `0x0287a6b8`, `0x0287b8d4`, `0x0287be14`,
-`0x0287c740`, `0x0287cc80`) pass stack matrices, and who fills `ctx+0x70` needs a runtime watch on
-the address.
+register file on the in-between paint, paired different panes' model-views: on in-between paints
+the hearts moved and HUD fragments were drawn in the world (`POST /paint` mode 13, gate on,
+walking). It was deleted with the fork's `OnAluConstants` hook. Key 1 was never the camera; a pane
+blend would key on the pane at `LoadMtx`.
 
 ### The quad blend
 

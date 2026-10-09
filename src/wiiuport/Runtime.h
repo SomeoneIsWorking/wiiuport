@@ -134,7 +134,7 @@ class Runtime {
     guest::ParticleProbe m_particleProbe{m_writers};
     guest::EnvironmentProbe m_environmentProbe{m_writers};
     guest::LineProbe m_lineProbe{m_writers};
-    guest::CallerCensus m_callers{&GuestCallProbes::Register};
+    guest::CallerCensus m_callers{&GuestCallProbes::Register, &GuestCallProbes::GuestBytes};
     title::LogicGate m_logic{&GuestCallProbes::Register, &GuestPatching::AllocateCode,
                              &GuestPatching::AllocateData, &GuestPatching::WriteWord,
                              &GuestPatching::ReadWord};

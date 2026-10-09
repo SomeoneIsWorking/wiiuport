@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -16,7 +17,7 @@
 
 namespace wiiuport::guest {
 
-// Which call sites reach a title function, and how often: the instrument for
+// Which call sites and call chains reach a title function, and how often: the instrument for
 // a function reached only through a pointer, which leaves Ghidra no
 // reference to follow. Configured, not compiled in: WIIUPORT_CALLER_CENSUS
 // names up to kMaxEntries functions as `entry:firstInstruction` in hex,
@@ -35,8 +36,21 @@ class CallerCensus {
     using Register = void (*)(uint32_t entry, uint32_t firstInstruction,
                               GuestCallProbes::Probe& probe, bool holdsEntry, uint32_t resume);
 
-    explicit CallerCensus(Register registerProbe) : m_register(registerProbe) {
+    // The fork's guest memory read: the bytes at a guest address, or null where unmapped.
+    using GuestBytes = const void* (*)(uint32_t address, uint32_t size);
+
+    // Frames of a call's chain: its return address, then each caller's saved link register.
+    static constexpr size_t kChainDepth = 6;
+    using Chain = std::array<uint32_t, kChainDepth>;
+    static constexpr size_t kReportedChains = 24;
+
+    CallerCensus(Register registerProbe, GuestBytes guestBytes)
+        : m_register(registerProbe), m_guestBytes(guestBytes) {
     }
+
+    // The chain a call entering a function with `stackPointer` and `returnAddress` came by,
+    // walked up the EABI back chain; frames past an unreadable one are zero.
+    static Chain chainOf(uint32_t stackPointer, uint32_t returnAddress, GuestBytes guestBytes);
 
     struct Target {
         uint32_t entry = 0;
@@ -54,7 +68,7 @@ class CallerCensus {
   private:
     class Entry final : public GuestCallProbes::Probe {
       public:
-        explicit Entry(Target target) : m_target(target) {
+        Entry(Target target, GuestBytes guestBytes) : m_target(target), m_guestBytes(guestBytes) {
         }
 
         void OnInstall(GuestCallProbes::Installation installation) override;
@@ -67,12 +81,15 @@ class CallerCensus {
 
       private:
         Target m_target;
+        GuestBytes m_guestBytes;
         mutable std::mutex m_mutex;
         std::optional<GuestCallProbes::Installation> m_installation;
         std::unordered_map<uint32_t, uint64_t> m_callsByReturn;
+        std::map<Chain, uint64_t> m_callsByChain;
     };
 
     Register m_register;
+    GuestBytes m_guestBytes;
     std::vector<std::unique_ptr<Entry>> m_entries;
 };
 
