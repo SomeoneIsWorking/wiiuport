@@ -1,6 +1,6 @@
 #pragma once
 
-#include "wiiuport/interp/DrawObjects.h"
+#include "wiiuport/interp/GuestObject.h"
 
 #include <array>
 #include <atomic>
@@ -28,12 +28,20 @@ namespace wiiuport::guest {
 // EnvironmentProbe and LineProbe watch those calls
 // and record here, by the buffer, the object and the leading bytes it wrote
 // there; a draw from that buffer is that object's while it reads those bytes.
-class BufferWriters final : public interp::DrawObjects {
+class BufferWriters final {
   public:
     // The bytes a draw is checked by: a quad as the writers leave it, four
     // corners of 20 bytes each, and the start of a line's longer mesh.
     static constexpr size_t kLeadingBytes = 80;
     using Leading = std::array<std::byte, kLeadingBytes>;
+
+    // One object's write into a buffer, and the bytes the same object wrote before it, if it was
+    // still the same object.
+    struct Write {
+        interp::GuestObject object;
+        Leading leading{};
+        std::optional<Leading> before;
+    };
 
     // A probe installed in the title's code, once it is linked.
     void noteInstalled() {
@@ -46,12 +54,12 @@ class BufferWriters final : public interp::DrawObjects {
         m_unreadable.fetch_add(1);
     }
 
-    // Keeps that `object` wrote `leading` at the start of `source`. Safe
-    // from any thread.
+    // Keeps that `object` wrote `leading` at the start of `source`. Safe from any thread.
     void record(const void* source, const interp::GuestObject& object, const Leading& leading);
 
-    std::optional<interp::GuestObject> objectDrawn(const void* source,
-                                                   std::span<const std::byte> bytes) const override;
+    // The write a draw read from `source`, whose bytes are `bytes`, or none when no object was
+    // seen writing there or the bytes are no longer what it wrote. Safe from any thread.
+    std::optional<Write> written(const void* source, std::span<const std::byte> bytes) const;
 
     // How many of the probes that record here were installed.
     uint32_t installed() const {
@@ -79,9 +87,9 @@ class BufferWriters final : public interp::DrawObjects {
     }
 
   private:
-    struct Written {
+    struct Latest {
         interp::GuestObject object;
-        Leading leading;
+        Leading leading{};
     };
 
     std::atomic<uint32_t> m_installed{0};
@@ -90,7 +98,9 @@ class BufferWriters final : public interp::DrawObjects {
     mutable std::atomic<uint64_t> m_identified{0};
     mutable std::atomic<uint64_t> m_rewritten{0};
     mutable std::mutex m_mutex;
-    std::unordered_map<const void*, Written> m_bySource;
+    std::unordered_map<const void*, Write> m_bySource;
+    // Each object's latest write, by its address.
+    std::unordered_map<uint32_t, Latest> m_byObject;
 };
 
 } // namespace wiiuport::guest

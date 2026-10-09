@@ -139,7 +139,7 @@ void PoseBlend::onAssemblyBeforeDraw(float* words, size_t count, uint64_t shader
     // **`installed()` is the guard, and it is asked rather than inferred.** A blend that derived
     // "is the stand-in on" from the paint rate would be a second rule about what the stand-in is
     // doing, and the stand-in is the thing that knows.
-    const bool inBetween = m_paint != nullptr && m_paint->installed() && m_paint->inBetweenPaint();
+    const bool inBetween = m_paint != nullptr && m_paint->inBetweenPaint();
     onAssembly(words, count, shaderBaseHash, shaderAuxHash, node, inBetween);
 }
 

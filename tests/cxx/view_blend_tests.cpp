@@ -54,7 +54,7 @@ class Guest {
         std::array<uint32_t, 32> gpr{};
         gpr[ViewBlend::kContextRegister] = context;
         blend.OnCall(gpr, 0);
-        const uintptr_t packet = write + ViewBlend::kPacketHeaderBytes;
+        uintptr_t packet = write + ViewBlend::kPacketHeaderBytes;
         write += sizeof(uint32_t) * (2 + ViewBlend::kWords);
         return packet;
     }
@@ -62,7 +62,7 @@ class Guest {
 
 Registers view(float translation) {
     Registers words{};
-    const std::array<float, ViewBlend::kWords> rows{1, 0, 0, translation, 0, 1, 0, 2, 0, 0, 1, 3};
+    std::array<float, ViewBlend::kWords> rows{1, 0, 0, translation, 0, 1, 0, 2, 0, 0, 1, 3};
     for (size_t i = 0; i < words.size(); i++) {
         words[i] = std::bit_cast<uint32_t>(rows[i]);
     }

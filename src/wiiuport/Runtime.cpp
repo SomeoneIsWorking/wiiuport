@@ -35,6 +35,7 @@ Runtime::Runtime() : m_capture(&requestFrameCapture) {
     m_poseBlend.setPaint(&m_paint);
     m_recorder.addAssemblyBeforeDrawListener(&m_poseBlend);
     m_recorder.addAluConstantsListener(&m_viewBlend);
+    m_recorder.setVertexReplacer(&m_quadBlend);
     m_recorder.addDisplayedListener(&m_pacing);
     m_recorder.addScanOutListener(&m_scanOut);
     m_recorder.addFrameEndListener(&m_shapeLog);

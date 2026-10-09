@@ -1313,8 +1313,29 @@ matched, 0 of another size; 19,860 held and 2,673 lerped across 4 contexts, of w
 are still in flight at any sample. With the gate on this headless run painted ~3 times a second
 against ~30 with it off; that rate is the gate's, not the blend's.
 
-**Not yet:** moving models (`ca2d0854ee6b264d` positions) are still the tick's own on the in-between
-paint, so with the view blended they sit half a tick off the camera there.
+### The quad blend
+
+**Owner:** `title/QuadBlend`, fed by `guest/BufferWriters`. `ca2d0854ee6b264d`'s draws are the
+quads the particle, sea-wave and sky-cloud writers fill on the CPU each paint: four corners at stride
+20, a big-endian `32_32_32_FLOAT` position then 8 bytes of UV, in one of the object's two
+alternating buffers. Each write is recorded with the same object's write before it. At the draw, the
+fork's `OnDrawPrepared` offers the buffers with the vertex count read by index (Latte's read size,
+92 bytes for a quad, would make a fifth vertex of the UVs); the blend hands back a copy whose
+positions are `interp::midpoint(before, now)`, and the guest's buffer is not written.
+
+With the gate in, the title writes the same bytes on both paints of a tick. **The write that changes
+an object's bytes is the tick's first, and is blended; the repeat is drawn as written.** Paint parity
+does not say which paint that is: in one run of four the quads' in-between writes repeated the own
+paint's while the view's moved, so the gated tick landed between the paint's quad writes and its view
+upload. In that phase the quads trail the view by one paint. A particle's age is the same on both
+writes of a tick, so `GuestObject::continuesAs` takes an equal age as the same object.
+
+3D lines (stride 152, 10-12 vertices, a second three-float attribute) are longer than the 80 bytes a
+write is checked by and are refused as `longerThanWritten`.
+
+**Measured** (gameplay, mode 13, gate on, standing then walking, gated period): 5,007 blends, all
+moved; 4,992 repeats; 32 first sights; 12,456 line buffers refused; 0 without a position, ambiguous
+or unblendable.
 
 Evidence: the GX2 HLE's caller histogram (`GX2SetVertexUniformReg` link register, offset, size,
 distinct values; a temporary fork-side counter, not kept). A Ghidra caller search by the name

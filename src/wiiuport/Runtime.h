@@ -24,6 +24,7 @@
 #include "wiiuport/title/ObjectPoseLocator.h"
 #include "wiiuport/title/PoseBlend.h"
 #include "wiiuport/title/PoseByShader.h"
+#include "wiiuport/title/QuadBlend.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/ViewBlend.h"
 #include "wiiuport/title/WindWakerPaint.h"
@@ -157,7 +158,11 @@ class Runtime {
     // The camera's view, blended on the in-between paint.
     title::ViewBlend m_viewBlend{&GuestCallProbes::Register, &GuestCallProbes::GuestBytes,
                                  &Runtime::gx2WritePosition, [this] {
-                                     return m_paint.installed() && m_paint.inBetweenPaint();
+                                     return m_paint.inBetweenPaint();
+                                 }};
+    // The CPU-written quads, blended on the first paint of each gated tick.
+    title::QuadBlend m_quadBlend{m_writers, [this] {
+                                     return m_logic.enabled();
                                  }};
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
@@ -169,7 +174,6 @@ class Runtime {
         .input = m_input,
         .capture = m_capture,
         .shapeLog = m_shapeLog,
-        .writers = m_writers,
         .callers = m_callers,
         .paint = m_paint,
         .blocks = m_blocks,
@@ -178,6 +182,7 @@ class Runtime {
         .poseByShader = m_poseByShader,
         .poseBlend = m_poseBlend,
         .viewBlend = m_viewBlend,
+        .quadBlend = m_quadBlend,
         .logic = m_logic,
         .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,

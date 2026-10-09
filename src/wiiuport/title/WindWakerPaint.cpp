@@ -297,7 +297,7 @@ std::string_view WindWakerPaint::modeName(Mode mode) {
 bool WindWakerPaint::inBetweenPaint() const {
     // The count is incremented at the start of every paint, before the body runs, so during a paint
     // it already includes this one: the first of the stand-in's two leaves it odd.
-    return (m_paints.load(std::memory_order_relaxed) & 1u) != 0u;
+    return installed() && (m_paints.load(std::memory_order_relaxed) & 1u) != 0u;
 }
 
 std::optional<WindWakerPaint::Mode> WindWakerPaint::modeFrom(long long number) {

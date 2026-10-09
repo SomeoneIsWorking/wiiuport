@@ -90,6 +90,9 @@ struct Fixture {
                                          [] {
                                              return false;
                                          }};
+    wiiuport::title::QuadBlend quadBlend{writers, [] {
+                                             return false;
+                                         }};
     // The data-area scan, with readers that refuse: a channel built with readers that say no is how
     // every refusal in this file is exercised, and a scan wired with a reader that answers would
     // never reach the refusal it exists to report.
@@ -107,7 +110,6 @@ struct Fixture {
         .input = input,
         .capture = capture,
         .shapeLog = shapeLog,
-        .writers = writers,
         .callers = callers,
         .paint = paint,
         .blocks = blocks,
@@ -116,6 +118,7 @@ struct Fixture {
         .poseByShader = poseByShader,
         .poseBlend = poseBlend,
         .viewBlend = viewBlend,
+        .quadBlend = quadBlend,
         .logic = logic,
         .guestBytes = &noGuestBytes,
         .snapshot = snapshot,
@@ -415,6 +418,8 @@ void everyReportIsOneJsonDocument() {
                                                           {"GET", "/logic"},
                                                           {"GET", "/gate"},
                                                           {"GET", "/blocks"},
+                                                          {"GET", "/view"},
+                                                          {"GET", "/quads"},
                                                           {"POST", "/pacing"},
                                                           {"POST", "/pose"}}) {
         lucent::http::Request read;

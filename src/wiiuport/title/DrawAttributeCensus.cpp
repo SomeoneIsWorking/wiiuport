@@ -121,9 +121,10 @@ void DrawAttributeCensus::onDrawRecorded(const LatteFrameHooks::DrawPrepared& dr
             const auto* base = static_cast<const uint8_t*>(source.data) + attribute.offset;
             for (uint32_t vertex = 0; vertex < vertices && vertex < kMagnitudeSamples; vertex++) {
                 for (uint32_t component = 0; component < perVertex; component++) {
-                    const float value = VertexComponent::read(
-                        base + (static_cast<size_t>(vertex) * source.stride) + component * 4,
-                        attribute.endianSwap);
+                    const float value =
+                        VertexComponent(attribute.endianSwap)
+                            .read(base + (static_cast<size_t>(vertex) * source.stride) +
+                                  (static_cast<size_t>(component) * sizeof(float)));
                     read++;
                     // Three ways a value is not a position. Above the ceiling: a projection
                     // constant. Non-finite: a byte pattern. Below the floor **and non-zero**: a

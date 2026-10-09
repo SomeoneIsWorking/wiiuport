@@ -11,7 +11,6 @@
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/RecordingSnapshot.h"
 #include "wiiuport/frame/VertexChanges.h"
-#include "wiiuport/guest/BufferWriters.h"
 #include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/title/GlobalPoseCensus.h"
@@ -19,6 +18,7 @@
 #include "wiiuport/title/ObjectPoseLocator.h"
 #include "wiiuport/title/PoseBlend.h"
 #include "wiiuport/title/PoseByShader.h"
+#include "wiiuport/title/QuadBlend.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/ViewBlend.h"
 #include "wiiuport/title/WindWakerPaint.h"
@@ -69,7 +69,6 @@ class ControlChannel {
         input::InputDriver& input;
         frame::FrameCapture& capture;
         const frame::FrameShapeLog& shapeLog;
-        const guest::BufferWriters& writers;
         const guest::CallerCensus& callers;
         title::WindWakerPaint& paint;
         const title::UniformBlockCensus& blocks;
@@ -87,6 +86,7 @@ class ControlChannel {
         // draw was actually blended rather than having to ask a second route.
         const title::PoseBlend& poseBlend;
         const title::ViewBlend& viewBlend;
+        const title::QuadBlend& quadBlend;
         title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
@@ -228,7 +228,6 @@ class ControlChannel {
     const SetupStatusSource* m_setupStatus{nullptr};
     std::atomic<HostStopTarget*> m_hostStop{nullptr};
     const frame::FrameShapeLog& m_shapeLog;
-    const guest::BufferWriters& m_writers;
     const guest::CallerCensus& m_callers;
     title::WindWakerPaint& m_paint;
     const title::UniformBlockCensus& m_blocks;
@@ -237,6 +236,7 @@ class ControlChannel {
     title::PoseByShader& m_poseByShader;
     const title::PoseBlend& m_poseBlend;
     const title::ViewBlend& m_viewBlend;
+    const title::QuadBlend& m_quadBlend;
     title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;

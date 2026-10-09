@@ -127,16 +127,15 @@ class DrawRecordedListener {
     virtual void onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) = 0;
 };
 
-// Something that may give a runtime draw vertex bytes of its own. As with
-// AssemblyFilter, only the runtime's replayed draws are offered.
-class VertexFilter {
+// Something that may give one of the title's draws vertex bytes of its own, on the Latte thread.
+class VertexReplacer {
   public:
-    virtual ~VertexFilter() = default;
+    virtual ~VertexReplacer() = default;
 
-    // Returns whether it replaced anything, which the recorder counts. The
-    // replacements must outlive the call only until it returns.
-    virtual bool onRuntimeDraw(const LatteFrameHooks::DrawPrepared& draw,
-                               LatteFrameHooks::VertexReplacements& replacements) = 0;
+    // Returns whether it replaced anything. The replacements must outlive the call only until it
+    // returns.
+    virtual bool onDraw(const LatteFrameHooks::DrawPrepared& draw,
+                        LatteFrameHooks::VertexReplacements& replacements) = 0;
 };
 
 // Fills a FrameRecording from the fork's hooks, and nothing else.
@@ -244,18 +243,13 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     }
 
     // At most one, for the same reason.
-    void setVertexFilter(VertexFilter* filter) {
-        m_vertexFilter = filter;
+    void setVertexReplacer(VertexReplacer* replacer) {
+        m_vertexReplacer = replacer;
     }
 
-    // The runtime's draws the renderer would take vertex bytes for, and those
-    // the vertex filter gave some.
-    uint64_t runtimeDrawsReplaceable() const {
-        return m_runtimeDrawsReplaceable;
-    }
-
-    uint64_t runtimeDrawsReplaced() const {
-        return m_runtimeDrawsReplaced;
+    // The title's draws the replacer gave vertex bytes.
+    uint64_t guestDrawsReplaced() const {
+        return m_guestDrawsReplaced;
     }
 
     uint64_t presentsSeen() const {
@@ -400,9 +394,8 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     uint64_t m_runtimePacketsProcessed{0};
     uint64_t m_runtimeDrawsIssued{0};
     AssemblyFilter* m_assemblyFilter{nullptr};
-    VertexFilter* m_vertexFilter{nullptr};
-    uint64_t m_runtimeDrawsReplaceable{0};
-    uint64_t m_runtimeDrawsReplaced{0};
+    VertexReplacer* m_vertexReplacer{nullptr};
+    uint64_t m_guestDrawsReplaced{0};
 };
 
 } // namespace wiiuport::frame

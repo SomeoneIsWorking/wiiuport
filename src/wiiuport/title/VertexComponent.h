@@ -12,7 +12,17 @@ class VertexComponent {
     static constexpr uint8_t kSwapU16 = 1;
     static constexpr uint8_t kSwapU32 = 2;
 
-    static float read(const uint8_t* bytes, uint8_t endianSwap);
+    explicit VertexComponent(uint8_t endianSwap) : m_endianSwap(endianSwap) {
+    }
+
+    float read(const uint8_t* bytes) const;
+    void write(uint8_t* bytes, float value) const;
+
+  private:
+    // Between memory order and host order; each mode is its own inverse.
+    uint32_t swap(uint32_t word) const;
+
+    uint8_t m_endianSwap;
 };
 
 } // namespace wiiuport::title
