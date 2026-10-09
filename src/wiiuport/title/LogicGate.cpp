@@ -49,6 +49,7 @@ constexpr uint32_t kAndImmediate = 0x70000000; // andi. rS, rA, K
 // even calls and returned on the odd ones without running the tick -- and the
 // title hung, reading exactly like a title that has stopped.
 constexpr uint32_t kBranchNotEqual = 0x40820000; // bne, relative
+constexpr uint32_t kCompareImmediate = 0x2c000000; // cmpwi rA, simm (0x025b020c)
 constexpr uint32_t kReturn = 0x4e800020;         // blr
 constexpr uint32_t kMoveToCounter = 0x7c0903a6;  // mtctr rS
 constexpr uint32_t kBranchCount = 0x4e800420;    // bctr
@@ -165,6 +166,26 @@ void LogicGate::Counter::OnCall(std::span<const uint32_t, 32>, uint32_t) {
     calls.fetch_add(1, std::memory_order_relaxed);
 }
 
+class LogicGate::SceneWork final : public GuestCallProbes::Probe {
+  public:
+    explicit SceneWork(LogicGate& owner) : m_owner(owner) {
+    }
+
+    void OnInstall(GuestCallProbes::Installation installation) override {
+        std::scoped_lock lock(m_owner.m_mutex);
+        m_owner.m_sceneProbe = installation;
+    }
+
+    void OnCall(std::span<const uint32_t, 32>, uint32_t) override {
+        calls.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    std::atomic<uint64_t> calls{0};
+
+  private:
+    LogicGate& m_owner;
+};
+
 class LogicGate::Moment final : public GuestCallProbes::Probe {
   public:
     explicit Moment(LogicGate& owner) : m_owner(owner) {
@@ -187,7 +208,8 @@ void LogicGate::Moment::OnCall(std::span<const uint32_t, 32>, uint32_t) {
 LogicGate::LogicGate(Seams seams)
     : m_register(seams.registerProbe), m_allocateCode(seams.allocateCode),
       m_allocateData(seams.allocateData), m_writeWord(seams.writeWord), m_readWord(seams.readWord),
-      m_moment(new Moment(*this)), m_counter(new Counter(*this)) {
+      m_moment(new Moment(*this)), m_counter(new Counter(*this)),
+      m_sceneWork(new SceneWork(*this)) {
 }
 
 void LogicGate::install() {
@@ -238,6 +260,21 @@ void LogicGate::onInstalled(GuestCallProbes::Installation installation) {
     // Registering from inside this callback is why the installer had to be fixed
     // to survive an append while it iterates.
     m_register(kTick, kTickFirst, *m_counter, true, m_block);
+    // The scene gate reads only the skipping word, which is zero until a skipped call runs.
+    std::vector<uint32_t> scene = scenePayload({.code = m_block, .counters = m_counters});
+    if (scene.size() != kSceneGateWords) {
+        m_refusal = "the scene gate at " + hex(m_block) + " cannot reach the scene's draw";
+        return;
+    }
+    for (size_t word = 0; word < scene.size(); word++) {
+        if (!m_writeWord(m_block + 4 * static_cast<uint32_t>(kSceneGateWord + word), scene[word])) {
+            m_refusal = "the scene gate at " + hex(m_block) + " would not take word " +
+                        std::to_string(word);
+            return;
+        }
+    }
+    m_register(kSceneWork, kSceneWorkFirst, *m_sceneWork, true,
+               m_block + 4 * static_cast<uint32_t>(kSceneGateWord));
 }
 
 bool LogicGate::passThrough() {
@@ -306,6 +343,8 @@ std::vector<uint32_t> LogicGate::payload(Memory memory) {
                                        kOrImmediate | (reg << 21) | (reg << 16) |
                                            (address & 0xffff)};
     };
+    uint32_t skipping = countersAddress + 4 * kSkippingWord;
+    const auto skippingAt = loadAddress(11, skipping);
     const auto matrixInit = loadAddress(12, kMatrixInit);
     const auto iterator = loadAddress(3, kDrawIterator);
     const auto process = loadAddress(4, kDrawProcess);
@@ -335,6 +374,10 @@ std::vector<uint32_t> LogicGate::payload(Memory memory) {
         // r0 holds the caller's link register: the stub ran the tick's `mflr r0`.
         kOpenFrame,
         kSaveLink,
+        skippingAt[0],
+        skippingAt[1],
+        kAddImmediate | (12 << 21) | 1,  // li   r12, 1
+        kStoreWord | (12 << 21) | (11 << 16), // stw  r12, 0(r11)
         matrixInit[0],
         matrixInit[1],
         kMoveToCounter | (12 << 21),
@@ -347,10 +390,34 @@ std::vector<uint32_t> LogicGate::payload(Memory memory) {
         handler[1],
         kMoveToCounter | (12 << 21),
         kBranchCountLink,
+        skippingAt[0],
+        skippingAt[1],
+        kAddImmediate | (12 << 21),           // li   r12, 0
+        kStoreWord | (12 << 21) | (11 << 16), // stw  r12, 0(r11)
         kLoadLink,
         kMoveToLink,
         kCloseFrame,
         kReturn,
+    };
+}
+
+std::vector<uint32_t> LogicGate::scenePayload(Memory memory) {
+    uint32_t skipping = memory.counters + 4 * kSkippingWord;
+    uint32_t testAt = memory.code + 4 * (kSceneGateWord + 4);
+    uint32_t onAt = memory.code + 4 * (kSceneGateWord + 5);
+    uint32_t loopAt = memory.code + 4 * (kSceneGateWord + 6);
+    if (!withinReach(onAt, kSceneWork + 4) || !withinReach(loopAt, kSceneDrawLoop)) {
+        return {};
+    }
+    // r12 carried the stub's branch here, and r0, r11, r12 and cr0 are dead at kSceneWork.
+    return {
+        kLoadUpper | (12 << 21) | ((skipping >> 16) & 0xffff),          // lis   r12, skipping
+        kOrImmediate | (12 << 21) | (12 << 16) | (skipping & 0xffff),   // ori   r12, r12, skipping
+        kLoadWord | (12 << 21) | (12 << 16),                            // lwz   r12, 0(r12)
+        kCompareImmediate | (12 << 16),                                 // cmpwi r12, 0
+        kBranchNotEqual | ((loopAt - testAt) & 0xfffc),                 // bne   the draw loop
+        branchTo(onAt, kSceneWork + 4, false),                          // b     the tick's work
+        branchTo(loopAt, kSceneDrawLoop, false),                        // b     the draw loop
     };
 }
 
@@ -498,6 +565,8 @@ std::string LogicGate::json() const {
     // two things worth telling apart.
     body.string("holdingProbe", std::string(installationName(m_counted)));
     body.number("callsAtProbe", m_counter != nullptr ? m_counter->calls.load() : 0);
+    body.string("sceneProbe", std::string(installationName(m_sceneProbe)));
+    body.number("sceneCalls", m_sceneWork != nullptr ? m_sceneWork->calls.load() : 0);
     // Which payload the block holds, because "enabled" alone cannot say it: the
     // pass-through control is enabled too, and it is the control, not the gate.
     body.raw("through", m_through ? "true" : "false");

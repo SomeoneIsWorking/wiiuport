@@ -83,9 +83,17 @@ class LogicGate {
     static constexpr size_t kThroughWord = 8;
     static constexpr size_t kBranchWord = 13;
     // A skipped call runs the draw phase alone, so the in-between paint is drawn from the
-    // tick's state by the title's own draw methods.
+    // tick's state by the title's own draw methods. It marks itself in the skipping word.
     static constexpr size_t kSkippedDrawWord = 14;
-    static constexpr size_t kGateWords = 32;
+    static constexpr size_t kGateWords = 40;
+    // dScnPly_Draw (0x025af8a0) advances the tick before its draw loop: collision, grass and
+    // trees, particles, the frame counter 0x101ff560. A skipped call's draw phase goes from
+    // the scene's view straight to the loop; no register set in between is read after it.
+    static constexpr uint32_t kSceneWork = 0x025af934;
+    static constexpr uint32_t kSceneWorkFirst = 0x386326a4; // addi r3,r3,0x26a4
+    static constexpr uint32_t kSceneDrawLoop = 0x025b0234;
+    static constexpr size_t kSceneGateWord = kGateWords;
+    static constexpr size_t kSceneGateWords = 7;
     // fpcM_Management's draw half: MtxInit, then fpcDw_Handler(fpcM_DrawIterater, fpcM_Draw).
     static constexpr uint32_t kMatrixInit = 0x0200fac4;
     static constexpr uint32_t kDrawHandler = 0x025de37c;
@@ -93,10 +101,12 @@ class LogicGate {
     static constexpr uint32_t kDrawProcess = 0x025de2cc;
     // The code block holds only the sixteen instructions; the two counters the
     // guest writes are in a block of their own, in memory it may write.
-    static constexpr size_t kBlockWords = kGateWords;
+    static constexpr size_t kBlockWords = kGateWords + kSceneGateWords;
     static constexpr size_t kCallsWord = 0;
     static constexpr size_t kTicksWord = 1;
-    static constexpr size_t kCounterWords = 2;
+    // Non-zero while a skipped call's draw phase runs.
+    static constexpr size_t kSkippingWord = 2;
+    static constexpr size_t kCounterWords = 3;
     // How many bytes the gate asks the loader's arena for, reported so a report
     // that says the counters are zero can be read against the space they are in.
     static constexpr uint32_t kBlockBytes = 4 * kBlockWords;
@@ -188,6 +198,10 @@ class LogicGate {
     // memory, instructions the guest executes and words it writes.
     static std::vector<uint32_t> payload(Memory memory);
 
+    // The scene gate's words: in a skipped call's draw phase, the scene's draw continues at its
+    // draw loop; otherwise at the instruction after kSceneWork. Empty when out of reach.
+    static std::vector<uint32_t> scenePayload(Memory memory);
+
     std::string json() const;
 
   private:
@@ -226,6 +240,10 @@ class LogicGate {
     // gate's block.
     class Counter;
     Counter* m_counter = nullptr;
+    // The standing probe in the scene's draw; its resume is the scene gate.
+    class SceneWork;
+    SceneWork* m_sceneWork = nullptr;
+    std::optional<GuestCallProbes::Installation> m_sceneProbe;
     std::optional<GuestCallProbes::Installation> m_counted;
     std::optional<GuestCallProbes::Installation> m_probe;
 };

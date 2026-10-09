@@ -1421,11 +1421,32 @@ bank s16 +0x100)`. It also refreshes the sead `LookAtCamera` the render layers r
 `doUpdateMatrix` `0x0274ccc4`), which the paint path updates again from the same pos/at. Camera
 execute (in Ex) writes eye/center/up/bank/fovy; nothing downstream needs more.
 
-**The gate's skipped call runs the draw phase.** `LogicGate::payload` words 14-31: a frame that
-saves the link register the stub's `mflr r0` left in r0, `MtxInit` `0x0200fac4`, then
-`fpcDw_Handler(0x025df908, 0x025de2cc)`, both through `ctr`, then return. Measured in gameplay
-(mode 13, gate on, walking): the title runs and draws (`scratch/drawphase/run.py`), at the same
-call and tick rate as the gate that only returned, under the same machine load.
+**The gate's skipped call runs the draw phase.** `LogicGate::payload` words 14-39: a frame that
+saves the link register the stub's `mflr r0` left in r0, sets the skipping word (counters `+8`),
+`MtxInit` `0x0200fac4`, `fpcDw_Handler(0x025df908, 0x025de2cc)`, both through `ctr`, clears the
+skipping word, then returns.
+
+**A draw phase is not pure: the scene's draw advances the tick.** HD's `dScnPly_Draw` is
+`0x025af8a0`, TWW's (`d_s_play.cpp`) in the same order: the scene's view (`0x0276c9b4`), collision
+`Move` (`0x0200e558`), `Bgsp` `ClrMoveFlag` (`0x024ee9c8`), stage-change requests, then under
+`!dMenu_flag() && pauseTimer == 0` vibration, grass/tree/wood/flower execute, `Bgsp` `Move`,
+particle `calc3D`/`calc2D` (`0x025a81a0`, `0x025a8148`) and the frame counter `0x101ff560`++, then
+`MassClear`, `calcMenu`, and only then the actor draw loop (`0x025b0234`) and the grass, tree and
+attention draws. Run twice per tick, all of that ran twice: the frame counter rose 41 over 20 ticks
+(`scratch/drawphase/counter.py`). The pause guard is not usable for the skip: its else branch,
+`dVibration_c::Pause`, cancels rumble and camera-shake patterns.
+
+So the scene gate (`LogicGate::scenePayload`, a standing probe at `0x025af934`,
+`addi r3,r3,0x26a4`) sends a skipped call's scene draw from its view straight to the draw loop;
+no register set between the two is read after the loop, and the epilogue reloads r25-r31 from the
+frame. After it: the counter rose 50 over 50 ticks, and idle Link with interpolation off repeats
+exactly on in-between paints (`0, 21742, 0, 19169` pixels changed; `133` and `83` before, from the
+doubled particles).
+
+Draw methods that still advance state, from the decomp (874 draw functions scanned): the Z-target
+cursor's animation (`dAttention_c::runDrawProc`, in the scene's attention draw), Puppet Ganon's
+smoothing (`d_a_bgn`), fireflies (`d_a_ff`), the grappling rope (`d_a_himo2`) and Jabun's cave
+flash timer (`d_a_obj_ajav`). On the in-between paint these run a second time per tick.
 
 **Ordering.** A draw phase can only show a tick it has, so the picture lags one tick: the tick's own
 draw phase shows the midpoint of the previous and current inputs, and the in-between frame's draw
@@ -1472,8 +1493,9 @@ unreadable or failed writes; frames render without seams.
 
 Not interpolated, so still stepping at the tick rate: anything a draw method takes from state other
 than these inputs (material and texture animation, particles positioned in execute), and camera cuts
-and actor teleports, which blend across the cut for one present. Whether any draw method advances
-state when run twice is not yet measured.
+and actor teleports, which blend across the cut for one present. The game has no cut flag:
+`dCamera_c::Set` is called every frame by event cameras and `Reset` by a handful of actors, so a cut
+is not told apart from a fast move.
 
 ## The deleted mechanism, and where its evidence went
 
