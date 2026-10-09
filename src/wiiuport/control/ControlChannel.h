@@ -14,6 +14,7 @@
 #include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/title/BufferedBlocks.h"
+#include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/GlobalPoseCensus.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
@@ -87,6 +88,7 @@ class ControlChannel {
         const title::PoseBlend& poseBlend;
         const title::QuadBlend& quadBlend;
         const title::BufferedBlocks& bufferedBlocks;
+        title::DrawInterpolation& drawInterpolation;
         title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
@@ -237,6 +239,7 @@ class ControlChannel {
     const title::PoseBlend& m_poseBlend;
     const title::QuadBlend& m_quadBlend;
     const title::BufferedBlocks& m_bufferedBlocks;
+    title::DrawInterpolation& m_drawInterpolation;
     title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;

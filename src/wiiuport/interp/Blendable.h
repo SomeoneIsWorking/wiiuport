@@ -40,6 +40,12 @@ inline bool midpoint(std::span<const float> from, std::span<const float> to, std
     return true;
 }
 
+// The midpoint of two s16 angles, the short way round.
+inline int16_t midpointAngle(int16_t from, int16_t to) {
+    auto delta = static_cast<int16_t>(static_cast<uint16_t>(to) - static_cast<uint16_t>(from));
+    return static_cast<int16_t>(from + (delta / 2));
+}
+
 // A value's two ends, N-2's and N's, bit for bit, as one key: the same move
 // made by several draws keys alike.
 inline uint64_t endsOf(float twoBack, float latest) {

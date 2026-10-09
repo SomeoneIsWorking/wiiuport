@@ -72,6 +72,8 @@ add_library(wiiuport STATIC
   title/UniformBlockRing.h
   title/BufferedBlocks.cpp
   title/BufferedBlocks.h
+  title/DrawInterpolation.cpp
+  title/DrawInterpolation.h
   title/QuadBlend.cpp
   title/QuadBlend.h
   title/VertexComponent.cpp

@@ -19,6 +19,7 @@
 #include "wiiuport/title/BufferedBlocks.h"
 #include "wiiuport/title/CommandStreamIdentity.h"
 #include "wiiuport/title/DrawAttributeCensus.h"
+#include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/GlobalPoseCensus.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/NodePoseLocator.h"
@@ -158,6 +159,12 @@ class Runtime {
     title::WindWakerPaint m_paint{&GuestCallProbes::Register,      &GuestPatching::AllocateCode,
                                   &GuestPatching::WriteWord,       &GuestPatching::ReadWord,
                                   &GuestPatching::SetSwapInterval, &GuestPatching::SwapInterval};
+    title::DrawInterpolation m_drawInterpolation{{.registerProbe = &GuestCallProbes::Register,
+                                                  .readWords = &GuestPatching::ReadWords,
+                                                  .writeWords = &GuestPatching::WriteDataWords,
+                                                  .gated = [this] {
+                                                      return m_logic.enabled();
+                                                  }}};
     // The CPU-written quads, blended on the first paint of each gated tick.
     title::QuadBlend m_quadBlend{m_writers, [this] {
                                      return m_logic.enabled();
@@ -181,6 +188,7 @@ class Runtime {
         .poseBlend = m_poseBlend,
         .quadBlend = m_quadBlend,
         .bufferedBlocks = m_bufferedBlocks,
+        .drawInterpolation = m_drawInterpolation,
         .logic = m_logic,
         .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,

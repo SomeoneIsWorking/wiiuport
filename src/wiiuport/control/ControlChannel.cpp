@@ -36,10 +36,11 @@ namespace {
 const char* const kRoutes =
     "GET /counters, GET /capture, "
     "GET /controllers, GET /setup, "
-    "GET /recordings, GET /draws, GET /memory, GET /callers, GET /quads, GET /buffered, "
+    "GET /recordings, GET /draws, GET /memory, GET /callers, GET /quads, "
+    "GET /buffered, GET /interpolation, "
     "GET /paint, GET /blocks, GET /logic, GET /gate, GET /pose, "
     "POST /global-pose, POST /pose, POST /capture, POST /pacing, "
-    "POST /draws, POST /recordings, POST /paint, POST /logic, POST /input "
+    "POST /draws, POST /recordings, POST /paint, POST /logic, POST /interpolation, POST /input "
     "and POST /quit";
 
 lucent::http::Response notFound() {
@@ -142,8 +143,8 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_shapeLog(sources.shapeLog), m_callers(sources.callers), m_paint(sources.paint),
       m_blocks(sources.blocks), m_poses(sources.poses), m_poseByShader(sources.poseByShader),
       m_poseBlend(sources.poseBlend), m_quadBlend(sources.quadBlend),
-      m_bufferedBlocks(sources.bufferedBlocks), m_logic(sources.logic),
-      m_globalPose(sources.globalPose), m_guestBytes(sources.guestBytes),
+      m_bufferedBlocks(sources.bufferedBlocks), m_drawInterpolation(sources.drawInterpolation),
+      m_logic(sources.logic), m_globalPose(sources.globalPose), m_guestBytes(sources.guestBytes),
       m_snapshot(sources.snapshot), m_pacing(sources.pacing), m_scanOut(sources.scanOut),
       m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
 }
@@ -685,6 +686,10 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
     // its ticks. It lives above the `method != "GET"` refusal below,
     // because a POST handler under that refusal is a route the refusal
     // itself advertises and no request can reach.
+    if (request.method == "POST" && request.path() == "/interpolation") {
+        m_drawInterpolation.setEnabled(requestedFlag(std::string(request.query()), "on", true));
+        return lucent::http::Response::json(200, "OK", m_drawInterpolation.json());
+    }
     if (request.method == "POST" && request.path() == "/logic") {
         const bool wanted = requestedFlag(std::string(request.query()), "on", true);
         // `through=1` installs the pass-through control: a payload of one word
@@ -895,6 +900,9 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
                 "and let K frames end.\n");
         }
         return lucent::http::Response::binary(200, "OK", "application/octet-stream", framed);
+    }
+    if (request.path() == "/interpolation") {
+        return lucent::http::Response::json(200, "OK", m_drawInterpolation.json());
     }
     if (request.path() == "/buffered") {
         return lucent::http::Response::json(200, "OK", m_bufferedBlocks.json());
