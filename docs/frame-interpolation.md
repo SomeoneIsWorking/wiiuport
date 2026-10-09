@@ -450,10 +450,11 @@ frame. After it: the counter rose 50 over 50 ticks, and idle Link with interpola
 exactly on in-between paints (`0, 21742, 0, 19169` pixels changed; `133` and `83` before, from the
 doubled particles).
 
-Draw methods that still advance state, from the decomp (874 draw functions scanned): the Z-target
-cursor's animation (`dAttention_c::runDrawProc`, in the scene's attention draw), Puppet Ganon's
+Draw methods that still advance state, from the decomp (874 draw functions scanned): Puppet Ganon's
 smoothing (`d_a_bgn`), fireflies (`d_a_ff`), the grappling rope (`d_a_himo2`) and Jabun's cave
-flash timer (`d_a_obj_ajav`). On the in-between paint these run a second time per tick. Material
+flash timer (`d_a_obj_ajav`). On the in-between paint these run a second time per tick. The Z-target
+cursor is not one: TWW plays its morf in `dAttention_c::runDrawProc`, called from `Run` in
+`dScnPly_Execute`, and `Draw` only copies the morf's frame to the colour animation. Material
 animations played in an actor's draw (two a tick on Outset) are held to one step a tick by
 `title/MaterialInterpolation`, below.
 
