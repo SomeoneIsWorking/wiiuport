@@ -38,7 +38,6 @@ int main(int argc, char** argv) {
     wiiuport::tests::runFrameTests();
     wiiuport::tests::runControlTests();
     wiiuport::tests::runPaintTests();
-    wiiuport::tests::runBufferWritersTests();
     wiiuport::tests::runBlockCensusTests();
     wiiuport::tests::runLogicGateTests();
     wiiuport::tests::runObjectPoseHistoryTests();
@@ -46,7 +45,6 @@ int main(int argc, char** argv) {
     wiiuport::tests::runObjectPoseLocatorTests();
     wiiuport::tests::runPoseByShaderTests();
     wiiuport::tests::runPoseBlendTests();
-    wiiuport::tests::runQuadBlendTests();
     wiiuport::tests::runBufferedBlocksTests();
     wiiuport::tests::runDrawInterpolationTests();
     wiiuport::tests::runGuestCallProbeTests();

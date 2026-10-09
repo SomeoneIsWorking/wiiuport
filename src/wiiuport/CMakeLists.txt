@@ -55,8 +55,6 @@ add_library(wiiuport STATIC
   frame/VertexChanges.cpp
   frame/VertexChanges.h
   guest/GuestWords.h
-  guest/BufferWriters.cpp
-  guest/BufferWriters.h
   guest/CallerCensus.cpp
   guest/CallerCensus.h
   guest/ProbeInstallation.h
@@ -74,8 +72,6 @@ add_library(wiiuport STATIC
   title/BufferedBlocks.h
   title/DrawInterpolation.cpp
   title/DrawInterpolation.h
-  title/QuadBlend.cpp
-  title/QuadBlend.h
   title/VertexComponent.cpp
   title/VertexComponent.h
   title/VertexPoseHistory.cpp
@@ -94,16 +90,9 @@ add_library(wiiuport STATIC
   title/UniformBlockCensus.h
   title/WindWakerPaint.cpp
   title/WindWakerPaint.h
-  guest/ParticleProbe.cpp
-  guest/ParticleProbe.h
-  guest/LineProbe.cpp
-  guest/LineProbe.h
-  guest/EnvironmentProbe.cpp
-  guest/EnvironmentProbe.h
     input/InputDriver.cpp
   input/InputDriver.h
   interp/Blendable.h
-  interp/GuestObject.h
 )
 
 target_include_directories(wiiuport PUBLIC

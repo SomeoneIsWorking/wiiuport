@@ -63,7 +63,6 @@ Prepared aDraw(uint32_t stride, uint32_t bufferBytes) {
     draw.vertexBuffers[0].data = g_buffer.data();
     draw.vertexBuffers[0].sizeInBytes = bufferBytes;
     draw.vertexBuffers[0].stride = stride;
-    draw.vertexBuffers[0].slot = 0;
     return draw;
 }
 

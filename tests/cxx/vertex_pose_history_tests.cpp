@@ -56,7 +56,6 @@ Prepared aMeshDraw(const Mesh& mesh) {
     draw.vertexBuffers[0].sizeInBytes =
         static_cast<uint32_t>(mesh.positions.size() * sizeof(float));
     draw.vertexBuffers[0].stride = mesh.stride;
-    draw.vertexBuffers[0].slot = 0;
     draw.vertexAttributeCount = 1;
     draw.vertexAttributes[0].buffer = 0;
     draw.vertexAttributes[0].offset = 0;

@@ -116,17 +116,6 @@ class DrawRecordedListener {
     virtual void onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) = 0;
 };
 
-// Something that may give one of the title's draws vertex bytes of its own, on the Latte thread.
-class VertexReplacer {
-  public:
-    virtual ~VertexReplacer() = default;
-
-    // Returns whether it replaced anything. The replacements must outlive the call only until it
-    // returns.
-    virtual bool onDraw(const LatteFrameHooks::DrawPrepared& draw,
-                        LatteFrameHooks::VertexReplacements& replacements) = 0;
-};
-
 // Fills a FrameRecording from the fork's hooks, and nothing else.
 //
 // Kept separate from FrameRecording so the recording stays testable without
@@ -156,8 +145,7 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void OnDisplayed(bool fromRuntime) override;
     void OnShown(const LatteFrameHooks::ShownFrame& shown) override;
     void OnGuestDraw(bool fromCommandBuffer) override;
-    void OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw,
-                        LatteFrameHooks::VertexReplacements& replacements) override;
+    void OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw) override;
     void OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) override;
 
     // Empty by default, so a build that installs no listener behaves as a
@@ -219,16 +207,6 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     // overwriting the other without either being able to report it.
     void setAssemblyFilter(AssemblyFilter* filter) {
         m_assemblyFilter = filter;
-    }
-
-    // At most one, for the same reason.
-    void setVertexReplacer(VertexReplacer* replacer) {
-        m_vertexReplacer = replacer;
-    }
-
-    // The title's draws the replacer gave vertex bytes.
-    uint64_t guestDrawsReplaced() const {
-        return m_guestDrawsReplaced;
     }
 
     uint64_t presentsSeen() const {
@@ -371,8 +349,6 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     uint64_t m_runtimePacketsProcessed{0};
     uint64_t m_runtimeDrawsIssued{0};
     AssemblyFilter* m_assemblyFilter{nullptr};
-    VertexReplacer* m_vertexReplacer{nullptr};
-    uint64_t m_guestDrawsReplaced{0};
 };
 
 } // namespace wiiuport::frame

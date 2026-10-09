@@ -10,11 +10,7 @@
 #include "wiiuport/frame/PresentPacing.h"
 #include "wiiuport/frame/RecordingObserver.h"
 #include "wiiuport/frame/RecordingSnapshot.h"
-#include "wiiuport/guest/BufferWriters.h"
 #include "wiiuport/guest/CallerCensus.h"
-#include "wiiuport/guest/EnvironmentProbe.h"
-#include "wiiuport/guest/LineProbe.h"
-#include "wiiuport/guest/ParticleProbe.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/title/BufferedBlocks.h"
 #include "wiiuport/title/CommandStreamIdentity.h"
@@ -26,7 +22,6 @@
 #include "wiiuport/title/ObjectPoseLocator.h"
 #include "wiiuport/title/PoseBlend.h"
 #include "wiiuport/title/PoseByShader.h"
-#include "wiiuport/title/QuadBlend.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
@@ -132,10 +127,6 @@ class Runtime {
     title::UniformBlockRing m_blockRing{&GuestPatching::ReadWords, nullptr};
     // The base the relative offset is relative to, measured against the draw's real block
     // addresses. The last thing standing between the objective's second question and an answer.
-    guest::BufferWriters m_writers;
-    guest::ParticleProbe m_particleProbe{m_writers};
-    guest::EnvironmentProbe m_environmentProbe{m_writers};
-    guest::LineProbe m_lineProbe{m_writers};
     guest::CallerCensus m_callers{&GuestCallProbes::Register, &GuestCallProbes::GuestBytes};
     title::BufferedBlocks m_bufferedBlocks{&GuestCallProbes::Register,
                                            &GuestCallProbes::GuestBytes};
@@ -165,10 +156,6 @@ class Runtime {
                                                   .gated = [this] {
                                                       return m_logic.enabled();
                                                   }}};
-    // The CPU-written quads, blended on the first paint of each gated tick.
-    title::QuadBlend m_quadBlend{m_writers, [this] {
-                                     return m_logic.enabled();
-                                 }};
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
     frame::PresentPacing m_scanOut{&frame::PresentPacing::Clock::now};
@@ -186,7 +173,6 @@ class Runtime {
         .globalPose = m_globalPose,
         .poseByShader = m_poseByShader,
         .poseBlend = m_poseBlend,
-        .quadBlend = m_quadBlend,
         .bufferedBlocks = m_bufferedBlocks,
         .drawInterpolation = m_drawInterpolation,
         .logic = m_logic,

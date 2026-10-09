@@ -14,8 +14,8 @@ so the pose is not in the assembled uniforms. RE of the uniform uploads settles 
 library's (key 1 is each HUD pane's model-view, filled by `Pane::LoadMtx` `0x028771b8`); the 3D
 camera reaches the shaders through each model's double-buffered `g3d` view block (`0x027fda54`,
 committed by `0x027fb678`), whose bound slot flips once per tick; the CPU-written quads are
-`ca2d0854ee6b264d`'s positions, rewritten every frame. The quads are blended at the draw
-(`title/QuadBlend`, `GET /quads`: 5,007 blends, all moving, one per object per tick). The view
+`ca2d0854ee6b264d`'s positions, rewritten every frame by the particle, sea and cloud writers; the
+GPU-side quad blend is deleted and these are to be blended game-side. The view
 blend is retired: it held key 1 per context, but key 1 is each layout pane's model-view, so it
 paired different panes and broke the HUD on in-between paints. The low headless paint rate is not the
 gate's: unmodded paints at the same rate, and `perf` put 29% of the product's samples in the retired
