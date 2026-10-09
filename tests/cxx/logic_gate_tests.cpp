@@ -52,13 +52,17 @@ GuestCallProbes::Probe* g_probe = nullptr;
 // because the count of entries is the whole diagnosis.
 std::vector<std::pair<uint32_t, bool>> g_registrations;
 uint32_t g_resume = 0;
+uint32_t g_sceneResume = 0;
 
 void keepRegistration(uint32_t entry, uint32_t, GuestCallProbes::Probe& probe, bool holdsEntry,
                       uint32_t resume) {
     g_probe = &probe;
     g_registrations.emplace_back(entry, holdsEntry);
-    if (holdsEntry && resume != 0) {
+    if (holdsEntry && resume != 0 && entry == LogicGate::kTick) {
         g_resume = resume;
+    }
+    if (entry == LogicGate::kSceneWork) {
+        g_sceneResume = resume;
     }
 }
 
@@ -100,6 +104,7 @@ LogicGate makeGate(FakeGuest& guest) {
     g_probe = nullptr;
     g_registrations.clear();
     g_resume = 0;
+    g_sceneResume = 0;
     return LogicGate({.registerProbe = &keepRegistration,
                       .allocateCode = &allocateCode,
                       .allocateData = &allocateData,
@@ -122,6 +127,7 @@ void linked() {
 // their uses were four places to look.
 constexpr uint32_t kCallsAt = kCounters + 4 * LogicGate::kCallsWord;
 constexpr uint32_t kTicksAt = kCounters + 4 * LogicGate::kTicksWord;
+constexpr uint32_t kSkippingAt = kCounters + 4 * LogicGate::kSkippingWord;
 constexpr uint32_t kThroughAt = kBlock + 4 * LogicGate::kThroughWord;
 constexpr uint32_t kBranchAt = kBlock + 4 * LogicGate::kBranchWord;
 // The bare pass-through a freshly allocated gate block holds: a branch to the tick's own body, by
@@ -164,7 +170,7 @@ void wiiuport::tests::runLogicGateTests() {
     // title and a payload this size is mostly the cost of being sure.
     {
         const auto words = LogicGate::payload({.code = kBlock, .counters = kCounters});
-        check::isTrue(words.size() == LogicGate::kGateWords, "the gate is thirty-two words");
+        check::isTrue(words.size() == LogicGate::kGateWords, "the gate is forty words");
         if (words.size() != LogicGate::kGateWords) {
             return;
         }
@@ -281,24 +287,49 @@ void wiiuport::tests::runLogicGateTests() {
                    words.at(index + 1) ==
                        (0x60000000u | (reg << 21) | (reg << 16) | (address & 0xffffu));
         };
-        check::isTrue(words.size() == at + 18,
-                      "the skipped draw is the gate's last eighteen words");
-        if (words.size() != at + 18) {
+        check::isTrue(words.size() == at + 26,
+                      "the skipped draw is the gate's last twenty-six words");
+        if (words.size() != at + 26) {
             return;
         }
         check::isTrue(words[at] == 0x9421fff0 && words[at + 1] == 0x90010014,
                       "it opens a frame and saves the caller's link register");
-        check::isTrue(loads(at + 2, 12, 0x0200fac4) && words[at + 4] == 0x7d8903a6 &&
-                          words[at + 5] == 0x4e800421,
+        check::isTrue(loads(at + 2, 11, kSkippingAt) && words[at + 4] == 0x39800001 &&
+                          words[at + 5] == 0x918b0000,
+                      "marks the skipping word: li r12,1; stw r12,0(r11)");
+        check::isTrue(loads(at + 6, 12, 0x0200fac4) && words[at + 8] == 0x7d8903a6 &&
+                          words[at + 9] == 0x4e800421,
                       "calls MtxInit through r12");
-        check::isTrue(loads(at + 6, 3, 0x025df908) && loads(at + 8, 4, 0x025de2cc),
+        check::isTrue(loads(at + 10, 3, 0x025df908) && loads(at + 12, 4, 0x025de2cc),
                       "passes fpcM_DrawIterater and fpcM_Draw");
-        check::isTrue(loads(at + 10, 12, 0x025de37c) && words[at + 12] == 0x7d8903a6 &&
-                          words[at + 13] == 0x4e800421,
+        check::isTrue(loads(at + 14, 12, 0x025de37c) && words[at + 16] == 0x7d8903a6 &&
+                          words[at + 17] == 0x4e800421,
                       "to fpcDw_Handler");
-        check::isTrue(words[at + 14] == 0x80010014 && words[at + 15] == 0x7c0803a6 &&
-                          words[at + 16] == 0x38210010 && words[at + 17] == 0x4e800020,
+        check::isTrue(loads(at + 18, 11, kSkippingAt) && words[at + 20] == 0x39800000 &&
+                          words[at + 21] == 0x918b0000,
+                      "clears the skipping word: li r12,0; stw r12,0(r11)");
+        check::isTrue(words[at + 22] == 0x80010014 && words[at + 23] == 0x7c0803a6 &&
+                          words[at + 24] == 0x38210010 && words[at + 25] == 0x4e800020,
                       "and returns to the caller through the saved link register");
+    }
+    // In a skipped call's draw phase the scene's draw goes from its view to its draw loop.
+    {
+        const auto words = LogicGate::scenePayload({.code = kBlock, .counters = kCounters});
+        check::isTrue(words.size() == LogicGate::kSceneGateWords, "the scene gate is seven words");
+        if (words.size() != LogicGate::kSceneGateWords) {
+            return;
+        }
+        uint32_t at = kBlock + (4 * LogicGate::kSceneGateWord);
+        check::isTrue(words[0] == (0x3d800000u | (kSkippingAt >> 16)) &&
+                          words[1] == (0x618c0000u | (kSkippingAt & 0xffffu)) &&
+                          words[2] == 0x818c0000u,
+                      "it reads the skipping word: lis/ori r12; lwz r12,0(r12)");
+        check::isTrue(words[3] == 0x2c0c0000u, "compares it with zero: cmpwi r12,0");
+        check::isTrue(words[4] == 0x40820008u, "and when set branches two words on: bne");
+        check::isTrue(at + 20 + (words[5] & 0x03fffffcu) == LogicGate::kSceneWork + 4,
+                      "otherwise the scene's draw continues with the tick's work");
+        check::isTrue(at + 24 + (words[6] & 0x03fffffcu) == LogicGate::kSceneDrawLoop,
+                      "and when set at its draw loop");
     }
     // The pass-through control has to reach the same instruction the gate's own
     // through path does. The indirect flavour used to load the *block's* address,
@@ -354,6 +385,15 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(!holdsEntry(LogicGate::kTick),
                       "and the momentary one does not keep the entry, so the standing one can "
                       "take it");
+        check::isTrue(LogicGate::kSceneWorkFirst == 0x386326a4 &&
+                          g_sceneResume == kBlock + (4 * LogicGate::kSceneGateWord) &&
+                          holdsEntry(LogicGate::kSceneWork),
+                      "the scene's draw is held at addi r3,r3,0x26a4 and resumes at the scene gate");
+        uint32_t sceneWord = 0;
+        check::isTrue(readWord(kBlock + (4 * LogicGate::kSceneGateWord), sceneWord) &&
+                          sceneWord == LogicGate::scenePayload({.code = kBlock,
+                                                                .counters = kCounters})[0],
+                      "and the scene gate is written before any call can reach it");
         check::isTrue(g_resume == kBlock,
                       "the standing probe on the tick resumes at the gate's own block, which is "
                       "the only way into the trampoline area known to arrive: a branch written "
