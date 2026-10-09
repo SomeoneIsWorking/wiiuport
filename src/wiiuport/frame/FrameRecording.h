@@ -41,15 +41,6 @@ struct RecordedUniformAssembly {
     // Whether the stage compares against a depth texture: it looks up a map,
     // such as the light's, that the frame drew before it.
     bool looksUpDepthMap{false};
-    // **The guest address the title passed for the same slots, one per pair.** The fork's
-    // `blockAddresses` is what the register holds, which is `memory_virtualToPhysical` of this,
-    // and the title's own descriptor record names its block by the address it passed to
-    // `GX2Set*UniformBlock`. A record word and a register word are two addresses for one block in
-    // two different address spaces, and comparing them is how a membership test that should have
-    // hit in every draw reported no word at all. This vector is what a record word is compared
-    // against, and it is also the only form of the address a block's bytes are readable and
-    // writable at.
-    std::vector<uint32_t> blockGuestAddresses;
     // Word 0 of the uniform-block register banks this draw's *shader* names, as
     // (bufferId, value) pairs.
     //
@@ -66,13 +57,7 @@ struct RecordedUniformAssembly {
     // `memory_virtualToPhysical` of the address the title passed, and the title's descriptor
     // record names its block by the guest address it passed. The two are different numbers for one
     // block, and a record word compared against this one cannot hit however large the corpus.
-    // `blockGuestAddresses` beside it is the same block in the form a record word is comparable
-    // with, and the form its bytes are readable and writable at.
     std::vector<uint32_t> blockSources;
-    // Word 1 of the same register slots -- `size - 1` as the guest wrote it, one word per pair in
-    // `blockSources`. **The half that says the slot was written**: word 0 is whatever last held the
-    // slot, and a size the guest chose is a small constant that register state does not invent.
-    std::vector<uint32_t> blockSizes;
     // The node whose draw this assembly belongs to, when the title's own code has said so.
     //
     // The node is not in anything the GX2 hook sees; it is one step away, because the draw

@@ -15,8 +15,13 @@ so the pose is not in the assembled uniforms. RE of the uniform uploads settles 
 the view; moving models are CPU-transformed into `ca2d0854ee6b264d`'s positions, rewritten every
 frame. The view is blended at the register file (`title/ViewBlend`, `GET /view`: 2,673 lerps,
 2,565 moving, walking with the gate on) and the CPU-written quads at the draw (`title/QuadBlend`,
-`GET /quads`: 5,007 blends, all moving, one per object per tick). Next: look at a player run in mode
-13 with the gate on, and the gate's headless paint rate (~3/s).
+`GET /quads`: 5,007 blends, all moving, one per object per tick). The low headless paint rate is not the
+gate's: unmodded paints at the same rate, and `perf` put 29% of the product's samples in the retired
+`UniformBlockAddress` instrument on the Latte thread (deleted; 7 to 12-15 paints/s unmodded). The
+rest of the always-on census family (`ObjectPoseLocator`, `UniformBlockCensus` binders,
+`DrawAttributeCensus`) still takes ~13% of samples on the Latte thread and ~8% on the guest cores.
+Rates measured on 2026-10-09 ran beside a load average of 19-28 on 16 cores and are not a baseline.
+Next: a rate measurement on an idle machine, and a player run in mode 13 with the gate on.
 
 **The host-side statistical lerp is deleted, not deferred.** It identified the camera by
 searching shaders for a 3x4 that moved like one, matched each draw's identity across ticks by

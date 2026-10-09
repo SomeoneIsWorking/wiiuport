@@ -24,7 +24,6 @@ void runCommandStreamIdentityTests();
 void runVertexComponentTests();
 void runDrawAttributeCensusTests();
 void runVertexPoseHistoryTests();
-void runUniformBlockAddressTests();
 void runUniformBlockRingTests();
 void runInputTests();
 void runBufferWritersTests();

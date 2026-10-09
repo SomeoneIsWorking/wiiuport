@@ -6,7 +6,6 @@
 #include "wiiuport/title/NodePoseLocator.h"
 #include "wiiuport/title/ObjectPoseHistory.h"
 #include "wiiuport/title/ObjectPoseLocator.h"
-#include "wiiuport/title/UniformBlockAddress.h"
 #include "wiiuport/title/UniformBlockRing.h"
 #include "wiiuport/title/VertexPoseHistory.h"
 
@@ -143,10 +142,6 @@ class UniformBlockCensus {
     // objective's own second question, and it is measured here because the census is the one
     // place that knows which block a binding names. Null is allowed and reported as null.
     void setBlockRing(UniformBlockRing* ring);
-
-    // Where the block is, and which word of the record says so. Null is allowed and reported
-    // as null.
-    void setBlockAddress(UniformBlockAddress* address);
 
     UniformBlockCensus(Register registerProbe, ReadWord readWord,
                        ObjectPoseHistory::ReadWords readWords,
@@ -297,7 +292,6 @@ class UniformBlockCensus {
     const DrawAttributeCensus* m_drawAttributes = nullptr;
     const VertexPoseHistory* m_vertexHistory = nullptr;
     UniformBlockRing* m_ring = nullptr;
-    UniformBlockAddress* m_address = nullptr;
     Binder m_first{*this, false};
     Binder m_second{*this, true};
     std::atomic<uint64_t> m_bindings{0};
@@ -316,7 +310,6 @@ class UniformBlockCensus {
     std::atomic<uint64_t> m_materialsRefused{0};
     std::atomic<uint64_t> m_otherRecordsRead{0};
     std::atomic<uint64_t> m_otherRecordsUnread{0};
-    std::atomic<uint64_t> m_recordsPublished{0};
     // And the ones that named something else, which the report carries as itself.
     uint64_t m_cursorsOutOfRange = 0;
     // Whether the ring turns per bind or per frame, counted rather than read:

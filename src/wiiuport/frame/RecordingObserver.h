@@ -4,7 +4,6 @@
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/frame/VertexChanges.h"
 #include "wiiuport/title/CommandStreamIdentity.h"
-#include "wiiuport/title/UniformBlockAddress.h"
 
 #include <array>
 #include <cstddef>
@@ -18,8 +17,6 @@ namespace wiiuport::frame {
 // the interface's own limit: a count the interface says cannot happen must not
 // be read past the caller's buffer.
 std::span<const uint32_t> sourceWordsOf(const LatteFrameHooks::UniformAssembly& assembly);
-// Word 1 of the same slots: `size - 1` per pair, or empty when the assembly carried none.
-std::span<const uint32_t> sourceSizeWordsOf(const LatteFrameHooks::UniformAssembly& assembly);
 
 // Notified once a frame is complete and published, which is the only moment
 // anything may act on a whole frame. That is when the guest has finished
@@ -156,9 +153,6 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     // Where the uniform block the draw sourced is, and which word of the descriptor record says
     // so. The observer is the one place that sees both, because the assembly it records is the
     // one that follows the binding. Null is allowed and means it is not measured.
-    void setBlockAddress(title::UniformBlockAddress* address) {
-        m_blockAddress = address;
-    }
 
     RecordingObserver() = default;
 
@@ -373,7 +367,6 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     FrameRecording m_completed;
     // Names each draw's node, or null.
     const title::CommandStreamIdentity* m_objectIdentity = nullptr;
-    title::UniformBlockAddress* m_blockAddress = nullptr;
     RecordedUniformAssembly m_assemblyScratch;
     FrameRecording m_previous;
     std::array<uint64_t, LatteFrameHooks::kWithheldEffectCount> m_runtimeWithheld{};

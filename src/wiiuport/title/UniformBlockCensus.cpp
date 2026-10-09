@@ -109,10 +109,6 @@ void UniformBlockCensus::setBlockRing(UniformBlockRing* ring) {
     m_ring = ring;
 }
 
-void UniformBlockCensus::setBlockAddress(UniformBlockAddress* address) {
-    m_address = address;
-}
-
 void UniformBlockCensus::setIdentity(CommandStreamIdentity* identity) {
     m_identity = identity;
 }
@@ -198,18 +194,6 @@ void UniformBlockCensus::record(uint32_t object, bool second) {
             m_otherRecordsRead.fetch_add(1, std::memory_order_relaxed);
         } else {
             m_otherRecordsUnread.fetch_add(1, std::memory_order_relaxed);
-        }
-        // Published from the bound record alone. Waiting on the other slot published nothing at
-        // all -- 179,597 of 179,597 other-slot reads failed, because that entry is not mapped --
-        // and the measurement that was supposed to name the address word never ran at all.
-        if (m_address != nullptr) {
-            m_address->publish(object, std::span<const uint32_t>(binding.entry));
-            m_recordsPublished.fetch_add(1, std::memory_order_relaxed);
-            // The block's size, from the record's own size word, so the address measurement can
-            // tell a register slot the guest wrote from one it did not: the register holds
-            // `size - 1`. Read from the record rather than from `binding.blockSize`, which is
-            // filled in by `blockOf` further down and is still zero here.
-            m_address->setExpectedSize(binding.entry[UniformBlockCensus::kEntryBlockSize / 4]);
         }
         mapWords(binding.otherEntry, binding.otherMapped);
         binding.block = blockOf(binding.entry, binding.blockSize);
@@ -352,9 +336,7 @@ int UniformBlockCensus::addressWordByMapping() const {
     // what it did: 16 of 16 comparisons agreed, because it was comparing the record with itself.
     //
     // So a majority is not the bar here; *being the only one* is. With five words reading, this
-    // route has no answer to give and says so, and the word is named instead by
-    // `title::UniformBlockAddress`, which compares the record's words against the block addresses
-    // the draw actually sourced -- a question where a wrong word loses rather than ties.
+    // route has no answer to give and says so.
     int found = -1;
     for (size_t word = 0; word < kEntryWords; word++) {
         if (static_cast<double>(m_wordReads[word]) / static_cast<double>(m_wordTests.load()) >=
@@ -473,7 +455,6 @@ std::string UniformBlockCensus::json() const {
     }
     body.number("otherRecordsRead", m_otherRecordsRead.load());
     body.number("otherRecordsUnread", m_otherRecordsUnread.load());
-    body.number("recordsPublished", m_recordsPublished.load());
     // The address word by the mapping route, with every word's share beside it: this is the
     // second, independent answer to which word is the address, and the two routes agreeing is
     // what makes it an answer rather than a coincidence that repeated.
@@ -506,7 +487,6 @@ std::string UniformBlockCensus::json() const {
                                                                   static_cast<double>(tests)));
         } else {
             body.number("addressWord", named);
-            // Widened before the multiply: see the same report field in UniformBlockAddress.
             body.number("addressWordOffset", static_cast<uint64_t>(named) * 4u);
             body.number("addressWordReads", m_wordReads[static_cast<size_t>(named)].load());
         }
@@ -617,7 +597,6 @@ std::string UniformBlockCensus::json() const {
     // are still there when tick N paints. Measured by re-reading the earlier address, so it is
     // in the report rather than in a note beside it.
     body.object("blockRing", m_ring == nullptr ? "null" : m_ring->json());
-    body.object("blockAddress", m_address == nullptr ? "null" : m_address->json());
     if (!m_refusal.empty()) {
         body.string("refusal", m_refusal);
     }
