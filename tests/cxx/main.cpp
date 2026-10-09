@@ -53,7 +53,6 @@ int main(int argc, char** argv) {
     wiiuport::tests::runCommandStreamIdentityTests();
     wiiuport::tests::runVertexComponentTests();
     wiiuport::tests::runDrawAttributeCensusTests();
-    wiiuport::tests::runUniformBlockAddressTests();
     wiiuport::tests::runUniformBlockRingTests();
     wiiuport::tests::runVertexPoseHistoryTests();
     wiiuport::tests::runInputTests();

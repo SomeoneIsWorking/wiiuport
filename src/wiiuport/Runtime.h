@@ -131,7 +131,6 @@ class Runtime {
     title::UniformBlockRing m_blockRing{&GuestPatching::ReadWords, nullptr};
     // The base the relative offset is relative to, measured against the draw's real block
     // addresses. The last thing standing between the objective's second question and an answer.
-    title::UniformBlockAddress m_blockAddress;
     guest::BufferWriters m_writers;
     guest::ParticleProbe m_particleProbe{m_writers};
     guest::EnvironmentProbe m_environmentProbe{m_writers};

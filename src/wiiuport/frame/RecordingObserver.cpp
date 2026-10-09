@@ -32,23 +32,6 @@ std::span<const uint32_t> sourceWordsOf(const LatteFrameHooks::UniformAssembly& 
     return {assembly.blockAddresses, static_cast<size_t>(pairs) * 2};
 }
 
-std::span<const uint32_t> guestSourceWordsOf(const LatteFrameHooks::UniformAssembly& assembly) {
-    if (assembly.blockGuestAddresses == nullptr) {
-        return {};
-    }
-    uint32_t pairs = std::min(assembly.blockAddressCount, LatteFrameHooks::kMaxUniformBlockSources);
-    return {assembly.blockGuestAddresses, static_cast<size_t>(pairs)};
-}
-
-std::span<const uint32_t> sourceSizeWordsOf(const LatteFrameHooks::UniformAssembly& assembly) {
-    if (assembly.blockSizes == nullptr) {
-        return {};
-    }
-    const uint32_t pairs = std::min({assembly.blockSizeCount, assembly.blockAddressCount,
-                                     LatteFrameHooks::kMaxUniformBlockSources});
-    return {assembly.blockSizes, static_cast<size_t>(pairs)};
-}
-
 void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly& assembly) {
     m_uniformAssembliesSeen++;
     if (assembly.fromRuntime) {
@@ -72,18 +55,6 @@ void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly
         m_objectIdentity == nullptr ? 0u : m_objectIdentity->objectAt(assembly.packet);
     std::span<const uint32_t> sources = sourceWordsOf(assembly);
     recorded.blockSources.assign(sources.begin(), sources.end());
-    std::span<const uint32_t> sizes = sourceSizeWordsOf(assembly);
-    recorded.blockSizes.assign(sizes.begin(), sizes.end());
-    auto guestAddresses = guestSourceWordsOf(assembly);
-    recorded.blockGuestAddresses.assign(guestAddresses.begin(), guestAddresses.end());
-    // The same words, for the address measurement: `(bufferId, physicalAddress)` pairs, which
-    // are the draw's real block addresses and the only ones the runtime has. Handed over here
-    // because the observer is the one place that sees both the descriptor record and the draw
-    // that followed it, in that order.
-    if (m_blockAddress != nullptr) {
-        m_blockAddress->observe(recorded.objectAddress, recorded.blockSources,
-                                recorded.blockGuestAddresses, recorded.blockSizes);
-    }
     // **Before the copy, and with the guest's own buffer.** A listener that changes what the title
     // is about to transform with has to be here: after this line the words live in a vector this
     // class owns, and a write to that is a write to a copy the draw never reads.

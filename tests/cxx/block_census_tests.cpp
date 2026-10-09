@@ -2,7 +2,6 @@
 #include "command_stream.h"
 #include "suites.h"
 #include "wiiuport/title/NodePoseLocator.h"
-#include "wiiuport/title/UniformBlockAddress.h"
 #include "wiiuport/title/UniformBlockCensus.h"
 
 #include <array>
@@ -206,34 +205,9 @@ void severalReadableWordsNameNothing() {
                   "with the number of candidates, which is the denominator the refusal rests on");
 }
 
-// **The size the address measurement needs comes from the record, on the same binding.** An edit
-// once closed the `binding.read` block early and put `mapWords`, `blockOf` and the pose history
-// inside the new guard -- and read `binding.blockSize`, which `blockOf` fills in further down, so
-// the size was always zero and the register-slot route never ran while the suite stayed green.
-// This is the case that catches it: the size is reported, and the pose history is still fed.
-void theBlockSizeIsPublishedWithTheRecord() {
-    FakeGuest guest;
-    guest.writeWord(kObject + UniformBlockCensus::kCursorOffset, 0);
-    writeEntry(guest, 0, 0x1000, 0x40);
-    wiiuport::title::UniformBlockAddress address;
-    UniformBlockCensus census = makeCensus(guest);
-    census.setBlockAddress(&address);
-    census.install();
-    linked();
-    bind(g_first, kObject);
-    check::isTrue(address.expectedSize() == 0x40,
-                  "the record's size word reaches the address measurement, which is what lets it "
-                  "tell a register slot the guest wrote from one it did not: " +
-                      address.json());
-    // The other half of that edit -- `mapWords`, `blockOf` and the pose history being swallowed by
-    // the new guard -- is already covered by the case above, which reads `blockAddress` out of the
-    // report and would see zero if `blockOf` had stopped running.
-}
-
 } // namespace
 
 void wiiuport::tests::runBlockCensusTests() {
-    theBlockSizeIsPublishedWithTheRecord();
     theTwoAddressesABindingNamesAreBothFed();
     aBindingNamesTheDrawWrittenAfterIt();
     theOtherSlotIsReadAsWellAsTheBoundOne();
