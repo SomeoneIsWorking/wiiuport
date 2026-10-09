@@ -143,10 +143,54 @@ void onlyTheLastTicksPaintIsAnEnd() {
     particles.onMidPaintEnd();
 }
 
+// A particle's draw parameters, as its emitter's calc leaves them.
+struct DrawParams {
+    float scale;
+    uint32_t color;
+    int16_t angle;
+};
+
+void drawParams(Guest& guest, DrawParams params) {
+    float scale = params.scale;
+    uint32_t color = params.color;
+    int16_t angle = params.angle;
+    uint32_t at = kFirstParticle + ParticleInterpolation::kDrawParams;
+    guest.words[at + (4 * ParticleInterpolation::kScaleWords)] = word(scale);
+    guest.words[at + (4 * ParticleInterpolation::kPrmColorWord)] = color;
+    guest.words[at + (4 * ParticleInterpolation::kRotationWord)] =
+        (uint32_t{static_cast<uint16_t>(angle)} << 16) | 0x0123;
+}
+
+void aParticlesScaleColourAndRotationArePaintedBetweenToo() {
+    Guest guest;
+    ParticleInterpolation particles = guest.interpolation();
+    guest.emitter({{.x = 0.0f, .age = 3.0f}}, {.x = 0.0f, .age = 1.0f});
+    drawParams(guest, {.scale = 1.0f, .color = 0x204060ffU, .angle = 0x7f00});
+    particles.onEmitterDraw(kDraw);
+    guest.emitter({{.x = 0.0f, .age = 4.0f}}, {.x = 0.0f, .age = 2.0f});
+    drawParams(guest, {.scale = 3.0f, .color = 0x406080ffU, .angle = -0x7f00});
+    particles.onMidPaintBegin(1);
+    particles.onEmitterDraw(kDraw);
+    uint32_t params = kFirstParticle + ParticleInterpolation::kDrawParams;
+    check::isTrue(value(guest.words[params + (4 * ParticleInterpolation::kScaleWords)]) == 2.0f,
+                  "a particle is painted at the scale between its two ticks'");
+    check::isTrue(guest.words[params + (4 * ParticleInterpolation::kPrmColorWord)] == 0x305070ffU,
+                  "in the colour between");
+    check::isTrue(guest.words[params + (4 * ParticleInterpolation::kRotationWord)] ==
+                      ((uint32_t{0x8000} << 16) | 0x0123),
+                  "turned the short way round, its spin kept");
+    particles.onMidPaintEnd();
+    check::isTrue(value(guest.words[params + (4 * ParticleInterpolation::kScaleWords)]) == 3.0f &&
+                      guest.words[params + (4 * ParticleInterpolation::kPrmColorWord)] ==
+                          0x406080ffU,
+                  "and the tick's own is back after");
+}
+
 } // namespace
 
 void wiiuport::tests::runParticleInterpolationTests() {
     aParticleIsPaintedAtItsMidpointAndPutBack();
     aRenewedSlotIsPaintedAsItIs();
     onlyTheLastTicksPaintIsAnEnd();
+    aParticlesScaleColourAndRotationArePaintedBetweenToo();
 }

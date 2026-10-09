@@ -511,8 +511,12 @@ callbacks run inside those loops.
 The paint after the tick's draw phase is the in-between one: `DrawInterpolation` opens it at the gated
 AfterOfDraw, once its own inputs are back, and closes it at the next BeforeOfDraw
 (`MidPaintListener`). In it `title/ParticleInterpolation`, at each emitter's draw entry, sets each
-particle's global position to the midpoint of where the previous paint drew it and where it is, if
-its age grew (a lower age is a slot the pool reused); the next draw phase gets the tick's own back.
+particle's global position and draw parameters to the midpoint of where the previous paint drew it
+and where it is, if its age grew (a lower age is a slot the pool reused); the next draw phase gets
+the tick's own back. The draw parameters (`JPADrawParams` at `+0x8c`, TWW's layout) are set by the
+emitter's calc in the same `calc3D`: axis, scale out, x and y, alpha out, prm and env colour (RGBA8,
+each byte halfway) and the rotation angle (u16 `+0xc0`, the short way round; HD's `calcParticle`
+`0x0282dcbc` adds the speed at `+0xc2` to it). Walk, with them: 293 blends, 0 unblendable.
 
 **Measured** (gameplay, mode 13, gate on): Link idle, whole-frame pixels changed between presents, off
 `0, 11259, 0, 10271`, on `8098, 9191, 7783, 9386`. Walk: 316 particle blends over 313 ticks, 17 first
@@ -577,8 +581,7 @@ in its actor's draw (`scratch/drawphase/material_speed.py`): 216 steps in 4 s wi
 115.5 over 116 gated ticks with it on.
 
 Not interpolated, so still stepping at the tick rate: anything a draw method takes from state other
-than these inputs (a particle's rotation, scale and colour; the sea's texture scroll, held to one
-step a tick; texture-pattern and visibility animation, which are discrete), and camera cuts
+than these inputs (the sea's texture scroll, held to one step a tick; texture-pattern and visibility animation, which are discrete), and camera cuts
 and actor teleports, which blend across the cut for one present. The game has no cut flag:
 `dCamera_c::Set` is called every frame by event cameras and `Reset` by a handful of actors, so a cut
 is not told apart from a fast move.
