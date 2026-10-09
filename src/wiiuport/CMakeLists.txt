@@ -64,6 +64,8 @@ add_library(wiiuport STATIC
   title/DrawInterpolation.h
   title/EnvironmentInterpolation.cpp
   title/EnvironmentInterpolation.h
+  title/MaterialInterpolation.cpp
+  title/MaterialInterpolation.h
   title/ParticleInterpolation.cpp
   title/ParticleInterpolation.h
   title/SeaInterpolation.cpp
