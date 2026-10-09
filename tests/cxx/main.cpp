@@ -40,6 +40,7 @@ int main(int argc, char** argv) {
     wiiuport::tests::runPaintTests();
     wiiuport::tests::runLogicGateTests();
     wiiuport::tests::runDrawInterpolationTests();
+    wiiuport::tests::runParticleInterpolationTests();
     wiiuport::tests::runGuestCallProbeTests();
     wiiuport::tests::runJsonBodyTests();
     wiiuport::tests::runInputTests();

@@ -14,6 +14,7 @@
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/LogicGate.h"
+#include "wiiuport/title/ParticleInterpolation.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
 namespace wiiuport {
@@ -93,12 +94,18 @@ class Runtime {
     title::WindWakerPaint m_paint{&GuestCallProbes::Register,      &GuestPatching::AllocateCode,
                                   &GuestPatching::WriteWord,       &GuestPatching::ReadWord,
                                   &GuestPatching::SetSwapInterval, &GuestPatching::SwapInterval};
+    title::ParticleInterpolation m_particleInterpolation{
+        {.registerProbe = &GuestCallProbes::Register,
+         .readWords = &GuestPatching::ReadWords,
+         .writeWords = &GuestPatching::WriteDataWords}};
     title::DrawInterpolation m_drawInterpolation{{.registerProbe = &GuestCallProbes::Register,
                                                   .readWords = &GuestPatching::ReadWords,
                                                   .writeWords = &GuestPatching::WriteDataWords,
-                                                  .gated = [this] {
-                                                      return m_logic.enabled();
-                                                  }}};
+                                                  .gated =
+                                                      [this] {
+                                                          return m_logic.enabled();
+                                                      },
+                                                  .midPaint = &m_particleInterpolation}};
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
     frame::PresentPacing m_scanOut{&frame::PresentPacing::Clock::now};
@@ -112,6 +119,7 @@ class Runtime {
         .callers = m_callers,
         .paint = m_paint,
         .drawInterpolation = m_drawInterpolation,
+        .particleInterpolation = m_particleInterpolation,
         .logic = m_logic,
         .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,

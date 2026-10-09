@@ -42,6 +42,7 @@ void Runtime::installHooks() {
     LatteFrameHooks::SetObserver(&m_recorder);
     VPADInputHooks::SetSource(&m_input);
     m_drawInterpolation.install();
+    m_particleInterpolation.install();
     m_paint.install();
     m_logic.install();
     m_hooksInstalled = true;

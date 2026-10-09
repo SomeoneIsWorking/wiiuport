@@ -62,6 +62,8 @@ add_library(wiiuport STATIC
   title/LogicGate.h
   title/DrawInterpolation.cpp
   title/DrawInterpolation.h
+  title/ParticleInterpolation.cpp
+  title/ParticleInterpolation.h
   title/WindWakerPaint.cpp
   title/WindWakerPaint.h
     input/InputDriver.cpp

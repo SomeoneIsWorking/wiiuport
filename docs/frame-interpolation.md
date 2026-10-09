@@ -498,8 +498,27 @@ pixels changed in the centre box): off `5233, 133, 4870, 83`, on `2832, 3116, 27
 (`scratch/drawphase/run.py`): 11,958 model blends, 628 with the base from the draw, 0 unblendable,
 unreadable or failed writes; frames render without seams.
 
+**Particles.** JPA particles are calculated in the scene's draw (`calc3D` `0x025a81a0`) and drawn by
+the paint, so the draw phase's inputs do not reach them. HD's `JPADraw::draw` is `0x0282bec8`
+(JPADraw in r3): the emitter is at `+0xc0`, its active and child particle lists (`JSUPtrList`) at
+emitter `+0x1ac` and `+0x1b8`, drawn by `0x0282bcd4` and `0x0282bae0` after the emitter-level
+executors. A link is `{object, list, prev, next}`. `JPABaseParticle` is TWW's: `mGlobalPosition`
+`+0x28`, `mCurFrame` (age) `+0x78`. The other per-particle callers of `0x028255f8` are vtable draw
+callbacks run inside those loops.
+
+The paint after the tick's draw phase is the in-between one: `DrawInterpolation` opens it at the gated
+AfterOfDraw, once its own inputs are back, and closes it at the next BeforeOfDraw
+(`MidPaintListener`). In it `title/ParticleInterpolation`, at each emitter's draw entry, sets each
+particle's global position to the midpoint of where the previous paint drew it and where it is, if
+its age grew (a lower age is a slot the pool reused); the next draw phase gets the tick's own back.
+
+**Measured** (gameplay, mode 13, gate on): Link idle, whole-frame pixels changed between presents, off
+`0, 11259, 0, 10271`, on `8098, 9191, 7783, 9386`. Walk: 316 particle blends over 313 ticks, 17 first
+seen, 18 reused slots, 0 unblendable, unreadable or failed writes, every write restored.
+
 Not interpolated, so still stepping at the tick rate: anything a draw method takes from state other
-than these inputs (material and texture animation, particles positioned in execute), and camera cuts
+than these inputs (material and texture animation; a particle's rotation, scale and colour), sea waves
+and sky clouds (CPU-written by the paint, "The CPU-written quads: writers"), and camera cuts
 and actor teleports, which blend across the cut for one present. The game has no cut flag:
 `dCamera_c::Set` is called every frame by event cameras and `Reset` by a handful of actors, so a cut
 is not told apart from a fast move.
