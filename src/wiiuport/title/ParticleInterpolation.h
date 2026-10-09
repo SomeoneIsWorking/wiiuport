@@ -19,8 +19,9 @@ namespace wiiuport::title {
 //
 // Particles are calculated in the scene's draw (`calc3D`) and drawn by the paint, so the draw
 // phase's midpoint inputs do not reach them. In the paint drawn from a tick's draw phase, each
-// particle's global position is set to the midpoint of where the previous paint drew it and where
-// it is now, just before its emitter draws, and put back when the next draw phase starts.
+// particle's global position and draw parameters are set to the midpoint of where the previous
+// paint drew it and where it is now, just before its emitter draws, and put back when the next draw
+// phase starts.
 class ParticleInterpolation final : public DrawInterpolation::MidPaintListener {
   public:
     // JPADraw::draw (JPADraw in r3): draws one emitter's particles and children.
@@ -39,6 +40,16 @@ class ParticleInterpolation final : public DrawInterpolation::MidPaintListener {
     static constexpr uint32_t kGlobalPosition = 0x28;
     static constexpr uint32_t kPositionWords = 3;
     static constexpr uint32_t kAge = 0x78;
+    // JPADrawParams, set by the emitter's calc: axis, scale out, x and y, alpha out, prm and env
+    // colour (RGBA8), then the rotation angle (u16, high half) and its speed. In words.
+    static constexpr uint32_t kDrawParams = 0x8c;
+    static constexpr uint32_t kDrawParamWords = 14;
+    static constexpr size_t kAxisWord = 0;
+    static constexpr size_t kScaleWords = 3;
+    static constexpr size_t kAlphaWord = 8;
+    static constexpr size_t kPrmColorWord = 11;
+    static constexpr size_t kEnvColorWord = 12;
+    static constexpr size_t kRotationWord = 13;
     // A list longer than any emitter's pool is a misread, not particles.
     static constexpr uint32_t kMaxListLength = 4096;
 
@@ -75,19 +86,27 @@ class ParticleInterpolation final : public DrawInterpolation::MidPaintListener {
     };
 
     // A particle as a paint drew it.
+    // What a paint draws a particle from.
+    struct Drawn {
+        std::array<uint32_t, kPositionWords> position{};
+        std::array<uint32_t, kDrawParamWords> params{};
+    };
+
     struct Seen {
         uint64_t tick = 0;
-        std::array<uint32_t, kPositionWords> position{};
+        Drawn drawn;
         float age = 0.0f;
     };
 
     struct Restore {
         uint32_t particle = 0;
-        std::array<uint32_t, kPositionWords> position{};
+        Drawn drawn;
     };
 
     // Each particle in the emitter's lists, or nothing when a list does not read.
     std::optional<std::vector<uint32_t>> particlesOf(uint32_t draw);
+    bool read(uint32_t particle, Drawn& drawn, uint32_t& age);
+    bool write(uint32_t particle, const Drawn& drawn);
     void record(uint32_t particle);
     void blend(uint32_t particle);
 
