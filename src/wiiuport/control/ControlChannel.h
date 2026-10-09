@@ -14,6 +14,7 @@
 #include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/title/DrawInterpolation.h"
+#include "wiiuport/title/EnvironmentInterpolation.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/ParticleInterpolation.h"
 #include "wiiuport/title/SeaInterpolation.h"
@@ -70,6 +71,7 @@ class ControlChannel {
         title::DrawInterpolation& drawInterpolation;
         const title::ParticleInterpolation& particleInterpolation;
         const title::SeaInterpolation& seaInterpolation;
+        const title::EnvironmentInterpolation& environmentInterpolation;
         title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
@@ -195,6 +197,7 @@ class ControlChannel {
     title::DrawInterpolation& m_drawInterpolation;
     const title::ParticleInterpolation& m_particleInterpolation;
     const title::SeaInterpolation& m_seaInterpolation;
+    const title::EnvironmentInterpolation& m_environmentInterpolation;
     title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;

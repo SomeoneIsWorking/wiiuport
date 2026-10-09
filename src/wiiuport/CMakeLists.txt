@@ -62,6 +62,8 @@ add_library(wiiuport STATIC
   title/LogicGate.h
   title/DrawInterpolation.cpp
   title/DrawInterpolation.h
+  title/EnvironmentInterpolation.cpp
+  title/EnvironmentInterpolation.h
   title/ParticleInterpolation.cpp
   title/ParticleInterpolation.h
   title/SeaInterpolation.cpp

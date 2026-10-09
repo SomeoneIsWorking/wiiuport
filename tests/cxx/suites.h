@@ -13,6 +13,7 @@ void runLogicGateTests();
 void runDrawInterpolationTests();
 void runParticleInterpolationTests();
 void runSeaInterpolationTests();
+void runEnvironmentInterpolationTests();
 void runGuestCallProbeTests();
 void runJsonBodyTests();
 void runInputTests();
