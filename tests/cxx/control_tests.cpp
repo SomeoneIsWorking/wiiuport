@@ -275,13 +275,16 @@ const void* guestStack(uint32_t address, uint32_t size) {
 
 void aCallsChainIsItsReturnAddressThenEachSavedLinkRegister() {
     using wiiuport::guest::CallerCensus;
-    const CallerCensus::Chain chain = CallerCensus::chainOf(kStackPointer, 0x02880fa0, &guestStack);
+    std::array<uint32_t, 32> gpr{};
+    gpr[1] = kStackPointer;
+    const CallerCensus::Chain chain = CallerCensus::chainOf(gpr, 0x02880fa0, &guestStack);
     check::equal(chain[0], uint32_t{0x02880fa0}, "the call's own return address first");
     check::equal(chain[1], uint32_t{0x0287b2a4},
                  "then the link register its caller's caller saved");
     check::equal(chain[2], uint32_t{0x020b0010}, "and the next frame out");
     check::equal(chain[3], uint32_t{0}, "a zero back chain ends the walk");
-    const CallerCensus::Chain unmapped = CallerCensus::chainOf(0x9000, 0x02880fa0, &guestStack);
+    gpr[1] = 0x9000;
+    const CallerCensus::Chain unmapped = CallerCensus::chainOf(gpr, 0x02880fa0, &guestStack);
     check::isTrue(unmapped[0] == 0x02880fa0 && unmapped[1] == 0,
                   "an unreadable stack leaves the return address alone");
 }

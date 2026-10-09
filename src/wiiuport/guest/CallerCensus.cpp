@@ -76,12 +76,12 @@ void CallerCensus::Entry::OnInstall(GuestCallProbes::Installation installation) 
     m_installation = installation;
 }
 
-CallerCensus::Chain CallerCensus::chainOf(uint32_t stackPointer, uint32_t returnAddress,
+CallerCensus::Chain CallerCensus::chainOf(std::span<const uint32_t, 32> gpr, uint32_t returnAddress,
                                           GuestBytes guestBytes) {
     Chain chain{};
     chain[0] = returnAddress;
     // Each frame's word 0 is its caller's frame, whose word 1 holds the link register saved there.
-    uint32_t frame = stackPointer;
+    uint32_t frame = gpr[1];
     for (size_t depth = 1; depth < kChainDepth; ++depth) {
         const void* back = guestBytes(frame, sizeof(uint32_t));
         if (back == nullptr) {
@@ -98,7 +98,7 @@ CallerCensus::Chain CallerCensus::chainOf(uint32_t stackPointer, uint32_t return
 }
 
 void CallerCensus::Entry::OnCall(std::span<const uint32_t, 32> gpr, uint32_t returnAddress) {
-    const Chain chain = chainOf(gpr[1], returnAddress, m_guestBytes);
+    const Chain chain = chainOf(gpr, returnAddress, m_guestBytes);
     std::scoped_lock lock(m_mutex);
     ++m_callsByReturn[returnAddress];
     ++m_callsByChain[chain];
