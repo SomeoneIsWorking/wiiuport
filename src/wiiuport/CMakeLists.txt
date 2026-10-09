@@ -60,34 +60,8 @@ add_library(wiiuport STATIC
   guest/ProbeInstallation.h
   title/LogicGate.cpp
   title/LogicGate.h
-  title/ObjectPoseHistory.cpp
-  title/ObjectPoseHistory.h
-  title/DrawAttributeCensus.cpp
-  title/DrawAttributeCensus.h
-  title/NodePoseLocator.cpp
-  title/NodePoseLocator.h
-  title/UniformBlockRing.cpp
-  title/UniformBlockRing.h
-  title/BufferedBlocks.cpp
-  title/BufferedBlocks.h
   title/DrawInterpolation.cpp
   title/DrawInterpolation.h
-  title/VertexComponent.cpp
-  title/VertexComponent.h
-  title/VertexPoseHistory.cpp
-  title/VertexPoseHistory.h
-  title/TransformShape.cpp
-  title/TransformShape.h
-  title/CommandStreamIdentity.cpp
-  title/CommandStreamIdentity.h
-  title/ObjectPoseLocator.cpp
-  title/PoseBlend.cpp
-  title/PoseByShader.cpp
-  title/ObjectPoseLocator.h
-  title/GlobalPoseCensus.cpp
-  title/GlobalPoseCensus.h
-  title/UniformBlockCensus.cpp
-  title/UniformBlockCensus.h
   title/WindWakerPaint.cpp
   title/WindWakerPaint.h
     input/InputDriver.cpp

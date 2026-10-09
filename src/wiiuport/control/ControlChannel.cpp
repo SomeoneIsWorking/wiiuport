@@ -37,9 +37,9 @@ const char* const kRoutes =
     "GET /counters, GET /capture, "
     "GET /controllers, GET /setup, "
     "GET /recordings, GET /draws, GET /memory, GET /callers, "
-    "GET /buffered, GET /interpolation, "
-    "GET /paint, GET /blocks, GET /logic, GET /gate, GET /pose, "
-    "POST /global-pose, POST /pose, POST /capture, POST /pacing, "
+    "GET /interpolation, "
+    "GET /paint, GET /logic, GET /gate, "
+    "POST /capture, POST /pacing, "
     "POST /draws, POST /recordings, POST /paint, POST /logic, POST /interpolation, POST /input "
     "and POST /quit";
 
@@ -141,12 +141,9 @@ std::string pacingJson(const frame::PresentPacing::Summary& pacing) {
 ControlChannel::ControlChannel(const Sources& sources)
     : m_recorder(sources.recorder), m_input(sources.input), m_capture(sources.capture),
       m_shapeLog(sources.shapeLog), m_callers(sources.callers), m_paint(sources.paint),
-      m_blocks(sources.blocks), m_poses(sources.poses), m_poseByShader(sources.poseByShader),
-      m_poseBlend(sources.poseBlend),
-      m_bufferedBlocks(sources.bufferedBlocks), m_drawInterpolation(sources.drawInterpolation),
-      m_logic(sources.logic), m_globalPose(sources.globalPose), m_guestBytes(sources.guestBytes),
-      m_snapshot(sources.snapshot), m_pacing(sources.pacing), m_scanOut(sources.scanOut),
-      m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
+      m_drawInterpolation(sources.drawInterpolation), m_logic(sources.logic),
+      m_guestBytes(sources.guestBytes), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
+      m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -239,101 +236,6 @@ std::string ControlChannel::countersJson() const {
 std::string ControlChannel::pacingJson() const {
     return control::pacingJson(m_pacing.summary());
 }
-
-// The pose table and the blend, as **one document with two named sections**, composed from the two
-// owners' own `writeTo` rather than from their rendered text. Splicing rendered documents is how a
-// report grows a second one, and this project has paid for that once; the composition is done by
-// the classes that own the fields and this one only names them.
-std::string ControlChannel::poseForShader(uint64_t shaderBaseHash, uint64_t shaderAuxHash) const {
-    title::JsonBody body;
-    body.string("shaderBaseHash", title::JsonBody::hex(shaderBaseHash));
-    body.string("shaderAuxHash", title::JsonBody::hex(shaderAuxHash));
-    // **What happened to this shader's own assemblies, and this is the answer the candidate
-    // list cannot give.** "0 candidates of 300 considered" says the census found nothing that
-    // belongs to this shader; it does not say whether the scan ever looked at one of them. A
-    // shader whose every assembly is too short to hold twelve floats has no matrix in its
-    // uniforms *to* find -- a fact about the title -- while a shader that was scanned and held
-    // none was looked at and came back empty, which is a fact about the search. The two call
-    // for opposite next steps, and before this the report carried only the whole-run total.
-    // **A zero aux hash asks about every aux hash of this base hash**, for the same reason the
-    // candidate filter below does: the census keys on the pair and a caller naming one hash was
-    // never told the other. `std::optional` rather than a magic zero, so a caller's own zero
-    // cannot be read as a request for "all aux hashes" by accident.
-    const std::optional<uint64_t> wantAux =
-        shaderAuxHash == 0 ? std::nullopt : std::optional<uint64_t>{shaderAuxHash};
-    const title::ObjectPoseLocator::ShaderOutcome outcome =
-        m_poses.outcomeOf(shaderBaseHash, wantAux);
-    title::JsonBody counted;
-    counted.number("assemblies", outcome.assemblies);
-    counted.number("tooShortForAPose", outcome.tooShort);
-    counted.number("unidentified", outcome.unidentified);
-    counted.number("unscanned", outcome.unscanned);
-    counted.number("scanned", outcome.scanned);
-    counted.number("scannedWithoutBlocks", outcome.scannedWithoutBlocks);
-    counted.number("largestUniformBytes", outcome.largestBytes);
-    counted.raw("uniformBytesAgree", outcome.sizesAgree ? "true" : "false");
-    // The threshold the size is read against, stated so a reader does not have to know it: a
-    // shader below this cannot be applying a 3x4 from its uniforms, whatever it binds.
-    counted.number("poseBytesWanted",
-                   static_cast<uint64_t>(title::ObjectPoseLocator::kPoseWords) * sizeof(float));
-    counted.raw("canHoldAPose",
-                outcome.largestBytes >= title::ObjectPoseLocator::kPoseWords * sizeof(float)
-                    ? "true"
-                    : "false");
-    body.object("assemblyOutcome", counted.text());
-    const auto found = m_poses.found();
-    title::JsonBody list;
-    size_t index = 0;
-    uint64_t considered = 0;
-    for (const title::ObjectPoseLocator::Found& one : found) {
-        ++considered;
-        if (one.shaderBaseHash != shaderBaseHash) {
-            continue;
-        }
-        // **An aux hash of zero asks about every aux hash of this base hash.** The census
-        // keys its candidates on the pair, so matching the pair exactly answered "nothing" for
-        // any shader whose aux hash the caller was never told -- and "nothing" is the one answer
-        // a caller cannot tell from a real absence.
-        if (shaderAuxHash != 0 && one.shaderAuxHash != shaderAuxHash) {
-            continue;
-        }
-        title::PoseByShader::Entry entry;
-        entry.byteOffset = one.byteOffset;
-        entry.otherObjects = one.otherObjects;
-        entry.otherObjectsSame = one.otherObjectsSame;
-        entry.moved = one.moved;
-        entry.compared = one.compared;
-        // **The table's own refusal for this candidate, asked of the table.** Not a restatement of
-        // the counts: a reader wants to know what the blend would do with this offset, and the
-        // class that would do it is the one that says.
-        title::JsonBody one_body;
-        one_body.number("offset", one.byteOffset);
-        one_body.number("moved", one.moved);
-        one_body.number("compared", one.compared);
-        one_body.number("otherObjects", one.otherObjects);
-        one_body.number("otherObjectsSame", one.otherObjectsSame);
-        one_body.string("refusal", m_poseByShader.refused(entry));
-        list.object(std::to_string(index), one_body.text());
-        ++index;
-    }
-    body.number("candidatesForThisShader", index);
-    body.number("candidatesConsidered", considered);
-    body.object("offsets", list.text());
-    return body.finish();
-}
-
-std::string ControlChannel::poseReport() const {
-    title::JsonBody body;
-    title::JsonBody table;
-    m_poseByShader.writeTo(table);
-    title::JsonBody blend;
-    m_poseBlend.writeTo(blend);
-    body.object("table", table.finish());
-    body.object("blend", blend.finish());
-    return body.finish();
-}
-
-namespace {} // namespace
 
 std::string ControlChannel::framesJson() const {
     std::string body = "{\"framesLogged\":" + std::to_string(m_shapeLog.framesLogged());
@@ -431,34 +333,6 @@ bool ControlChannel::requestedFlag(const std::string& query, std::string_view na
     return fallback;
 }
 
-bool ControlChannel::requestedHashes(const std::string& query, std::string_view name,
-                                     std::vector<uint64_t>& hashes) {
-    std::string_view rest(query);
-    hashes.clear();
-    while (auto parameter = nextParameter(rest)) {
-        auto [key, value] = *parameter;
-        if (key != name) {
-            continue;
-        }
-        // **`0x` in front is optional, and it is optional because every hash in this project is
-        // written with it.** The length was the gate and it counted the prefix, so `?shader=0x…`
-        // was refused where `?shader=…` was accepted -- a diagnostic that accepts one spelling of a
-        // hash is read as broken, and `GET /memory` had the same fault and had it fixed there. The
-        // sixteen digits are still required: a hash of another length is a different number, not a
-        // spelling of this one.
-        if (value.size() > 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X')) {
-            value.remove_prefix(2);
-        }
-        uint64_t parsed = 0;
-        auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed, 16);
-        if (value.size() != 16 || error != std::errc{} || end != value.data() + value.size()) {
-            return false;
-        }
-        hashes.push_back(parsed);
-    }
-    return true;
-}
-
 size_t ControlChannel::requestedCount(const std::string& query, std::string_view name,
                                       size_t fallback) {
     std::string_view rest(query);
@@ -477,23 +351,6 @@ size_t ControlChannel::requestedCount(const std::string& query, std::string_view
             count = (count * 10) + static_cast<size_t>(digit - '0');
         }
         return value.empty() ? 0 : count;
-    }
-    return fallback;
-}
-
-// A text-valued query parameter, beside the count and flag ones because the range a scan is pointed
-// at is a name and a name is not a number. The same parameter walk, and an empty value is the
-// fallback rather than a blank: a caller that asked for a range with no name meant the default, and
-// a caller that meant nothing at all would not have sent the parameter.
-std::string ControlChannel::requestedText(const std::string& query, std::string_view name,
-                                          std::string fallback) {
-    std::string_view rest(query);
-    while (auto parameter = nextParameter(rest)) {
-        auto [key, value] = *parameter;
-        if (key != name) {
-            continue;
-        }
-        return value.empty() ? fallback : std::string(value);
     }
     return fallback;
 }
@@ -768,90 +625,6 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
         return lucent::http::Response::json(accepted ? 202 : 409,
                                             accepted ? "Accepted" : "Conflict", body);
     }
-    // **Above the `method != "GET"` barrier below, which is the whole placement rule for a POST
-    // route in this dispatcher and the one thing about it that is not obvious.** A POST route
-    // written into the GET section is unreachable and answers "unknown route" for ever, and the
-    // route table lists it, so the table and the dispatcher disagree while both look right. The
-    // route table test caught exactly that when this route was first added.
-    if (request.method == "POST" && request.path() == "/global-pose") {
-        // On request rather than per frame, because it holds two snapshots of 3 MB and waits for a
-        // frame between them. A route that ran on the display thread would spend milliseconds of a
-        // sixty-hertz budget to answer a question asked once.
-        std::string refusal;
-        // The range is named rather than fixed, because the first range was measured to hold
-        // nothing that moves and a scan that cannot be pointed elsewhere cannot answer the next
-        // question. A name the code does not have is a refusal, not a default.
-        // **A range the caller names, or one of the two this class holds in a table.** The two
-        // named ranges have fixed addresses; the uniform block a draw sources does not, because it
-        // is wherever the title's binder put it, and the measurement that unblocked the blend needs
-        // exactly those. So `start=<hex>&bytes=<decimal>` scans a range the evidence named, bounded
-        // and refused by reason, and `range=<token>` scans one of the constants. A request that
-        // names neither scans nothing and says so, rather than scanning the module's data because
-        // that is what a missing parameter defaulted to once.
-        const std::string query(request.query());
-        title::GlobalPoseCensus::Range wanted =
-            title::GlobalPoseCensus::rangeByName(requestedText(query, "range", ""));
-        if (!wanted.end) {
-            const auto named = title::GlobalPoseCensus::namedRange(
-                requestedText(query, "start", ""), requestedText(query, "bytes", ""));
-            if (!named.refusal.empty()) {
-                return lucent::http::Response::text(409, "Conflict", named.refusal + "\n");
-            }
-            wanted = named.range;
-        }
-        m_globalPose.scan(refusal, wanted);
-        if (!refusal.empty()) {
-            return lucent::http::Response::text(409, "Conflict", refusal + "\n");
-        }
-        return lucent::http::Response::json(200, "OK", m_globalPose.json());
-    }
-    // **Where a draw's pose is, per shader, and whether any draw was blended.** `POST /pose` feeds
-    // the table from the census's own candidates -- the offsets the measurement gave, with the
-    // counts that decided them -- and `GET /pose` reads the table and the blend beside it. **Two
-    // routes and not one, because filling a table on a read is a mutation a reader of the report
-    // would not expect**: a `GET` here answers what the table holds and nothing else, and the
-    // census is the only thing that can change it.
-    if (request.path() == "/pose" && request.method == "GET") {
-        // **A named shader answers for itself and not for the table.** The report's table lists
-        // eight candidates out of 285, so "why is my shader not in it" was a question the
-        // instrument could not answer -- and that is worse than a negative measurement.
-        std::vector<uint64_t> wanted;
-        if (requestedHashes(std::string(request.query()), "shader", wanted) && !wanted.empty()) {
-            return lucent::http::Response::json(200, "OK", poseForShader(wanted.front(), 0));
-        }
-        return lucent::http::Response::json(200, "OK", poseReport());
-    }
-    if (request.path() == "/pose" && request.method == "POST") {
-        // **Fed from the census's own candidates, as the structure.** Reading its rendered report
-        // back into a class would be a second implementation of the fields the report already has,
-        // and a second one that could disagree with it.
-        //
-        // **A named `shader` narrows the feed to that shader's own candidates, and the narrowing is
-        // the point.** The census is cumulative and `PoseByShader::offer` evaluates the counts it
-        // is given, so a candidate refused on first sight -- because nothing had been compared
-        // against it yet -- can be admitted by offering it again once it has drawn enough. The
-        // blend's own unplaced-shader list names which shaders need that, so the caller holding the
-        // measurement asks for exactly those rather than the whole census every time.
-        std::vector<uint64_t> only;
-        const bool narrowed =
-            requestedHashes(std::string(request.query()), "shader", only) && !only.empty();
-        const auto found = m_poses.found();
-        std::vector<title::PoseByShader::Offered> offered;
-        for (const title::ObjectPoseLocator::Found& one : found) {
-            if (narrowed && std::none_of(only.begin(), only.end(), [&one](uint64_t hash) {
-                    return hash == one.shaderBaseHash;
-                })) {
-                continue;
-            }
-            offered.push_back(title::PoseByShader::Offered{
-                one.shaderBaseHash, one.shaderAuxHash, one.byteOffset, one.otherObjects,
-                one.otherObjectsSame, one.moved, one.compared});
-        }
-        m_poseByShader.feed(offered.data(), offered.size());
-        // The blend's counts are in the same document, so a caller that armed the table sees in one
-        // read what it armed and what has happened since.
-        return lucent::http::Response::json(200, "OK", poseReport());
-    }
     if (request.method == "POST" && request.path() == "/input") {
         auto accepted = false;
         auto body = applyInput(std::string(request.query()), accepted);
@@ -904,17 +677,11 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
     if (request.path() == "/interpolation") {
         return lucent::http::Response::json(200, "OK", m_drawInterpolation.json());
     }
-    if (request.path() == "/buffered") {
-        return lucent::http::Response::json(200, "OK", m_bufferedBlocks.json());
-    }
     if (request.path() == "/callers") {
         return lucent::http::Response::json(200, "OK", m_callers.json());
     }
     if (request.method == "GET" && request.path() == "/paint") {
         return lucent::http::Response::json(200, "OK", m_paint.json());
-    }
-    if (request.path() == "/blocks") {
-        return lucent::http::Response::json(200, "OK", m_blocks.json());
     }
     // The logic gate is `/logic` and not `/gate`: the frame gate has held
     // that route since it existed, and two things meaning "hold" by the

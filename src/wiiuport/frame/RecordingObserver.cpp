@@ -50,29 +50,11 @@ void RecordingObserver::OnUniformAssembly(const LatteFrameHooks::UniformAssembly
     recorded.stageIndex = assembly.stageIndex;
     recorded.writesColour = assembly.writesColour;
     recorded.looksUpDepthMap = assembly.looksUpDepthMap;
-    // The node whose binder was written before this draw's packet.
-    recorded.objectAddress =
-        m_objectIdentity == nullptr ? 0u : m_objectIdentity->objectAt(assembly.packet);
     std::span<const uint32_t> sources = sourceWordsOf(assembly);
     recorded.blockSources.assign(sources.begin(), sources.end());
-    // **Before the copy, and with the guest's own buffer.** A listener that changes what the title
-    // is about to transform with has to be here: after this line the words live in a vector this
-    // class owns, and a write to that is a write to a copy the draw never reads.
-    if (!m_beforeDrawListeners.empty()) {
-        const size_t wordCount = assembly.sizeInBytes / sizeof(float);
-        for (AssemblyBeforeDrawListener* listener : m_beforeDrawListeners) {
-            listener->onAssemblyBeforeDraw(assembly.data, wordCount, recorded.shaderBaseHash,
-                                           recorded.shaderAuxHash, recorded.objectAddress);
-        }
-    }
     std::span<const float> values(assembly.data, assembly.sizeInBytes / sizeof(float));
     recorded.data.assign(values.begin(), values.end());
-    if (!m_inFlight.addUniformAssembly(recorded)) {
-        return;
-    }
-    for (AssemblyRecordedListener* listener : m_assemblyListeners) {
-        listener->onAssemblyRecorded(recorded);
-    }
+    m_inFlight.addUniformAssembly(recorded);
 }
 
 void RecordingObserver::OnPresent(const LatteFrameHooks::PresentArguments& present) {
@@ -99,9 +81,6 @@ void RecordingObserver::OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw
         ++m_guestDrawsWithoutVertexUniforms;
     }
     m_vertexChanges.onDraw(draw);
-    for (DrawRecordedListener* listener : m_drawListeners) {
-        listener->onDrawRecorded(draw);
-    }
 }
 
 void RecordingObserver::OnRuntimeSubmission(const LatteFrameHooks::SubmissionSummary& summary) {

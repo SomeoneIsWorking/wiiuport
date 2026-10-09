@@ -28,7 +28,6 @@ from wiiuport import control
 from wiiuport.control import (
     DEFAULT_PORT,
     ControlUnavailable,
-    read_blocks,
     read_callers,
     read_gate,
     read_paint,
@@ -292,19 +291,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  the caller census did not answer: {str(unavailable)[:70]}", flush=True)
         if args.measure and alive():
             measure(running, args, say)
-        if alive():
-            # The census, because a measurement run reads it here and this tool
-            # exists to say which request a run's product dies on. A route that
-            # only fails under a measurement run is still a fault in the route.
-            try:
-                census = read_blocks(args.port, timeout=10.0)
-                say(
-                    f"census: {census.bindings} bindings, cursors {census.cursors}, "
-                    f"switches {census.cursor_switches}/{census.cursor_compared}"
-                )
-            except ControlUnavailable as unavailable:
-                print(f"  census refused: {str(unavailable)[:90]}", flush=True)
-                say("after the census")
         if alive():
             print(f"  survived {args.seconds:.0f}s of polling", flush=True)
         return 0

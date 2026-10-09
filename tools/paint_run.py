@@ -30,17 +30,14 @@ from pathlib import Path
 
 from wiiuport.drive import press, release
 from wiiuport.headless import Display, HeadlessSession, LogType, log_flags
-from wiiuport.paths import Layout, find_layout
+from wiiuport.paths import find_layout
 
 from wiiuport import control
 from wiiuport.control import (
     DEFAULT_PORT,
     ControlUnavailable,
     capture_frame,
-    compare_bytes,
     compare_images,
-    dump_guest,
-    read_blocks,
     read_callers,
     read_gate,
     read_paint,
@@ -54,13 +51,6 @@ from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys
 # The title's own tick, watched so the simulation's rate is measured at the
 # function that runs it rather than at a frame counter the flip also moves:
 # fapGm_Execute, and the instruction it starts on.
-# How much of a uniform block to read when the question is which bytes move. The
-# title's descriptor entry has a word at +0x04 that reads 0x3e634300, which is a
-# pointer and not a length: a tool that took it for one asked the product for a
-# gigabyte and the product died. So the window is ours, it is small, and it is
-# named here rather than taken from the title.
-DUMP_BYTES = 0x400
-
 LOGIC_TARGET = "025d42ec:7c0802a6"
 
 # What the logic rate must stay inside, in hertz. The title runs at 30 and this
@@ -191,23 +181,6 @@ def _logic_source(port: int) -> tuple[int, str]:
     if gate.enabled and gate.ticks is not None:
         return gate.ticks, "the logic gate's own tick counter"
     return _logic_calls(port), "the caller census on fapGm_Execute"
-
-
-def save_block_dumps(layout: Layout, block: int, before: bytes, after: bytes) -> tuple[Path, Path]:
-    """The two dumps, on disk, in one activity directory of their own.
-
-    The bytes are the only copy of the title's per-tick state that a run will
-    ever have: the game's next tick overwrites them and nothing records what they
-    were. So they are written out, with the block's address in the name, and the
-    report says where they are -- a measurement nobody can look at again is a
-    measurement one has to take again.
-    """
-    directory = layout.activity_dir("block-dump")
-    first = directory / f"block-{block:08x}-before.bin"
-    second = directory / f"block-{block:08x}-after.bin"
-    first.write_bytes(before)
-    second.write_bytes(after)
-    return first, second
 
 
 def _callers_at(port: int) -> str:
@@ -380,148 +353,93 @@ def main(argv: list[str] | None = None) -> int:
                         break
                 except ControlUnavailable:
                     continue
-            # Before the windows, not after: the product has been seen to stop
-            # answering near the end of a run, and this is the measurement that
-            # cannot be taken again without another nine minutes. The census is
-            # the title's own binder counted over the whole run, and the two slots
-            # of its ring are what say whether the previous tick's values are still
-            # in memory when this tick paints.
         print(
             f"  after the settle: the product is "
             f"{'alive' if running.poll() is None else f'gone (exit {running.returncode})'}",
             flush=True,
         )
         try:
-            census = read_blocks(args.port)
-            print(census.render())
-            print(f"  its two entries: {census.parity()}")
-            for binding in census.examples[:2]:
-                print(
-                    f"  a binding read cursor {binding.cursor}, offset {binding.offset}, "
-                    f"size word {binding.size:#x}, entry "
-                    + ", ".join(
-                        f"{word}:{value:#010x}" for word, value in sorted(binding.entry.items())
-                    )
-                )
-                block = binding.block()
-                other = binding.other_block()
-                if block is None:
-                    print("    no single word of the entry names a readable block, so no address")
-                    continue
-                # Both slots, twice, half a tick apart. The bound one says what the
-                # tick is drawing from now; the other one says whether the previous
-                # tick's values are still in memory when it does, which is the whole
-                # question a blend has to answer before it can be built on this ring.
-                # Their difference is the per-tick pose, and it is a range, not a
-                # guess: the bytes that move are the bytes a blend would write.
-                before_bytes = dump_guest(args.port, block, DUMP_BYTES)
-                before_other = dump_guest(args.port, other, DUMP_BYTES) if other else None
-                time.sleep(0.3)
-                after_bytes = dump_guest(args.port, block, DUMP_BYTES)
-                after_other = dump_guest(args.port, other, DUMP_BYTES) if other else None
-                print(
-                    f"    slot {binding.cursor} at {block:#010x}: {compare_bytes(before_bytes, after_bytes)}"
-                )
-                if other is not None:
+            for name in ("off", "on", "off")[: max(args.windows, 1)]:
+                if running.poll() is not None:
+                    # The product died between windows. Said plainly, with
+                    # what its own log last said, because "the channel did
+                    # not answer" reads the same whether the mod killed the
+                    # title or the display did.
                     print(
-                        f"    slot {binding.other_cursor} at {other:#010x}: "
-                        f"{compare_bytes(before_other, after_other)}"
-                    )
-                    print(
-                        "    and the two slots against each other, right now: "
-                        f"{compare_bytes(before_bytes, before_other)}"
-                    )
-                    saved = save_block_dumps(layout, block, before_bytes, after_bytes)
-                    other_saved = save_block_dumps(layout, other, before_other, after_other)
-                    print(
-                        f"    saved {saved[0].name} and {other_saved[0].name} for tools/block_pose.py"
-                    )
-        except ControlUnavailable as unavailable:
-            print(f"refused: {unavailable}", file=sys.stderr)
-            try:
-                for name in ("off", "on", "off")[: max(args.windows, 1)]:
-                    if running.poll() is not None:
-                        # The product died between windows. Said plainly, with
-                        # what its own log last said, because "the channel did
-                        # not answer" reads the same whether the mod killed the
-                        # title or the display did.
-                        print(
-                            f"refused: the product exited {running.returncode} before the "
-                            f"{name} window; its log last said:",
-                            file=sys.stderr,
-                        )
-                        for line in _last_log_lines(session, 4):
-                            print(f"  {line}", file=sys.stderr)
-                        return 1
-                    set_paint(name == "on", port=args.port, mode=args.mode)
-                    # The gate with it: the paint rate and the logic rate are the
-                    # same measurement until something separates them, and the
-                    # gate is what separates them.
-                    if args.gate:
-                        gate = set_gate(name == "on", port=args.port)
-                        print(
-                            f"  gate {'in' if gate.enabled else 'out'}: {gate.render()}", flush=True
-                        )
-                        # The gate's own report of what is in memory: its probe's
-                        # installation, and the words at the tick's entry and the
-                        # one after it. Read right after arming, because a count of
-                        # zero is the same number whether the gate is not wired to
-                        # the tick or no calls came, and only these say which.
-                        print(f"    {read_gate(args.port).render()}", flush=True)
-                        print(f"    the census on that tick: {_callers_at(args.port)}", flush=True)
-                    # One settle second, then the window's own start reading, so
-                    # the first second's paints are not counted twice.
-                    time.sleep(1.0)
-                    start = (read_paint(args.port).paints, _logic_calls(args.port))
-                    window = _window(name, args.port, args.window, start)
-                    windows.append(window)
-                    # Printed as it is measured. A run whose product dies before
-                    # the end -- which this one has done twice, once on a lost
-                    # display and once for reasons the log does not name -- would
-                    # otherwise throw away the numbers it had already taken.
-                    print(window.render(), flush=True)
-                    if name == "on" and args.captures >= 2:
-                        # Consecutive paints, each labelled with the tick it was
-                        # taken in, and compared byte by byte. The label is what
-                        # makes the null case mean something: two paints of the
-                        # *same* tick must be identical, and a paint of the *next*
-                        # tick must differ, and saying so needs the tick each one
-                        # belongs to. Without it, "two frames are identical" is
-                        # equally consistent with a still scene and with a capture
-                        # path that is not reading the screen.
-                        shots = []
-                        for slot in range(args.captures):
-                            images_bytes = capture_frame(args.port, slot)
-                            paints, ticks = (
-                                read_paint(args.port).paints,
-                                _logic_source(args.port)[0],
-                            )
-                            shots.append(Capture(slot, paints, ticks, images_bytes))
-                            print(
-                                f"    capture {slot}: {len(images_bytes)} bytes, "
-                                f"paint {paints}, tick {ticks} ({window.source})"
-                            )
-                        comparison = render_captures(shots)
-                try:
-                    state = read_paint(args.port)
-                except ControlUnavailable as unavailable:
-                    print(
-                        f"the product stopped answering before the end: {unavailable}",
+                        f"refused: the product exited {running.returncode} before the "
+                        f"{name} window; its log last said:",
                         file=sys.stderr,
                     )
-            except ControlUnavailable as unavailable:
-                print(f"refused: {unavailable}", file=sys.stderr)
-                return 1
-            try:
-                set_paint(False, port=args.port)
+                    for line in _last_log_lines(session, 4):
+                        print(f"  {line}", file=sys.stderr)
+                    return 1
+                set_paint(name == "on", port=args.port, mode=args.mode)
+                # The gate with it: the paint rate and the logic rate are the
+                # same measurement until something separates them, and the
+                # gate is what separates them.
                 if args.gate:
-                    set_gate(False, port=args.port)
-            except ControlUnavailable:
-                pass
+                    gate = set_gate(name == "on", port=args.port)
+                    print(f"  gate {'in' if gate.enabled else 'out'}: {gate.render()}", flush=True)
+                    # The gate's own report of what is in memory: its probe's
+                    # installation, and the words at the tick's entry and the
+                    # one after it. Read right after arming, because a count of
+                    # zero is the same number whether the gate is not wired to
+                    # the tick or no calls came, and only these say which.
+                    print(f"    {read_gate(args.port).render()}", flush=True)
+                    print(f"    the census on that tick: {_callers_at(args.port)}", flush=True)
+                # One settle second, then the window's own start reading, so
+                # the first second's paints are not counted twice.
+                time.sleep(1.0)
+                start = (read_paint(args.port).paints, _logic_calls(args.port))
+                window = _window(name, args.port, args.window, start)
+                windows.append(window)
+                # Printed as it is measured. A run whose product dies before
+                # the end -- which this one has done twice, once on a lost
+                # display and once for reasons the log does not name -- would
+                # otherwise throw away the numbers it had already taken.
+                print(window.render(), flush=True)
+                if name == "on" and args.captures >= 2:
+                    # Consecutive paints, each labelled with the tick it was
+                    # taken in, and compared byte by byte. The label is what
+                    # makes the null case mean something: two paints of the
+                    # *same* tick must be identical, and a paint of the *next*
+                    # tick must differ, and saying so needs the tick each one
+                    # belongs to. Without it, "two frames are identical" is
+                    # equally consistent with a still scene and with a capture
+                    # path that is not reading the screen.
+                    shots = []
+                    for slot in range(args.captures):
+                        images_bytes = capture_frame(args.port, slot)
+                        paints, ticks = (
+                            read_paint(args.port).paints,
+                            _logic_source(args.port)[0],
+                        )
+                        shots.append(Capture(slot, paints, ticks, images_bytes))
+                        print(
+                            f"    capture {slot}: {len(images_bytes)} bytes, "
+                            f"paint {paints}, tick {ticks} ({window.source})"
+                        )
+                    comparison = render_captures(shots)
             try:
-                release(port=args.port)
-            except ControlUnavailable:
-                pass
+                state = read_paint(args.port)
+            except ControlUnavailable as unavailable:
+                print(
+                    f"the product stopped answering before the end: {unavailable}",
+                    file=sys.stderr,
+                )
+        except ControlUnavailable as unavailable:
+            print(f"refused: {unavailable}", file=sys.stderr)
+            return 1
+        try:
+            set_paint(False, port=args.port)
+            if args.gate:
+                set_gate(False, port=args.port)
+        except ControlUnavailable:
+            pass
+        try:
+            release(port=args.port)
+        except ControlUnavailable:
+            pass
 
     if not windows:
         print("refused: the run measured no window at all.", file=sys.stderr)
