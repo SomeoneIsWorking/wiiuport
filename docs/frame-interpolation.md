@@ -910,9 +910,9 @@ they are the reason one search is **not** being run:
   `+0xb0` anywhere in 2.36M instructions. **The natural place to look for "the pose the object is
   drawn with" does not exist on this title**, and a search for it would have been a search for a
   structure that is not in the binary.
-- **HD draws on its logic thread and paints on a separate display thread** (`fpcM_Management`
-  `0x025df948`: execute then draw; the frame at `0x0274c264` paints), and the GameCube painter is an
-  empty stub. So the pose is filled before the display thread sees it -- consistent with the uniform
+- **HD builds its draw lists in the tick and executes them after it, on the same display thread**
+  (`fpcM_Management` `0x025df948`: execute then draw; the frame `0x0274c264` runs the tick, then
+  paints), and the GameCube painter is an empty stub. So the pose is filled before the display thread sees it -- consistent with the uniform
   buffer holding it, and inconsistent with anything the display thread recomputes.
 - **J3D uploads its uniform buffers through one bind helper** (for example `0x027f1a30`) from a
   **28-byte-entry table, index word at `+76` and pointer at `+28`.** That table is where the buffers
@@ -1402,10 +1402,32 @@ Runtime census (gameplay, walking): every model calc and view pass (`0x027f55fc`
 `0x027fda54`) runs under `0x025d4654`, called from actor draw methods; none from the paint. The
 default view object is `*(*(0x101f95d0 + 0x1024))`, the second entry when `+0x1020` > 1.
 
-The in-between frame is therefore a second `fpcDw_Handler` between ticks, with the view object's
-camera and each actor's pose set to midpoints and restored after, then a paint. Not yet known:
-where the draw lists it fills are reset and consumed, which draw methods change state, and where
-each actor keeps its previous pose (TWW's `fopAc_ac_c::old`).
+**One thread runs both.** The display loop `0x0274c00c` calls the frame `0x0274c264`, whose
+`0x02034ffc` takes the display lock (`display+0x18`), runs the sead task tree (`0x02746790`, which
+reaches the tick through `0x020359c8` → `0x025f172c`), then executes the draw lists through the
+render manager `*0x101f86e8` (`0x0272a8c4`, `0x0272ad80`). With the gate skipping the tick, the
+stand-in's second frame re-executes the lists the last draw phase built.
+
+**A draw phase is self-contained.** `0x025de37c` is `fpcDw_Handler`: BeforeOfDraw `0x025f03c4`
+resets the draw list (`0x0252f264` on game info `+0x5d30`; game info is `0x025200d4()`), the
+iterator draws every process, AfterOfDraw `0x025f03f0` finishes (`0x0252e388` on `+0x60ec`). A
+second run replaces the lists rather than adding to them.
+
+**The camera is derived in the draw phase from five inputs.** HD's `camera_draw` is `0x024ffc40`,
+TWW's with the `view_class` fields 4 bytes later: perspective `0x028e9948(fovy +0xd4, aspect +0xd8,
+near +0xcc, far +0xd0)` into `+0x104`; `lookAt 0x025f1eac(+0x144, eye +0xdc, center +0xe8, up +0xf4,
+bank s16 +0x100)`. It also refreshes the sead `LookAtCamera` the render layers read (matrix at
+`this`, vptr `0x101450f8` at `+0x30`, pos `+0x34`, at `+0x40`, up `+0x4c`;
+`doUpdateMatrix` `0x0274ccc4`), which the paint path updates again from the same pos/at. Camera
+execute (in Ex) writes eye/center/up/bank/fovy; nothing downstream needs more.
+
+**Ordering.** A draw phase can only show a tick it has, so the picture lags one tick: the tick's own
+draw phase shows the midpoint of the previous and current inputs, and the in-between frame's draw
+phase shows the current inputs. Shown in order: mid(n-1, n), n, mid(n, n+1), n+1.
+
+Not yet known: which draw methods change state when run twice, and where each actor keeps its
+previous pose (TWW's `fopAc_ac_c::old`). Without actors, a followed actor would step against a
+smooth camera.
 
 ## The deleted mechanism, and where its evidence went
 

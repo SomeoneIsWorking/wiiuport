@@ -40,7 +40,7 @@ class CallerCensus {
     using GuestBytes = const void* (*)(uint32_t address, uint32_t size);
 
     // Frames of a call's chain: its return address, then each caller's saved link register.
-    static constexpr size_t kChainDepth = 6;
+    static constexpr size_t kChainDepth = 14;
     using Chain = std::array<uint32_t, kChainDepth>;
     static constexpr size_t kReportedChains = 24;
 
