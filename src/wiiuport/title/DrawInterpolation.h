@@ -19,8 +19,8 @@ namespace wiiuport::title {
 //
 // With the logic gate in, each tick's draw phase runs with the camera's inputs, each executed
 // actor's placement and each model's joint matrices at the midpoint of the previous tick's and this
-// tick's, put back afterwards; the skipped call's draw phase then draws this tick's. Shown in order:
-// mid(n-1, n), n. Everything downstream of these the title derives itself.
+// tick's, put back afterwards; the skipped call's draw phase then draws this tick's. Shown in
+// order: mid(n-1, n), n. Everything downstream of these the title derives itself.
 class DrawInterpolation {
   public:
     // fpcM_Management: a tick is running.
@@ -139,6 +139,7 @@ class DrawInterpolation {
 
     bool blendCamera(uint32_t camera, const std::array<uint32_t, kCameraWords>& words);
     bool blendActor(uint32_t actor, const std::array<uint32_t, kPlacementWords>& words);
+
     // A model's base TR matrix, where its world matrices are, and the matrices.
     struct ModelPose {
         std::array<uint32_t, kMatrixWords> base{};
@@ -176,6 +177,7 @@ class DrawInterpolation {
     uint64_t m_tick = 0;
     std::map<uint32_t, Seen<kCameraWords>> m_cameras;
     std::map<uint32_t, Seen<2>> m_shapes;
+
     // Each model as the skipped call's draw phase drew it: the tick's own.
     struct SeenModel {
         uint64_t tick = 0;
@@ -183,6 +185,7 @@ class DrawInterpolation {
         // Its base is set in the draw phase from an actor's placement, already at the midpoint.
         bool baseFromDraw = false;
     };
+
     std::map<uint32_t, SeenModel> m_models;
     // The base each model's tick drew with, to learn whether the base follows the draw's inputs.
     std::map<uint32_t, Seen<kMatrixWords>> m_tickBases;

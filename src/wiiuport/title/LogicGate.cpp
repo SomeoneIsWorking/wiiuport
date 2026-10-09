@@ -48,11 +48,11 @@ constexpr uint32_t kAndImmediate = 0x70000000; // andi. rS, rA, K
 // BO=4 BI=0 the branch is taken on an *even* count, so the gate let through the
 // even calls and returned on the odd ones without running the tick -- and the
 // title hung, reading exactly like a title that has stopped.
-constexpr uint32_t kBranchNotEqual = 0x40820000; // bne, relative
+constexpr uint32_t kBranchNotEqual = 0x40820000;   // bne, relative
 constexpr uint32_t kCompareImmediate = 0x2c000000; // cmpwi rA, simm (0x025b020c)
-constexpr uint32_t kReturn = 0x4e800020;         // blr
-constexpr uint32_t kMoveToCounter = 0x7c0903a6;  // mtctr rS
-constexpr uint32_t kBranchCount = 0x4e800420;    // bctr
+constexpr uint32_t kReturn = 0x4e800020;           // blr
+constexpr uint32_t kMoveToCounter = 0x7c0903a6;    // mtctr rS
+constexpr uint32_t kBranchCount = 0x4e800420;      // bctr
 // The skipped draw's frame, each word thousands of times in the image.
 constexpr uint32_t kOpenFrame = 0x9421fff0;       // stwu r1,-0x10(r1)
 constexpr uint32_t kSaveLink = 0x90010014;        // stw  r0,0x14(r1)
@@ -376,7 +376,7 @@ std::vector<uint32_t> LogicGate::payload(Memory memory) {
         kSaveLink,
         skippingAt[0],
         skippingAt[1],
-        kAddImmediate | (12 << 21) | 1,  // li   r12, 1
+        kAddImmediate | (12 << 21) | 1,       // li   r12, 1
         kStoreWord | (12 << 21) | (11 << 16), // stw  r12, 0(r11)
         matrixInit[0],
         matrixInit[1],
@@ -411,13 +411,13 @@ std::vector<uint32_t> LogicGate::scenePayload(Memory memory) {
     }
     // r12 carried the stub's branch here, and r0, r11, r12 and cr0 are dead at kSceneWork.
     return {
-        kLoadUpper | (12 << 21) | ((skipping >> 16) & 0xffff),          // lis   r12, skipping
-        kOrImmediate | (12 << 21) | (12 << 16) | (skipping & 0xffff),   // ori   r12, r12, skipping
-        kLoadWord | (12 << 21) | (12 << 16),                            // lwz   r12, 0(r12)
-        kCompareImmediate | (12 << 16),                                 // cmpwi r12, 0
-        kBranchNotEqual | ((loopAt - testAt) & 0xfffc),                 // bne   the draw loop
-        branchTo(onAt, kSceneWork + 4, false),                          // b     the tick's work
-        branchTo(loopAt, kSceneDrawLoop, false),                        // b     the draw loop
+        kLoadUpper | (12 << 21) | ((skipping >> 16) & 0xffff),        // lis   r12, skipping
+        kOrImmediate | (12 << 21) | (12 << 16) | (skipping & 0xffff), // ori   r12, r12, skipping
+        kLoadWord | (12 << 21) | (12 << 16),                          // lwz   r12, 0(r12)
+        kCompareImmediate | (12 << 16),                               // cmpwi r12, 0
+        kBranchNotEqual | ((loopAt - testAt) & 0xfffc),               // bne   the draw loop
+        branchTo(onAt, kSceneWork + 4, false),                        // b     the tick's work
+        branchTo(loopAt, kSceneDrawLoop, false),                      // b     the draw loop
     };
 }
 
