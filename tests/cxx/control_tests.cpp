@@ -91,8 +91,11 @@ struct Fixture {
     // every refusal in this file is exercised, and a scan wired with a reader that answers would
     // never reach the refusal it exists to report.
     wiiuport::title::GlobalPoseCensus globalPose{&noReadWords, &noFrame};
-    wiiuport::title::LogicGate logic{&noRegistration, &noCodeSpace, &noCodeSpace, &noWriteWord,
-                                     &noReadWord};
+    wiiuport::title::LogicGate logic{{.registerProbe = &noRegistration,
+                                      .allocateCode = &noCodeSpace,
+                                      .allocateData = &noCodeSpace,
+                                      .writeWord = &noWriteWord,
+                                      .readWord = &noReadWord}};
     wiiuport::title::WindWakerPaint paint{&noRegistration, &noCodeSpace,    &noWriteWord,
                                           &noReadWord,     &noPacingChange, &noPacing};
     wiiuport::frame::RecordingSnapshot snapshot;

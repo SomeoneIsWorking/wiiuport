@@ -1421,6 +1421,12 @@ bank s16 +0x100)`. It also refreshes the sead `LookAtCamera` the render layers r
 `doUpdateMatrix` `0x0274ccc4`), which the paint path updates again from the same pos/at. Camera
 execute (in Ex) writes eye/center/up/bank/fovy; nothing downstream needs more.
 
+**The gate's skipped call runs the draw phase.** `LogicGate::payload` words 14-31: a frame that
+saves the link register the stub's `mflr r0` left in r0, `MtxInit` `0x0200fac4`, then
+`fpcDw_Handler(0x025df908, 0x025de2cc)`, both through `ctr`, then return. Measured in gameplay
+(mode 13, gate on, walking): the title runs and draws (`scratch/drawphase/run.py`), at the same
+call and tick rate as the gate that only returned, under the same machine load.
+
 **Ordering.** A draw phase can only show a tick it has, so the picture lags one tick: the tick's own
 draw phase shows the midpoint of the previous and current inputs, and the in-between frame's draw
 phase shows the current inputs. Shown in order: mid(n-1, n), n, mid(n, n+1), n+1.

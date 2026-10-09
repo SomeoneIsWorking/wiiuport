@@ -52,6 +52,13 @@ constexpr uint32_t kBranchNotEqual = 0x40820000; // bne, relative
 constexpr uint32_t kReturn = 0x4e800020;         // blr
 constexpr uint32_t kMoveToCounter = 0x7c0903a6;  // mtctr rS
 constexpr uint32_t kBranchCount = 0x4e800420;    // bctr
+// The skipped draw's frame, each word thousands of times in the image.
+constexpr uint32_t kOpenFrame = 0x9421fff0;       // stwu r1,-0x10(r1)
+constexpr uint32_t kSaveLink = 0x90010014;        // stw  r0,0x14(r1)
+constexpr uint32_t kLoadLink = 0x80010014;        // lwz  r0,0x14(r1)
+constexpr uint32_t kMoveToLink = 0x7c0803a6;      // mtlr r0
+constexpr uint32_t kCloseFrame = 0x38210010;      // addi r1,r1,0x10
+constexpr uint32_t kBranchCountLink = 0x4e800421; // bctrl
 constexpr uint32_t kPrimaryBranch = 18;
 constexpr int64_t kRelativeBranchReach = 0x02000000;
 
@@ -177,11 +184,10 @@ void LogicGate::Moment::OnInstall(GuestCallProbes::Installation installation) {
 void LogicGate::Moment::OnCall(std::span<const uint32_t, 32>, uint32_t) {
 }
 
-LogicGate::LogicGate(Register registerProbe, AllocateCode allocateCode, AllocateData allocateData,
-                     WriteWord writeWord, ReadWord readWord)
-    : m_register(registerProbe), m_allocateCode(allocateCode), m_allocateData(allocateData),
-      m_writeWord(writeWord), m_readWord(readWord), m_moment(new Moment(*this)),
-      m_counter(new Counter(*this)) {
+LogicGate::LogicGate(Seams seams)
+    : m_register(seams.registerProbe), m_allocateCode(seams.allocateCode),
+      m_allocateData(seams.allocateData), m_writeWord(seams.writeWord), m_readWord(seams.readWord),
+      m_moment(new Moment(*this)), m_counter(new Counter(*this)) {
 }
 
 void LogicGate::install() {
@@ -258,7 +264,9 @@ uint32_t LogicGate::resumeTarget() const {
     return m_block.load();
 }
 
-std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t countersAddress) {
+std::vector<uint32_t> LogicGate::payload(Memory memory) {
+    const uint32_t blockAddress = memory.code;
+    const uint32_t countersAddress = memory.counters;
     // The gate runs in its own block, because a 52-byte tick has no room for it,
     // and the probe's stub is what brings a call here.
     //
@@ -279,18 +287,29 @@ std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t counter
     //
     // The counters are in the data block: memory the guest writes, not memory it
     // executes from.
-    const uint32_t calls = countersAddress + 4 * kCallsWord;
-    const uint32_t ticks = countersAddress + 4 * kTicksWord;
-    const uint32_t testAt = blockAddress + 4 * 6;
-    const uint32_t through = blockAddress + 4 * kThroughWord;
+    uint32_t calls = countersAddress + 4 * kCallsWord;
+    uint32_t ticks = countersAddress + 4 * kTicksWord;
+    uint32_t testAt = blockAddress + 4 * 6;
+    uint32_t through = blockAddress + 4 * kThroughWord;
     // Where the branch to the tick *stands*, which is not where the through path
     // starts. A displacement is measured from the word it is in; measured from the
     // start of the path instead, it lands 20 bytes past the tick's second
     // instruction and hangs the title with the gate armed.
-    const uint32_t branchAt = blockAddress + 4 * kBranchWord;
+    uint32_t branchAt = blockAddress + 4 * kBranchWord;
+    uint32_t skippedAt = blockAddress + 4 * 7;
+    uint32_t skippedDraw = blockAddress + 4 * kSkippedDrawWord;
     if (!withinReach(testAt, through) || !withinReach(branchAt, kTickBody)) {
         return {};
     }
+    auto loadAddress = [](uint32_t reg, uint32_t address) {
+        return std::array<uint32_t, 2>{kLoadUpper | (reg << 21) | ((address >> 16) & 0xffff),
+                                       kOrImmediate | (reg << 21) | (reg << 16) |
+                                           (address & 0xffff)};
+    };
+    const auto matrixInit = loadAddress(12, kMatrixInit);
+    const auto iterator = loadAddress(3, kDrawIterator);
+    const auto process = loadAddress(4, kDrawProcess);
+    const auto handler = loadAddress(12, kDrawHandler);
     // The ticks counter is incremented on the path that *runs* the tick, not on
     // the one that skips it. It read the other way round, which made the report
     // say "0 ticks through it" for a gate that was letting every call through --
@@ -306,21 +325,40 @@ std::vector<uint32_t> LogicGate::payload(uint32_t blockAddress, uint32_t counter
         kStoreWord | (4 << 21) | (3 << 16),                      // stw  r4, 0(r3)
         kAndImmediate | (4 << 21) | (4 << 16) | 1,               // andi. r4, r4, 1
         kBranchNotEqual | ((through - testAt) & 0xfffc),         // bne  the through path
-        kReturn,                                                 // blr  on a skipped call
+        branchTo(skippedAt, skippedDraw, false),                 // b    the skipped draw
         kLoadUpper | (5 << 21) | ((ticks >> 16) & 0xffff),       // lis  r5, ticks
         kOrImmediate | (5 << 21) | (5 << 16) | (ticks & 0xffff), // ori  r5, r5, ticks
         kLoadWord | (6 << 21) | (5 << 16),                       // lwz  r6, 0(r5)
         kAddImmediate | (6 << 21) | (6 << 16) | 1,               // addi r6, r6, 1
         kStoreWord | (6 << 21) | (5 << 16),                      // stw  r6, 0(r5)
         branchTo(branchAt, kTickBody, false),                    // b    the tick's own body
+        // r0 holds the caller's link register: the stub ran the tick's `mflr r0`.
+        kOpenFrame,
+        kSaveLink,
+        matrixInit[0],
+        matrixInit[1],
+        kMoveToCounter | (12 << 21),
+        kBranchCountLink,
+        iterator[0],
+        iterator[1],
+        process[0],
+        process[1],
+        handler[0],
+        handler[1],
+        kMoveToCounter | (12 << 21),
+        kBranchCountLink,
+        kLoadLink,
+        kMoveToLink,
+        kCloseFrame,
+        kReturn,
     };
 }
 
-std::vector<uint32_t> LogicGate::throughPayload(uint32_t blockAddress, int flavour) {
+std::vector<uint32_t> LogicGate::throughPayload(uint32_t blockAddress, Through flavour) {
     // One word that branches to the title's own second instruction: no state,
     // nothing to keep right, and the tick either runs or does not. The census says
     // which, and it counts the tick whether or not this payload runs.
-    if (flavour == 1) {
+    if (flavour == Through::Direct) {
         return {branchTo(blockAddress, kTickBody, false)};
     }
     // Through the count register, which is the way the recompiler resolves a
@@ -381,8 +419,10 @@ std::string LogicGate::enable(bool through, int throughFlavour) {
     // is the mechanism the recompiler's jump table serves. Everything else about
     // the install is identical, and the observer is the caller census.
     const std::vector<uint32_t> control =
-        through ? throughPayload(m_block, m_throughFlavour) : std::vector<uint32_t>{};
-    const std::vector<uint32_t> words = through ? control : payload(m_block, m_counters);
+        through ? throughPayload(m_block, static_cast<Through>(m_throughFlavour))
+                : std::vector<uint32_t>{};
+    const std::vector<uint32_t> words =
+        through ? control : payload({.code = m_block, .counters = m_counters});
     if (through ? (m_throughFlavour < 1 || words.empty()) : (words.size() != kGateWords)) {
         m_refusal = "the gate at " + hex(m_block) + " cannot reach the tick's body";
         return m_refusal;

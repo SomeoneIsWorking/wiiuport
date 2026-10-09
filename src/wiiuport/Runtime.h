@@ -138,9 +138,11 @@ class Runtime {
     guest::CallerCensus m_callers{&GuestCallProbes::Register, &GuestCallProbes::GuestBytes};
     title::BufferedBlocks m_bufferedBlocks{&GuestCallProbes::Register,
                                            &GuestCallProbes::GuestBytes};
-    title::LogicGate m_logic{&GuestCallProbes::Register, &GuestPatching::AllocateCode,
-                             &GuestPatching::AllocateData, &GuestPatching::WriteWord,
-                             &GuestPatching::ReadWord};
+    title::LogicGate m_logic{{.registerProbe = &GuestCallProbes::Register,
+                              .allocateCode = &GuestPatching::AllocateCode,
+                              .allocateData = &GuestPatching::AllocateData,
+                              .writeWord = &GuestPatching::WriteWord,
+                              .readWord = &GuestPatching::ReadWord}};
     title::UniformBlockCensus m_blocks{&GuestCallProbes::Register, &GuestPatching::ReadWord,
                                        &GuestPatching::ReadWords, &m_poseLocator, &m_nodePose};
     // The data-area scan: two snapshots of the title's `.data` and `.bss` a frame apart, looking
