@@ -11,8 +11,9 @@ every per-node measurement below that predates 2026-10-08 is suspect and is bein
 correct identity the uniform candidates are shared across objects (390 of 482 refused as shared),
 so the pose is not in the assembled uniforms. RE of the uniform uploads settles where it is
 (`docs/frame-interpolation.md` "Where the pose is"): the ALU-constant uploads are the layout
-library's (key 1 is each HUD pane's model-view, filled by `Pane::LoadMtx` `0x028771b8`), so the 3D
-camera view reaches the world's shaders another way, still to be found; the CPU-written quads are
+library's (key 1 is each HUD pane's model-view, filled by `Pane::LoadMtx` `0x028771b8`); the 3D
+camera reaches the shaders through each model's double-buffered `g3d` view block (`0x027fda54`,
+committed by `0x027fb678`), whose bound slot flips once per tick; the CPU-written quads are
 `ca2d0854ee6b264d`'s positions, rewritten every frame. The quads are blended at the draw
 (`title/QuadBlend`, `GET /quads`: 5,007 blends, all moving, one per object per tick). The view
 blend is retired: it held key 1 per context, but key 1 is each layout pane's model-view, so it
