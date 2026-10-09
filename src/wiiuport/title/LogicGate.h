@@ -151,7 +151,7 @@ class LogicGate {
     uint32_t resumeTarget() const;
 
     bool enabled() const {
-        return m_enabled;
+        return m_enabled.load();
     }
 
     // The gate's words for a block at `blockAddress`: count the call, let every
@@ -186,7 +186,8 @@ class LogicGate {
     // could hold the control.
     bool m_through = false;
     int m_installedFlavour = 0;
-    bool m_enabled = false;
+    // Read by the Latte thread.
+    std::atomic<bool> m_enabled{false};
     mutable std::mutex m_mutex;
     std::string m_refusal;
     // The probe exists for the link-time moment and to hold the entry while the

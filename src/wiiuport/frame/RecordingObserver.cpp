@@ -122,13 +122,6 @@ void RecordingObserver::OnGuestDraw(bool fromCommandBuffer) {
 void RecordingObserver::OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw,
                                        LatteFrameHooks::VertexReplacements& replacements) {
     if (draw.fromRuntime) {
-        if (!draw.vertexReplaceable) {
-            return;
-        }
-        ++m_runtimeDrawsReplaceable;
-        if (m_vertexFilter != nullptr && m_vertexFilter->onRuntimeDraw(draw, replacements)) {
-            ++m_runtimeDrawsReplaced;
-        }
         return;
     }
     ++m_guestDrawsPrepared;
@@ -138,6 +131,9 @@ void RecordingObserver::OnDrawPrepared(const LatteFrameHooks::DrawPrepared& draw
     m_vertexChanges.onDraw(draw);
     for (DrawRecordedListener* listener : m_drawListeners) {
         listener->onDrawRecorded(draw);
+    }
+    if (m_vertexReplacer != nullptr && m_vertexReplacer->onDraw(draw, replacements)) {
+        ++m_guestDrawsReplaced;
     }
 }
 

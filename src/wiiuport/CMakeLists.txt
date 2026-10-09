@@ -72,6 +72,8 @@ add_library(wiiuport STATIC
   title/UniformBlockAddress.h
   title/UniformBlockRing.cpp
   title/UniformBlockRing.h
+  title/QuadBlend.cpp
+  title/QuadBlend.h
   title/VertexComponent.cpp
   title/VertexComponent.h
   title/VertexPoseHistory.cpp
@@ -101,7 +103,7 @@ add_library(wiiuport STATIC
     input/InputDriver.cpp
   input/InputDriver.h
   interp/Blendable.h
-  interp/DrawObjects.h
+  interp/GuestObject.h
 )
 
 target_include_directories(wiiuport PUBLIC

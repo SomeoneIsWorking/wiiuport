@@ -13,7 +13,7 @@ namespace {
 
 // One component of a position, in the byte order the draw's fetch declared.
 bool readFloat(const uint8_t* bytes, uint8_t endianSwap, float* out) {
-    *out = VertexComponent::read(bytes, endianSwap);
+    *out = VertexComponent(endianSwap).read(bytes);
     return std::isfinite(*out);
 }
 

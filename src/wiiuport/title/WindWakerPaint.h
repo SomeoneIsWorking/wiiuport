@@ -371,10 +371,7 @@ class WindWakerPaint {
     // thing to keep in step with the counter, and two counters that disagree would show up as a
     // blend on the wrong half of a pair rather than as the disagreement.
     //
-    // **It is a parity, so it is only meaningful while the stand-in is installed.** In any other
-    // mode the count climbs once per paint and the parity says nothing; `installed()` is the guard
-    // a caller should ask, and this is documented rather than enforced because the alternative is a
-    // second source of truth about what the stand-in is doing.
+    // False while the stand-in is not installed: a single paint per tick has no in-between.
     bool inBetweenPaint() const;
 
     std::string enable(Mode mode);
