@@ -1431,9 +1431,27 @@ call and tick rate as the gate that only returned, under the same machine load.
 draw phase shows the midpoint of the previous and current inputs, and the in-between frame's draw
 phase shows the current inputs. Shown in order: mid(n-1, n), n, mid(n, n+1), n+1.
 
-Not yet known: which draw methods change state when run twice, and where each actor keeps its
-previous pose (TWW's `fopAc_ac_c::old`). Without actors, a followed actor would step against a
-smooth camera.
+**Actors.** HD's `fopAc_Execute` (`0x025d475c`, asserts name `actor->current.pos`) copies `old` =
+`current` before the actor runs: `old` at `+0x300`, `current` at `+0x314` (pos, then angle), TWW's
+offsets plus `0x11c`; `shape_angle` is `+0x328` (`lha 0x32a`, its y, is the most-read halfword of the
+group). An actor the title did not execute this tick has condition bit `0x2` (`+0x2e4`) and a stale
+`old`. `fopAc_Draw` is `0x025d4654`.
+
+**The mechanism** (`title/DrawInterpolation`): with the gate in, the tick's draw phase runs with
+each camera's eye, center, up, fovy and bank, and each executed actor's `current.pos` (from `old`)
+and `shape_angle` (from the previous tick's draw), at their midpoints; AfterOfDraw puts the tick's
+own values back. The skipped call's draw phase draws them as they are.
+
+**Measured** (`scratch/drawphase/pan.py`, gameplay, mode 13, gate on, right stick held, 5
+consecutive presents per arm): the image's horizontal shift between presents was `0, -124, 0, -124`
+px with interpolation off and `-64, -64, -60, -60` with it on. Counters over the run: 117 camera
+blends of 118 ticks (1 first sight), 17,278 actor blends, 2,074 actors not executed, 0 unblendable,
+unreadable or failed writes.
+
+Not interpolated, so still stepping at the tick rate: skeletal animation frames, anything a draw
+method takes from state other than these inputs, and camera cuts and actor teleports, which blend
+across the cut for one present. Whether any draw method advances state when run twice (particles in
+particular) is not yet measured.
 
 ## The deleted mechanism, and where its evidence went
 

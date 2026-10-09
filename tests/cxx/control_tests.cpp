@@ -84,6 +84,10 @@ struct Fixture {
     // and the route test would be reporting a blend that cannot happen.
     wiiuport::title::PoseBlend poseBlend{poseByShader};
     wiiuport::title::BufferedBlocks bufferedBlocks{&noRegistration, &noGuestBytes};
+    wiiuport::title::DrawInterpolation drawInterpolation{{.registerProbe = &noRegistration,
+                                                          .readWords = &noReadWords,
+                                                          .writeWords = nullptr,
+                                                          .gated = nullptr}};
     wiiuport::title::QuadBlend quadBlend{writers, [] {
                                              return false;
                                          }};
@@ -116,6 +120,7 @@ struct Fixture {
         .poseBlend = poseBlend,
         .quadBlend = quadBlend,
         .bufferedBlocks = bufferedBlocks,
+        .drawInterpolation = drawInterpolation,
         .logic = logic,
         .guestBytes = &noGuestBytes,
         .snapshot = snapshot,
@@ -450,6 +455,8 @@ void everyReportIsOneJsonDocument() {
                                                           {"GET", "/blocks"},
                                                           {"GET", "/quads"},
                                                           {"GET", "/buffered"},
+                                                          {"GET", "/interpolation"},
+                                                          {"POST", "/interpolation"},
                                                           {"POST", "/pacing"},
                                                           {"POST", "/pose"}}) {
         lucent::http::Request read;
