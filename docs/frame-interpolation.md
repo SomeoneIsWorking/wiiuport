@@ -1299,12 +1299,33 @@ Key 1 is uploaded once per pane, at its material apply (`0x02880f1c`, `0x02880e9
 translation z = -989.1. `CalculateMtx` writes the global matrix in place, so `LoadMtx` has no static
 store to `ctx+0x70` and Ghidra had not disassembled it.
 
-**The 3D world's camera view is not in these constants.** Static geometry (`6669a23d03806414`,
-`6a3a79e768f17158`, `48d25cda84f07f19`, ...) is stored in world space and reads unchanged vertex
-bytes every frame while the camera moves, so its view reaches the shader another way; the uniform
-candidates `PoseByShader` refuses as shared across objects are the lead. Moving particles, sea
-waves and sky clouds are CPU-written into `ca2d0854ee6b264d`'s positions every frame
-(`POST /draws?frames=60`, standing and walking).
+**The 3D world's camera view is not in these constants**; it is in the model renderer's view
+blocks, below. Moving particles, sea waves and sky clouds are CPU-written into
+`ca2d0854ee6b264d`'s positions every frame (`POST /draws?frames=60`, standing and walking).
+
+### The 3D camera: per-model view blocks, double-buffered
+
+HD draws models with NintendoWare `g3d` behind a J3D-shaped wrapper (resource offsets relative to
+themselves, shaders `wii_pipeline.sharcfb`). The camera reaches the shaders through a **view
+block** per model per view, an entry of `0x23c` bytes in an array `{count, entries}`:
+
+| guest | what |
+|---|---|
+| `0x104b45f8` | the camera's view 3x4, the J3DSys-style global every model reads |
+| `0x027f55fc` | a model's calc: cycles its buffer index (`+0x6c`, modulo the buffering count), calcs world matrices (`0x027de8a0`), then its view blocks (`0x027f53cc`) |
+| `0x027f53cc` | per view: `0x027fda54` with the camera view, the model's lights, then `0x027fdff4` |
+| `0x027fda54` | the view setter: view 3x4 to entry `+0x74`, projection x view to `+0xa4`, projection to `+0x1fc`, lights to `+0xe4`.. |
+| `0x027fdff4` → `0x027fb678` | the commit: `+0x4c` = `+0x48` (the slot to bind), `+0x48` flipped (the slot to fill next), then queues the upload job at `+0x54` (`0x027f9ae0`) |
+| `0x027fb880` | the upload (vtable `0x1016ef54` `+0x24`): members 0 view (3 vec4, offset 0), 1 projection x view (4 vec4, `0x30`), 2-7 lights, 8 projection |
+| `0x027f16e8`, `0x027ff88c` | shape draw and binder: bind the slot at `entry + 0x10 + index * 0x1c` (buffer `+4`, size `+0xc`) with `GX2Set*UniformBlock` |
+
+Entry construction is `0x027fb40c`/`0x027fd838`: two buffer slots at `+0x10` and `+0x2c`, index
+`+0x48` = 0 and `+0x4c` = 1. **Every commit binds the other slot**, so the slot a model's draws bind
+changes exactly once per tick, and the slot not bound holds that model's view from the tick before.
+That is the pairing a camera blend needs, by identity: entry and slot, no value matching. Members 0
+and 1 are linear in the view, so their midpoints are the midpoint view's own. Not yet measured on the
+running title: the entry addresses, that each model commits once per tick, and the upload's byte
+layout in the GPU buffer.
 
 ### The view blend: retired
 
