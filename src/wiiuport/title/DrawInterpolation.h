@@ -8,6 +8,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <vector>
@@ -16,11 +17,10 @@ namespace wiiuport::title {
 
 // Wind Waker HD's in-between picture, drawn by the title's own draw phase.
 //
-// With the logic gate in, each tick's draw phase runs with the camera's inputs and each executed
-// actor's placement set to the midpoint of the previous tick's and this tick's, and put back
-// afterwards; the skipped call's draw phase then draws this tick's. Shown in order: mid(n-1, n), n.
-// The camera's matrices and the actors' model matrices are derived in the draw methods from these
-// inputs, so the title computes everything downstream itself.
+// With the logic gate in, each tick's draw phase runs with the camera's inputs, each executed
+// actor's placement and each model's joint matrices at the midpoint of the previous tick's and this
+// tick's, put back afterwards; the skipped call's draw phase then draws this tick's. Shown in order:
+// mid(n-1, n), n. Everything downstream of these the title derives itself.
 class DrawInterpolation {
   public:
     // fpcM_Management: a tick is running.
@@ -32,9 +32,15 @@ class DrawInterpolation {
     // fopAc_Draw (fopAc_ac_c in r3).
     static constexpr uint32_t kActorDraw = 0x025d4654;
     static constexpr uint32_t kActorDrawFirst = 0x7c0802a6; // mflr r0
+    // fpcDw_Handler's BeforeOfDraw: a draw phase starts.
+    static constexpr uint32_t kBeforeDraw = 0x025f03c4;
+    static constexpr uint32_t kBeforeDrawFirst = 0x7c0802a6; // mflr r0
     // fpcDw_Handler's AfterOfDraw: every process has drawn.
     static constexpr uint32_t kAfterDraw = 0x025f03f0;
     static constexpr uint32_t kAfterDrawFirst = 0x7c0802a6; // mflr r0
+    // The model's view pass (model in r3): world matrices times the camera, only in a draw phase.
+    static constexpr uint32_t kModelView = 0x027f55fc;
+    static constexpr uint32_t kModelViewFirst = 0x9421ffe0; // stwu r1,-0x20(r1)
     static constexpr size_t kProcessRegister = 3;
 
     // view_class from fovy: fovy, aspect, eye, center, up, then bank in the high half.
@@ -52,6 +58,17 @@ class DrawInterpolation {
     static constexpr size_t kCurrentPosWord = 5;
     static constexpr size_t kShapeAngleWord = 10;
     static constexpr size_t kPosWords = 3;
+
+    // J3DModel::calc (0x027f4d5c) makes each joint's world matrix from the base TR matrix and the
+    // animation, in execute for some actors and in the draw phase for most.
+    static constexpr uint32_t kModelBase = 0xc8;
+    static constexpr uint32_t kMatrixWords = 12;
+    // Model to skeleton; the skeleton's world matrices and joint count (u16, high half).
+    static constexpr uint32_t kModelSkeleton = 0x2c;
+    static constexpr uint32_t kSkeletonWorld = 0x10;
+    static constexpr uint32_t kSkeletonJoints = 0x2c;
+    // A skeleton larger than any the title builds is a misread, not a model.
+    static constexpr uint32_t kMaxJoints = 512;
 
     using Register = void (*)(uint32_t entry, uint32_t firstInstruction,
                               GuestCallProbes::Probe& probe, bool holdsEntry, uint32_t resume);
@@ -79,6 +96,8 @@ class DrawInterpolation {
     void onManagement();
     void onCameraDraw(uint32_t camera);
     void onActorDraw(uint32_t actor);
+    void onModelView(uint32_t model);
+    void onBeforeDraw();
     void onAfterDraw();
 
     std::string json() const;
@@ -88,6 +107,8 @@ class DrawInterpolation {
         Management,
         CameraDraw,
         ActorDraw,
+        ModelView,
+        BeforeDraw,
         AfterDraw
     };
 
@@ -118,6 +139,16 @@ class DrawInterpolation {
 
     bool blendCamera(uint32_t camera, const std::array<uint32_t, kCameraWords>& words);
     bool blendActor(uint32_t actor, const std::array<uint32_t, kPlacementWords>& words);
+    // A model's base TR matrix, where its world matrices are, and the matrices.
+    struct ModelPose {
+        std::array<uint32_t, kMatrixWords> base{};
+        uint32_t world = 0;
+        std::vector<uint32_t> joints;
+    };
+
+    std::optional<ModelPose> readModel(uint32_t model);
+    void recordModel(uint32_t model, ModelPose pose);
+    bool blendModel(uint32_t model, const ModelPose& pose);
 
     // The words a draw phase sees, and the tick's own to put back after it.
     struct Change {
@@ -134,14 +165,28 @@ class DrawInterpolation {
     Entry m_management{*this, Event::Management};
     Entry m_cameraDraw{*this, Event::CameraDraw};
     Entry m_actorDraw{*this, Event::ActorDraw};
+    Entry m_modelView{*this, Event::ModelView};
+    Entry m_beforeDraw{*this, Event::BeforeDraw};
     Entry m_afterDraw{*this, Event::AfterDraw};
 
     mutable std::mutex m_mutex;
     bool m_enabled = true;
     bool m_inTick = false;
+    bool m_inDraw = false;
     uint64_t m_tick = 0;
     std::map<uint32_t, Seen<kCameraWords>> m_cameras;
     std::map<uint32_t, Seen<2>> m_shapes;
+    // Each model as the skipped call's draw phase drew it: the tick's own.
+    struct SeenModel {
+        uint64_t tick = 0;
+        ModelPose pose;
+        // Its base is set in the draw phase from an actor's placement, already at the midpoint.
+        bool baseFromDraw = false;
+    };
+    std::map<uint32_t, SeenModel> m_models;
+    // The base each model's tick drew with, to learn whether the base follows the draw's inputs.
+    std::map<uint32_t, Seen<kMatrixWords>> m_tickBases;
+    std::set<uint32_t> m_viewedInDraw;
     std::vector<Restore> m_restores;
 
     uint64_t m_ticks = 0;
@@ -150,6 +195,10 @@ class DrawInterpolation {
     uint64_t m_actorDraws = 0;
     uint64_t m_actorBlends = 0;
     uint64_t m_actorsNotExecuted = 0;
+    uint64_t m_modelViews = 0;
+    uint64_t m_modelBlends = 0;
+    uint64_t m_modelFirstSeen = 0;
+    uint64_t m_modelBasesFromDraw = 0;
     uint64_t m_unblendable = 0;
     uint64_t m_unreadable = 0;
     uint64_t m_writeFailures = 0;
