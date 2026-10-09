@@ -83,13 +83,6 @@ struct Fixture {
     // Armed with the table it reads, because a blend with no table leaves every draw alone
     // and the route test would be reporting a blend that cannot happen.
     wiiuport::title::PoseBlend poseBlend{poseByShader};
-    wiiuport::title::ViewBlend viewBlend{&noRegistration, &noGuestBytes,
-                                         [] {
-                                             return wiiuport::title::CommandPosition{};
-                                         },
-                                         [] {
-                                             return false;
-                                         }};
     wiiuport::title::QuadBlend quadBlend{writers, [] {
                                              return false;
                                          }};
@@ -117,7 +110,6 @@ struct Fixture {
         .globalPose = globalPose,
         .poseByShader = poseByShader,
         .poseBlend = poseBlend,
-        .viewBlend = viewBlend,
         .quadBlend = quadBlend,
         .logic = logic,
         .guestBytes = &noGuestBytes,
@@ -289,7 +281,8 @@ void aMemoryReadNamesItsRangeAndIsBounded() {
     for (const std::string& spelled :
          {"address=0x10163bb4&size=48", "address=10163bb4&size=48", "address=0X10163BB4&size=48"}) {
         const auto named = GuestMemoryRead::parse(spelled, refusal);
-        check::isTrue(named.has_value(), spelled + " is a read, not a refusal: " + refusal);
+        check::isTrue(named.has_value(),
+                      std::string(spelled).append(" is a read, not a refusal: ").append(refusal));
         if (named.has_value()) {
             check::equal(named->address, uint32_t{0x10163bb4}, "and names the same address");
             check::equal(named->size, uint32_t{48}, "and the size asked for");
@@ -418,7 +411,6 @@ void everyReportIsOneJsonDocument() {
                                                           {"GET", "/logic"},
                                                           {"GET", "/gate"},
                                                           {"GET", "/blocks"},
-                                                          {"GET", "/view"},
                                                           {"GET", "/quads"},
                                                           {"POST", "/pacing"},
                                                           {"POST", "/pose"}}) {
@@ -426,7 +418,8 @@ void everyReportIsOneJsonDocument() {
         read.method = method;
         read.target = path;
         auto answer = fixture.channel.dispatch(read);
-        check::isTrue(answer.status == 200, method + " " + path + " answers");
+        check::isTrue(answer.status == 200,
+                      std::string(method).append(" ").append(path).append(" answers"));
         check::isTrue(oneJsonDocument(answer.body),
                       std::string(path) +
                           " answers one JSON document, not a body with a second "

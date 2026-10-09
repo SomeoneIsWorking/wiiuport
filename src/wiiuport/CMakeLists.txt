@@ -80,8 +80,6 @@ add_library(wiiuport STATIC
   title/TransformShape.h
   title/CommandStreamIdentity.cpp
   title/CommandStreamIdentity.h
-  title/ViewBlend.cpp
-  title/ViewBlend.h
   title/ObjectPoseLocator.cpp
   title/PoseBlend.cpp
   title/PoseByShader.cpp

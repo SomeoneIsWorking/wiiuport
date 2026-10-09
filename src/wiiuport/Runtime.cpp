@@ -34,7 +34,6 @@ Runtime::Runtime() : m_capture(&requestFrameCapture) {
     // arithmetic.
     m_poseBlend.setPaint(&m_paint);
     m_recorder.addAssemblyBeforeDrawListener(&m_poseBlend);
-    m_recorder.addAluConstantsListener(&m_viewBlend);
     m_recorder.setVertexReplacer(&m_quadBlend);
     m_recorder.addDisplayedListener(&m_pacing);
     m_recorder.addScanOutListener(&m_scanOut);
@@ -76,7 +75,6 @@ void Runtime::installHooks() {
     m_paint.install();
     m_blocks.install();
     m_logic.install();
-    m_viewBlend.install();
     m_hooksInstalled = true;
     // Always open, on loopback: the channel is how an agent asks a running
     // product, the player's own session included, what it is doing.

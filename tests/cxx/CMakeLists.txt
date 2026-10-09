@@ -14,7 +14,6 @@ add_executable(wiiuport_tests
   vertex_component_tests.cpp
   pose_blend_tests.cpp
   quad_blend_tests.cpp
-  view_blend_tests.cpp
   pose_by_shader_tests.cpp
   pose_locator_tests.cpp
   paint_tests.cpp
