@@ -1323,9 +1323,23 @@ Entry construction is `0x027fb40c`/`0x027fd838`: two buffer slots at `+0x10` and
 `+0x48` = 0 and `+0x4c` = 1. **Every commit binds the other slot**, so the slot a model's draws bind
 changes exactly once per tick, and the slot not bound holds that model's view from the tick before.
 That is the pairing a camera blend needs, by identity: entry and slot, no value matching. Members 0
-and 1 are linear in the view, so their midpoints are the midpoint view's own. Not yet measured on the
-running title: the entry addresses, that each model commits once per tick, and the upload's byte
-layout in the GPU buffer.
+and 1 are linear in the view, so their midpoints are the midpoint view's own. The upload's byte
+layout in the GPU buffer is not yet measured.
+
+`0x027fb678` commits every double-buffered g3d block, not only view blocks. `title/BufferedBlocks`
+probes it and `GET /buffered` reports each kind; 5 s walking on Outset (`scratch/buffered/run.py`),
+22.4 ticks/s:
+
+| vtable | entries seen | commits per tick | slot bytes |
+|---|---|---|---|
+| `0x1016ef54` (view) | 426 | ~199 | 512 |
+| `0x1016ef84` | 2090 | ~726 | 64 |
+| `0x1016efb4` | 38 | ~19 | 768 |
+| `0x1016efe4` | 1563 | ~188 | 768 |
+| `0x1016f014` | 1 | 1.0 | 672 |
+
+The one `0x1016f014` entry commits once per tick, which ties commits to ticks. All kinds together
+commit about 0.3 MB per tick; view blocks are about 100 KB of it.
 
 ### The view blend: retired
 
