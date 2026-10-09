@@ -1448,10 +1448,32 @@ px with interpolation off and `-64, -64, -60, -60` with it on. Counters over the
 blends of 118 ticks (1 first sight), 17,278 actor blends, 2,074 actors not executed, 0 unblendable,
 unreadable or failed writes.
 
-Not interpolated, so still stepping at the tick rate: skeletal animation frames, anything a draw
-method takes from state other than these inputs, and camera cuts and actor teleports, which blend
-across the cut for one present. Whether any draw method advances state when run twice (particles in
-particular) is not yet measured.
+**Models.** HD's `J3DModel::calc` is `0x027f4d5c`: base TR matrix at model `+0xc8` (base scale
+`+0xbc`), each joint's mtx-calc object through vtable `+0x24`, then the skeleton's world matrices
+(`0x027db1d4`). The skeleton is model `+0x2c`; its world matrices are `*(skeleton+0x10)`, `0x30`
+bytes each, u16 count at `+0x2c`. The model's view pass `0x027f55fc` (only in a draw phase) then
+multiplies them by the camera. Measured over the walk (gate on): of the models drawn in the tick's
+draw phase, 11,133 of 12,099 had their world matrices calculated in that draw phase
+(`mDoExt_modelUpdateDL` style); the rest (the seagull's `daKamome_setMtx` style) in execute, so an
+actor's blended `current.pos` cannot reach them.
+
+So at the view pass the mechanism blends the world matrices themselves, with no per-actor knowledge:
+the skipped call's draw phase records each model's base `B` and joint matrices `W` (the tick's own);
+the next tick's draw phase writes `B_mid * mid(B_prev^-1 W_prev, B^-1 W)` per joint, the animation
+blended in model space and the placement apart. `B_mid` is `mid(B_prev, B)`, unless that model's base
+differed between the tick's draw and the skipped call's: then it was set in the draw phase from an
+actor's blended placement, is the midpoint already, and is used as it is. Morphs and any per-joint
+callback are inside `W`, so they are blended too.
+
+**Measured** (`scratch/drawphase/idle.py`, Link idle, camera still, 5 consecutive presents per arm,
+pixels changed in the centre box): off `5233, 133, 4870, 83`, on `2832, 3116, 2701, 2373`. Walk
+(`scratch/drawphase/run.py`): 11,958 model blends, 628 with the base from the draw, 0 unblendable,
+unreadable or failed writes; frames render without seams.
+
+Not interpolated, so still stepping at the tick rate: anything a draw method takes from state other
+than these inputs (material and texture animation, particles positioned in execute), and camera cuts
+and actor teleports, which blend across the cut for one present. Whether any draw method advances
+state when run twice is not yet measured.
 
 ## The deleted mechanism, and where its evidence went
 

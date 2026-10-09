@@ -4,6 +4,7 @@
 #include "suites.h"
 #include "wiiuport/title/DrawInterpolation.h"
 
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <map>
@@ -14,6 +15,20 @@ using wiiuport::title::DrawInterpolation;
 
 constexpr uint32_t kCamera = 0x3a000000;
 constexpr uint32_t kActor = 0x3b000000;
+constexpr uint32_t kModel = 0x3c000000;
+constexpr uint32_t kSkeleton = 0x3d000000;
+constexpr uint32_t kWorld = 0x3e000000;
+
+using Matrix = std::array<float, 12>;
+
+Matrix translation(float x, float y) {
+    return {1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, 0};
+}
+
+// A quarter turn about z, then a move.
+Matrix turned(float x, float y) {
+    return {0, -1, 0, x, 1, 0, 0, y, 0, 0, 1, 0};
+}
 
 struct CameraInputs {
     float fovy;
@@ -76,6 +91,21 @@ class Guest {
             words[kCamera + at] = word(1.0f);
         }
         words[kCamera + 0x100] = (uint32_t{static_cast<uint16_t>(in.bank)} << 16) | 0xabcd;
+    }
+
+    // A model of one joint: its base and the joint's world matrix.
+    void model(const Matrix& base, const Matrix& joint) {
+        words[kModel + DrawInterpolation::kModelSkeleton] = kSkeleton;
+        words[kSkeleton + DrawInterpolation::kSkeletonWorld] = kWorld;
+        words[kSkeleton + DrawInterpolation::kSkeletonJoints] = 1U << 16;
+        for (uint32_t i = 0; i < 12; ++i) {
+            words[kModel + DrawInterpolation::kModelBase + (4 * i)] = word(base.at(i));
+            words[kWorld + (4 * i)] = word(joint.at(i));
+        }
+    }
+
+    float joint(uint32_t index) {
+        return value(words[kWorld + (4 * index)]);
     }
 
     // old.pos.x, current.pos.x and shape_angle.y.
@@ -170,6 +200,74 @@ void nothingIsWrittenOutsideAGatedTick() {
     draw.onAfterDraw();
 }
 
+// The tick's draw phase, then the skipped call's.
+void tick(DrawInterpolation& draw) {
+    draw.onManagement();
+    draw.onBeforeDraw();
+    draw.onModelView(kModel);
+    draw.onAfterDraw();
+}
+
+void skipped(DrawInterpolation& draw) {
+    draw.onBeforeDraw();
+    draw.onModelView(kModel);
+    draw.onAfterDraw();
+}
+
+void aModelIsDrawnWithItsAnimationAndPlacementBlendedApart() {
+    Guest guest;
+    DrawInterpolation draw = guest.interpolation();
+    // Joint 10 along the base's x, then the base turns and the joint reaches 20.
+    guest.model(translation(0, 0), translation(10, 0));
+    tick(draw);
+    skipped(draw);
+    guest.model(turned(0, 0), turned(0, 20));
+    draw.onManagement();
+    draw.onBeforeDraw();
+    draw.onModelView(kModel);
+    check::isTrue(guest.joint(3) == 7.5f && guest.joint(7) == 7.5f,
+                  "the joint is the midpoint base times the midpoint model-space pose, not the "
+                  "midpoint of its world matrices (5, 10)");
+    draw.onAfterDraw();
+    check::isTrue(guest.joint(3) == 0.0f && guest.joint(7) == 20.0f,
+                  "and the tick's own matrices are back after the draw phase");
+}
+
+void aBaseFromTheDrawsInputsIsNotBlendedTwice() {
+    Guest guest;
+    DrawInterpolation draw = guest.interpolation();
+    guest.model(translation(0, 0), translation(0, 0));
+    tick(draw);
+    skipped(draw);
+    // The tick's draw places the model from an input already at its midpoint: 5 of 10.
+    guest.model(translation(5, 0), translation(5, 0));
+    draw.onManagement();
+    draw.onBeforeDraw();
+    draw.onModelView(kModel);
+    draw.onAfterDraw();
+    guest.model(translation(10, 0), translation(10, 0));
+    skipped(draw);
+    guest.model(translation(15, 0), translation(15, 0));
+    draw.onManagement();
+    draw.onBeforeDraw();
+    draw.onModelView(kModel);
+    check::isTrue(guest.joint(3) == 15.0f,
+                  "a base that differs between the tick's draw and the skipped call's is the "
+                  "draw's own midpoint, and is drawn as it is");
+    draw.onAfterDraw();
+}
+
+void aModelSeenForTheFirstTimeIsDrawnAsItIs() {
+    Guest guest;
+    DrawInterpolation draw = guest.interpolation();
+    guest.model(translation(0, 0), translation(10, 0));
+    draw.onManagement();
+    draw.onBeforeDraw();
+    draw.onModelView(kModel);
+    check::isTrue(guest.joint(3) == 10.0f, "a model with no tick before it is drawn as it is");
+    draw.onAfterDraw();
+}
+
 } // namespace
 
 void wiiuport::tests::runDrawInterpolationTests() {
@@ -177,4 +275,7 @@ void wiiuport::tests::runDrawInterpolationTests() {
     anExecutedActorIsDrawnBetweenItsOldAndCurrentPlacement();
     anActorThatDidNotRunIsDrawnAsItIs();
     nothingIsWrittenOutsideAGatedTick();
+    aModelIsDrawnWithItsAnimationAndPlacementBlendedApart();
+    aBaseFromTheDrawsInputsIsNotBlendedTwice();
+    aModelSeenForTheFirstTimeIsDrawnAsItIs();
 }
