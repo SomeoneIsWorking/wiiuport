@@ -385,14 +385,15 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(!holdsEntry(LogicGate::kTick),
                       "and the momentary one does not keep the entry, so the standing one can "
                       "take it");
-        check::isTrue(LogicGate::kSceneWorkFirst == 0x386326a4 &&
-                          g_sceneResume == kBlock + (4 * LogicGate::kSceneGateWord) &&
-                          holdsEntry(LogicGate::kSceneWork),
-                      "the scene's draw is held at addi r3,r3,0x26a4 and resumes at the scene gate");
+        check::isTrue(
+            LogicGate::kSceneWorkFirst == 0x386326a4 &&
+                g_sceneResume == kBlock + (4 * LogicGate::kSceneGateWord) &&
+                holdsEntry(LogicGate::kSceneWork),
+            "the scene's draw is held at addi r3,r3,0x26a4 and resumes at the scene gate");
         uint32_t sceneWord = 0;
         check::isTrue(readWord(kBlock + (4 * LogicGate::kSceneGateWord), sceneWord) &&
-                          sceneWord == LogicGate::scenePayload({.code = kBlock,
-                                                                .counters = kCounters})[0],
+                          sceneWord ==
+                              LogicGate::scenePayload({.code = kBlock, .counters = kCounters})[0],
                       "and the scene gate is written before any call can reach it");
         check::isTrue(g_resume == kBlock,
                       "the standing probe on the tick resumes at the gate's own block, which is "

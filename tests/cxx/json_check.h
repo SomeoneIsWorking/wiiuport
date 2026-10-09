@@ -76,7 +76,7 @@ inline std::string firstJsonFault(const std::string& text, size_t& at) {
             return false;
         }
         if (c == '{' || c == '[') {
-            const char close = c == '{' ? '}' : ']';
+            char close = c == '{' ? '}' : ']';
             ++i;
             skip();
             if (i < n && text[i] == close) {
