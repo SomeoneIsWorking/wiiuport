@@ -8,12 +8,7 @@ namespace wiiuport::control {
 namespace {
 
 std::optional<uint32_t> number(std::string_view text, int base) {
-    // **`0x` in front is optional, and it is optional because every address in this project is
-    // written with it.** `std::from_chars` refuses the prefix, so `address=0x10163bb4` was refused
-    // with "name address=<hex> and size=<decimal>" -- a message that reads as though the prefix
-    // should have worked, to a reader holding an address copied out of this project's own
-    // documents. `GlobalPoseCensus::namedRange` accepts the prefix, so the two were inconsistent
-    // and the inconsistency was in the diagnostic, not in the caller.
+    // Addresses are written with `0x` throughout the project; from_chars refuses it.
     if (base == 16 && text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
         text.remove_prefix(2);
     }

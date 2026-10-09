@@ -13,14 +13,8 @@
 #include "wiiuport/frame/VertexChanges.h"
 #include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/input/InputDriver.h"
-#include "wiiuport/title/BufferedBlocks.h"
 #include "wiiuport/title/DrawInterpolation.h"
-#include "wiiuport/title/GlobalPoseCensus.h"
 #include "wiiuport/title/LogicGate.h"
-#include "wiiuport/title/ObjectPoseLocator.h"
-#include "wiiuport/title/PoseBlend.h"
-#include "wiiuport/title/PoseByShader.h"
-#include "wiiuport/title/UniformBlockCensus.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
 #include <atomic>
@@ -71,21 +65,6 @@ class ControlChannel {
         const frame::FrameShapeLog& shapeLog;
         const guest::CallerCensus& callers;
         title::WindWakerPaint& paint;
-        const title::UniformBlockCensus& blocks;
-        // The pose census behind `blocks`'s `poseLocator` section, handed over so the pose
-        // table can be fed from the structure rather than from the rendered report.
-        const title::ObjectPoseLocator& poses;
-        // Mutable because scanning is work the channel does on request, not work the display
-        // thread does per frame; the census itself is const everywhere else.
-        title::GlobalPoseCensus& globalPose;
-        // Where a draw's pose is, in words, per shader. Fed from the census's own report
-        // and read by the blend, so the offsets a draw is placed from are the ones the
-        // measurement gave rather than a table written by hand.
-        title::PoseByShader& poseByShader;
-        // The blend the table feeds, so a caller that armed the table can see whether any
-        // draw was actually blended rather than having to ask a second route.
-        const title::PoseBlend& poseBlend;
-        const title::BufferedBlocks& bufferedBlocks;
         title::DrawInterpolation& drawInterpolation;
         title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
@@ -153,20 +132,6 @@ class ControlChannel {
     // keep an answer, so what is left is the pacing's numbers and nothing else.
     std::string pacingJson() const;
 
-    // **The pose table and the blend, as one document with two named sections.** Composed from the
-    // two owners' own `writeTo`, never from their rendered text: splicing rendered documents is how
-    // a report grows a second one, and this project has paid for that once.
-    std::string poseReport() const;
-
-    // **What the census found for one shader, and why the table would refuse each of it.**
-    //
-    // The report's table lists eight candidates out of 285, so a reader cannot look up *its* shader
-    // and the reason it is not in the table. That was measured: two runs of the blend, one blending
-    // 1,240 times and one not at all, differing only in which of 56 to 64 admitted shaders the game
-    // happened to be drawing. **The question is answerable and the instrument could not answer
-    // it**, which is a worse position than a negative measurement.
-    std::string poseForShader(uint64_t shaderBaseHash, uint64_t shaderAuxHash) const;
-
     // What the transform search has found, with the denominators that say
     // whether it looked. `limit` caps the candidate list only; the totals
     // describe the whole search.
@@ -207,13 +172,6 @@ class ControlChannel {
     // A non-negative count query parameter. Zero when present but not a
     // plain decimal number, so the caller's range check refuses it.
     static size_t requestedCount(const std::string& query, std::string_view name, size_t fallback);
-    // A text-valued parameter, for the things a query names rather than counts: the range a scan is
-    // pointed at is a name, and parsing it as a number would refuse every name there is.
-    static std::string requestedText(const std::string& query, std::string_view name,
-                                     std::string fallback);
-    // Every `name` in the query; false when one is not a 16-digit hash.
-    static bool requestedHashes(const std::string& query, std::string_view name,
-                                std::vector<uint64_t>& hashes);
 
     // Applies one input request and returns the body describing what it did.
     // `accepted` is false when nothing in the query named a button or a
@@ -230,12 +188,6 @@ class ControlChannel {
     const frame::FrameShapeLog& m_shapeLog;
     const guest::CallerCensus& m_callers;
     title::WindWakerPaint& m_paint;
-    const title::UniformBlockCensus& m_blocks;
-    const title::ObjectPoseLocator& m_poses;
-    title::GlobalPoseCensus& m_globalPose;
-    title::PoseByShader& m_poseByShader;
-    const title::PoseBlend& m_poseBlend;
-    const title::BufferedBlocks& m_bufferedBlocks;
     title::DrawInterpolation& m_drawInterpolation;
     title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;

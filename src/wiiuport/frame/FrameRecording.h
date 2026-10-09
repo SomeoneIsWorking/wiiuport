@@ -58,13 +58,6 @@ struct RecordedUniformAssembly {
     // record names its block by the guest address it passed. The two are different numbers for one
     // block, and a record word compared against this one cannot hit however large the corpus.
     std::vector<uint32_t> blockSources;
-    // The node whose draw this assembly belongs to, when the title's own code has said so.
-    //
-    // The node is not in anything the GX2 hook sees; it is one step away, because the draw
-    // calls its sub-object at `node + 0xa1c` and the binder probe there publishes the object
-    // before the draw's uniforms are uploaded. Zero when nothing published one, and a reader
-    // must treat zero as unknown rather than as a distinct object.
-    uint32_t objectAddress{0};
     std::vector<float> data;
 };
 

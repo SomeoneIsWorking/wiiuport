@@ -1,23 +1,10 @@
 add_executable(wiiuport_tests
   main.cpp
-  block_census_tests.cpp
-  draw_attribute_census_tests.cpp
-  uniform_block_ring_tests.cpp
-  vertex_pose_history_tests.cpp
   control_tests.cpp
   logic_gate_tests.cpp
-  pose_history_tests.cpp
-  global_pose_tests.cpp
   json_body_tests.cpp
-  node_pose_tests.cpp
-  command_stream_identity_tests.cpp
-  vertex_component_tests.cpp
-  pose_blend_tests.cpp
-  buffered_blocks_tests.cpp
   draw_interpolation_tests.cpp
   guest_call_probe_tests.cpp
-  pose_by_shader_tests.cpp
-  pose_locator_tests.cpp
   paint_tests.cpp
   frame_tests.cpp
   input_tests.cpp

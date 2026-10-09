@@ -352,28 +352,11 @@ class WindWakerPaint {
     // The mode a number names, or nothing when it names none.
     static std::optional<Mode> modeFrom(long long number);
 
-    // Puts the stand-in in and points the vtable slot at it. Empty on success,
-    // otherwise the refusal, naming what it found instead of the frame.
-    // Whether the stand-in is installed, which is what decides the shell's presentation mode: a
-    // title that paints twice in one pass needs each present on its own vblank, and a title
-    // painting once does not care which mode the surface is in.
+    // Whether the stand-in is in: a title painting twice per pass needs FIFO presents.
     bool installed() const;
 
-    // **Whether the paint in progress is the first of the stand-in's two, which is the one an
-    // in-between frame belongs in.** The objective puts the lerp of tick N-1 to tick N *before* the
-    // tick's own frame, so within one tick's two paints the blended one comes first and the tick's
-    // own comes second: the pair is [lerp(N-1 -> N), N], presented in that order, so the latency is
-    // the half-tick the mechanism inherently needs and not the 33 ms a lerp toward N+1 would cost.
-    //
-    // **Read from the existing paint counter, with no new state**, because the counter is already
-    // incremented at the start of every paint by the frame probe: the first of a pair leaves it odd
-    // and the second leaves it even, and "odd" is the in-between. A separate flag would be a second
-    // thing to keep in step with the counter, and two counters that disagree would show up as a
-    // blend on the wrong half of a pair rather than as the disagreement.
-    //
-    // False while the stand-in is not installed: a single paint per tick has no in-between.
-    bool inBetweenPaint() const;
-
+    // Puts the stand-in in and points the vtable slot at it. Empty on success, otherwise the
+    // refusal, naming what it found instead of the frame.
     std::string enable(Mode mode);
 
     // Why the memory is not there, for a report: asked before anything runs,

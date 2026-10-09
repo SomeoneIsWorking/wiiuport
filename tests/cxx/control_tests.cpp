@@ -76,21 +76,10 @@ struct Fixture {
     wiiuport::frame::FrameCapture capture{&refuseCapture};
     wiiuport::frame::FrameShapeLog shapeLog;
     wiiuport::guest::CallerCensus callers{&noRegistration, &noGuestBytes};
-    wiiuport::title::UniformBlockCensus blocks{&noRegistration, &noReadWord, &noReadWords};
-    wiiuport::title::ObjectPoseLocator poses;
-    wiiuport::title::PoseByShader poseByShader;
-    // Armed with the table it reads, because a blend with no table leaves every draw alone
-    // and the route test would be reporting a blend that cannot happen.
-    wiiuport::title::PoseBlend poseBlend{poseByShader};
-    wiiuport::title::BufferedBlocks bufferedBlocks{&noRegistration, &noGuestBytes};
     wiiuport::title::DrawInterpolation drawInterpolation{{.registerProbe = &noRegistration,
                                                           .readWords = &noReadWords,
                                                           .writeWords = nullptr,
                                                           .gated = nullptr}};
-    // The data-area scan, with readers that refuse: a channel built with readers that say no is how
-    // every refusal in this file is exercised, and a scan wired with a reader that answers would
-    // never reach the refusal it exists to report.
-    wiiuport::title::GlobalPoseCensus globalPose{&noReadWords, &noFrame};
     wiiuport::title::LogicGate logic{{.registerProbe = &noRegistration,
                                       .allocateCode = &noCodeSpace,
                                       .allocateData = &noCodeSpace,
@@ -109,12 +98,6 @@ struct Fixture {
         .shapeLog = shapeLog,
         .callers = callers,
         .paint = paint,
-        .blocks = blocks,
-        .poses = poses,
-        .globalPose = globalPose,
-        .poseByShader = poseByShader,
-        .poseBlend = poseBlend,
-        .bufferedBlocks = bufferedBlocks,
         .drawInterpolation = drawInterpolation,
         .logic = logic,
         .guestBytes = &noGuestBytes,
@@ -405,7 +388,7 @@ bool oneJsonDocument(const std::string& body) {
 std::string eachReport(Fixture& fixture) {
     std::string all;
     for (const char* path : {"/counters", "/paint", "/logic", "/gate", "/recordings", "/draws",
-                             "/pacing", "/memory", "/callers", "/blocks"}) {
+                             "/pacing", "/memory", "/callers"}) {
         lucent::http::Request read;
         read.method = "GET";
         read.target = path;
@@ -447,12 +430,9 @@ void everyReportIsOneJsonDocument() {
                                                           {"GET", "/paint"},
                                                           {"GET", "/logic"},
                                                           {"GET", "/gate"},
-                                                          {"GET", "/blocks"},
-                                                          {"GET", "/buffered"},
                                                           {"GET", "/interpolation"},
                                                           {"POST", "/interpolation"},
-                                                          {"POST", "/pacing"},
-                                                          {"POST", "/pose"}}) {
+                                                          {"POST", "/pacing"}}) {
         lucent::http::Request read;
         read.method = method;
         read.target = path;
@@ -465,182 +445,6 @@ void everyReportIsOneJsonDocument() {
                           "one inside it: " +
                           answer.body.substr(0, 60));
     }
-}
-
-// **The pose table is fed by a POST and read by a GET, and neither mutates the other's answer.**
-// Two routes rather than one, because filling a table on a read is a mutation a reader of the
-// report would not expect, and a report that changes because it was read is a report a reader stops
-// trusting.
-void thePoseTableIsFedByAPostAndReadByAGet() {
-    Fixture fixture;
-
-    // **The census is given candidates first, because a table that starts empty cannot tell a read
-    // that fills from a read that does not.** With nothing to offer, a GET that fed the table would
-    // produce exactly the report a GET that did not would, and the assertions at the end of this
-    // test would pass either way -- a test that cannot fail is not coverage.
-    //
-    // The candidate is the title's measured per-object pose: twelve words at **offset 12 in shader
-    // `0x1557c18f92f3bcb9`**, read by no other object, moved in 21,730 of 21,879 comparisons. The
-    // twelve words are a 3x4 read as three rows of three and a translation, which is how
-    // `TransformShape` reads them, and the translation moves each round so the class records a
-    // movement -- the thing that separates a pose from a basis matrix.
-    for (int round = 0; round < 80; round++) {
-        wiiuport::frame::RecordedUniformAssembly assembly;
-        assembly.shaderBaseHash = 0x1557c18f92f3bcb9;
-        assembly.objectAddress = 0x027ff88c + static_cast<uint32_t>(round % 2) * 4;
-        // The block sources are the fallback identity, and they are two so the class has *another*
-        // object to compare against: the table refuses a candidate nothing was compared with, and a
-        // fixture with one object would be refused for that reason rather than for the one under
-        // test.
-        assembly.blockSources = {0x3e000000u + static_cast<uint32_t>(round % 2) * 4};
-        assembly.data.assign(24, 0.0f);
-        const float step = static_cast<float>(round) * 0.25f;
-        const float pose[wiiuport::title::PoseByShader::kWords] = {
-            1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, step, 0.0f, 0.0f};
-        for (size_t word = 0; word < wiiuport::title::PoseByShader::kWords; word++) {
-            assembly.data[3 + word] = pose[word];
-        }
-        fixture.poses.onAssemblyRecorded(assembly);
-    }
-
-    // Read first: the table is empty and says so with a denominator, rather than answering an empty
-    // object that reads as "there is nothing" instead of "nothing has been offered yet".
-    lucent::http::Request read;
-    read.method = "GET";
-    read.target = "/pose";
-    auto before = fixture.channel.dispatch(read);
-    check::isTrue(before.status == 200, "GET /pose answers");
-    check::isTrue(oneJsonDocument(before.body),
-                  "as one JSON document: " + before.body.substr(0, 60));
-    check::isTrue(contains(before.body, "\"shaders\":{}"),
-                  "with an empty table said as empty, not omitted: " + before.body.substr(0, 120));
-    check::isTrue(contains(before.body, "\"offered\":0"),
-                  "and with what it has been offered, which is zero and is written down: " +
-                      before.body.substr(0, 120));
-
-    // **The feed is accepted, offers the census's candidate, and takes it.** A feed
-    // that reported nothing would not say whether it had refused anything, and a
-    // refusal with no count is a refusal a caller cannot act on.
-    lucent::http::Request feed;
-    feed.method = "POST";
-    feed.target = "/pose";
-    auto fed = fixture.channel.dispatch(feed);
-    check::isTrue(fed.status == 200, "POST /pose answers");
-    check::isTrue(oneJsonDocument(fed.body), "as one JSON document too: " + fed.body.substr(0, 60));
-    check::isTrue(
-        contains(fed.body, "\"offeredLastFeed\":1"),
-        "reporting what that call offered, which is the one candidate the census found: " +
-            fed.body.substr(0, 200));
-    check::isTrue(contains(fed.body, "\"acceptedLastFeed\":1"),
-                  "and that it took it: " + fed.body.substr(0, 200));
-    check::isTrue(contains(fed.body, "\"0x1557c18f92f3bcb9\""),
-                  "and which shader it took it for, in hex like every other hash in a report: " +
-                      fed.body.substr(0, 240));
-
-    // **The read now differs from the one taken before the feed, by the feed and nothing else.**
-    auto after = fixture.channel.dispatch(read);
-    check::isTrue(after.body != before.body,
-                  "the read changes because the POST filled the table, so neither answer is a "
-                  "decoration of the other");
-    // And it is the *same* feed reported again. A GET that filled the table would reset the feed's
-    // counts to zero, and this is the check that tells the two apart.
-    check::isTrue(contains(after.body, "\"offeredLastFeed\":1"),
-                  "and a GET reports the last feed's own counts rather than resetting them, which "
-                  "is how it is known not to have filled it: " +
-                      after.body.substr(0, 200));
-    check::isTrue(contains(after.body, "\"0x1557c18f92f3bcb9\""),
-                  "and still holds the offset the feed gave it");
-    // **Two named sections in one document**, and the blend's counts beside the table's: the table
-    // says where a pose goes and the blend says whether any draw went there, and a caller that
-    // armed the table wants both in one read rather than two round trips to find out whether the
-    // thing it armed is doing anything.
-    check::isTrue(contains(after.body, "\"table\":{"), "the table is its own named section");
-    check::isTrue(contains(after.body, "\"blend\":{"), "and the blend is another");
-    check::isTrue(contains(after.body, "\"lerpsPerInBetween\":"),
-                  "and the blend's own ratio is in it, which is the field that says a blend is "
-                  "happening: " +
-                      after.body.substr(0, 200));
-    // The composition is done by the owners rather than by splicing their rendered text, so the
-    // one-document check above covers this route for the same reason it covers the rest.
-    check::isTrue(oneJsonDocument(after.body),
-                  "and the two sections together are still one JSON document: " +
-                      after.body.substr(0, 60));
-}
-
-// **A named shader answers for itself, with the table's own refusal for each candidate.** The
-// report lists eight candidates out of 285, so "why is my shader not in the table" was a question
-// the instrument could not answer -- and two runs of the blend differed by exactly that: one
-// blended 1,240 times and one nothing at all, on tables of nearly the same size. The negative was
-// measurable and the reason was not, which is the worse of the two positions.
-void aNamedShaderAnswersForItselfWithTheTablesOwnRefusal() {
-    Fixture fixture;
-    // Two candidates of the named shader and one of another, so the query has to select rather than
-    // dump. Each is given a different reason to be refused.
-    for (int round = 0; round < 40; round++) {
-        wiiuport::frame::RecordedUniformAssembly assembly;
-        assembly.shaderBaseHash = 0x6669a23d03806414;
-        assembly.objectAddress = 0x027ff88c + static_cast<uint32_t>(round % 2) * 4;
-        assembly.blockSources = {0x3e000000u + static_cast<uint32_t>(round % 2) * 4};
-        assembly.data.assign(24, 0.0f);
-        const float pose[wiiuport::title::PoseBlend::kWords] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
-                                                                0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f};
-        for (size_t word = 0; word < wiiuport::title::PoseBlend::kWords; word++) {
-            assembly.data[3 + word] = pose[word];
-        }
-        fixture.poses.onAssemblyRecorded(assembly);
-    }
-
-    lucent::http::Request query;
-    query.method = "GET";
-    query.target = "/pose?shader=0x6669a23d03806414";
-    auto answer = fixture.channel.dispatch(query);
-    check::isTrue(answer.status == 200, "a named shader answers");
-    check::isTrue(oneJsonDocument(answer.body),
-                  "as one JSON document: " + answer.body.substr(0, 60));
-    check::isTrue(contains(answer.body, "\"shaderBaseHash\":\"0x6669a23d03806414\""),
-                  "and names the shader it answered for: " + answer.body.substr(0, 120));
-    check::isTrue(contains(answer.body, "\"candidatesForThisShader\":"),
-                  "with the count of candidates it has for that shader: " +
-                      answer.body.substr(0, 200));
-    // **The refusal is the table's own, asked of the table**, so a reader is told what the blend
-    // would do with the offset rather than being handed counts to interpret.
-    check::isTrue(contains(answer.body, "\"refusal\":"),
-                  "and each candidate carries the table's own refusal for it");
-    // And the bare word form works, because every address in this project is written both ways.
-    lucent::http::Request bare;
-    bare.method = "GET";
-    bare.target = "/pose?shader=6669a23d03806414";
-    auto bareAnswer = fixture.channel.dispatch(bare);
-    check::isTrue(
-        bareAnswer.body == answer.body,
-        "and the same shader without the 0x is the same answer, because a diagnostic that "
-        "accepts one spelling of a hash is read as broken");
-    // And with no shader named, the whole report comes back as before -- the query is additive and
-    // not a different route.
-    lucent::http::Request plain;
-    plain.method = "GET";
-    plain.target = "/pose";
-    auto plainAnswer = fixture.channel.dispatch(plain);
-    check::isTrue(contains(plainAnswer.body, "\"table\":{"),
-                  "and with no shader named the whole report comes back as before: " +
-                      plainAnswer.body.substr(0, 80));
-
-    // **A named shader narrows the feed to that shader's candidates.** The census is cumulative and
-    // the table evaluates whatever counts it is given, so a candidate refused on first sight can be
-    // admitted by offering it again once it has drawn enough. The blend's own unplaced-shader list
-    // names the shaders that need that, and a caller holding the measurement should be able to ask
-    // for exactly those rather than the whole census every time.
-    lucent::http::Request narrow;
-    narrow.method = "POST";
-    narrow.target = "/pose?shader=0x6669a23d03806414";
-    auto narrowed = fixture.channel.dispatch(narrow);
-    check::isTrue(narrowed.status == 200, "a narrowed feed answers");
-    check::isTrue(contains(narrowed.body, "\"offeredLastFeed\":"),
-                  "and says how many candidates it offered: " + narrowed.body.substr(0, 200));
-    // Whatever it offered, the table's size is unchanged by a narrowed feed of candidates it
-    // already holds, and the document is still one document.
-    check::isTrue(oneJsonDocument(narrowed.body),
-                  "and it is still one JSON document: " + narrowed.body.substr(0, 60));
 }
 
 void everyAdvertisedRouteIsReachableByItsOwnMethod() {
@@ -752,11 +556,11 @@ void aGetReportsAndDoesNotChangeAnything() {
     // absent.
     lucent::http::Request postOnly;
     postOnly.method = "GET";
-    postOnly.target = "/global-pose";
+    postOnly.target = "/input";
     auto refused = fixture.channel.dispatch(postOnly);
     check::isTrue(refused.body.rfind("unknown route. This channel serves", 0) == 0,
                   "a GET of a POST-only route is refused as unknown, not answered");
-    check::isTrue(contains(refused.body, "POST /global-pose"),
+    check::isTrue(contains(refused.body, "POST /input"),
                   "and the refusal still says the route exists for POST");
 
     // **And a route that was deleted stays deleted.** The host-side interpolation's routes are
@@ -791,8 +595,6 @@ void runControlTests() {
     aCallsChainIsItsReturnAddressThenEachSavedLinkRegister();
     anIdleCensusReportsNoEntriesRatherThanNothing();
     aMemoryReadNamesItsRangeAndIsBounded();
-    thePoseTableIsFedByAPostAndReadByAGet();
-    aNamedShaderAnswersForItselfWithTheTablesOwnRefusal();
     everyAdvertisedRouteIsReachableByItsOwnMethod();
     aGetReportsAndDoesNotChangeAnything();
 }

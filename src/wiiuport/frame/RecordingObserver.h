@@ -3,7 +3,6 @@
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 #include "wiiuport/frame/FrameRecording.h"
 #include "wiiuport/frame/VertexChanges.h"
-#include "wiiuport/title/CommandStreamIdentity.h"
 
 #include <array>
 #include <cstddef>
@@ -27,34 +26,6 @@ class FrameEndListener {
   public:
     virtual ~FrameEndListener() = default;
     virtual void onFrameRecorded(const FrameRecording& recording) = 0;
-};
-
-// Notified for each of the guest's uniform assemblies as it is recorded, while
-// the frame is still being drawn. Work done here is spread over the frame; work
-// done at the frame's end lands between the frame and its swap, where the title
-// waits for it.
-class AssemblyRecordedListener {
-  public:
-    virtual ~AssemblyRecordedListener() = default;
-    virtual void onAssemblyRecorded(const RecordedUniformAssembly& assembly) = 0;
-};
-
-// **Notified with the guest's own buffer, before it is copied and before the draw is issued.** This
-// is a separate seam from `AssemblyRecordedListener` because that one is handed a *copy* -- a
-// `RecordedUniformAssembly` whose `data` is a vector this class owns -- and a listener that wanted
-// to change what the title is about to transform with would be changing a copy, which the draw
-// never reads. A write to a copy is a write to nothing, and it would report having blended.
-//
-// The window is the only one in which the value the title is about to use is still the title's own
-// and not yet frozen into a record: the observer is called at the fork's uniform-assembly hook, the
-// buffer is the assembled one, and the draw follows.
-class AssemblyBeforeDrawListener {
-  public:
-    virtual ~AssemblyBeforeDrawListener() = default;
-    // `words` is the assembled buffer as a mutable span, `node` is the address the title's binder
-    // named for this draw, and the shader hashes identify whose layout the buffer is.
-    virtual void onAssemblyBeforeDraw(float* words, size_t count, uint64_t shaderBaseHash,
-                                      uint64_t shaderAuxHash, uint32_t node) = 0;
 };
 
 // Notified after the guest's swap has shown the frame most recently recorded.
@@ -107,15 +78,6 @@ class AssemblyFilter {
     virtual bool onRuntimeAssembly(const LatteFrameHooks::UniformAssembly& assembly) = 0;
 };
 
-// Notified for each of the guest's draws once it is prepared, in the order it
-// drew them, between the uniform assemblies it was drawn with and the next
-// draw's. The draw's vertex bytes are the guest's and last only the call.
-class DrawRecordedListener {
-  public:
-    virtual ~DrawRecordedListener() = default;
-    virtual void onDrawRecorded(const LatteFrameHooks::DrawPrepared& draw) = 0;
-};
-
 // Fills a FrameRecording from the fork's hooks, and nothing else.
 //
 // Kept separate from FrameRecording so the recording stays testable without
@@ -124,17 +86,6 @@ class DrawRecordedListener {
 // about what to record or when to replay lives here.
 class RecordingObserver final : public LatteFrameHooks::Observer {
   public:
-    // Which node each draw belongs to, so an assembly can be recorded with it. Null is the honest
-    // default: without it every assembly records zero
-    // and `RecordedUniformAssembly::objectAddress` reads as "unknown", which is what it is.
-    void setObjectIdentity(const title::CommandStreamIdentity* identity) {
-        m_objectIdentity = identity;
-    }
-
-    // Where the uniform block the draw sourced is, and which word of the descriptor record says
-    // so. The observer is the one place that sees both, because the assembly it records is the
-    // one that follows the binding. Null is allowed and means it is not measured.
-
     RecordingObserver() = default;
 
     void OnDisplayList(const LatteFrameHooks::DisplayList& list) override;
@@ -155,21 +106,6 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void addFrameEndListener(FrameEndListener* listener) {
         if (listener != nullptr) {
             m_listeners.push_back(listener);
-        }
-    }
-
-    void addAssemblyRecordedListener(AssemblyRecordedListener* listener) {
-        if (listener != nullptr) {
-            m_assemblyListeners.push_back(listener);
-        }
-    }
-
-    // Registered here rather than at construction because a listener that wants the live buffer is
-    // one the caller adds alongside the measurement that fills its table, and the two are wired at
-    // different times.
-    void addAssemblyBeforeDrawListener(AssemblyBeforeDrawListener* listener) {
-        if (listener != nullptr) {
-            m_beforeDrawListeners.push_back(listener);
         }
     }
 
@@ -194,12 +130,6 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
     void addScanOutListener(ScanOutListener* listener) {
         if (listener != nullptr) {
             m_scanOutListeners.push_back(listener);
-        }
-    }
-
-    void addDrawRecordedListener(DrawRecordedListener* listener) {
-        if (listener != nullptr) {
-            m_drawListeners.push_back(listener);
         }
     }
 
@@ -318,17 +248,12 @@ class RecordingObserver final : public LatteFrameHooks::Observer {
 
   private:
     std::vector<FrameEndListener*> m_listeners;
-    std::vector<AssemblyRecordedListener*> m_assemblyListeners;
-    std::vector<AssemblyBeforeDrawListener*> m_beforeDrawListeners;
     std::vector<FrameShownListener*> m_shownListeners;
     std::vector<PresentListener*> m_presentListeners;
     std::vector<DisplayedListener*> m_displayedListeners;
     std::vector<ScanOutListener*> m_scanOutListeners;
-    std::vector<DrawRecordedListener*> m_drawListeners;
     FrameRecording m_inFlight;
     FrameRecording m_completed;
-    // Names each draw's node, or null.
-    const title::CommandStreamIdentity* m_objectIdentity = nullptr;
     RecordedUniformAssembly m_assemblyScratch;
     FrameRecording m_previous;
     std::array<uint64_t, LatteFrameHooks::kWithheldEffectCount> m_runtimeWithheld{};

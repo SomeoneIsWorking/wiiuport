@@ -294,12 +294,6 @@ std::string_view WindWakerPaint::modeName(Mode mode) {
     return "unknown";
 }
 
-bool WindWakerPaint::inBetweenPaint() const {
-    // The count is incremented at the start of every paint, before the body runs, so during a paint
-    // it already includes this one: the first of the stand-in's two leaves it odd.
-    return installed() && (m_paints.load(std::memory_order_relaxed) & 1u) != 0u;
-}
-
 std::optional<WindWakerPaint::Mode> WindWakerPaint::modeFrom(long long number) {
     switch (number) {
     case 1:
@@ -515,8 +509,8 @@ std::optional<std::vector<uint32_t>> WindWakerPaint::payload(uint32_t blockAddre
             // 0`, which reads as though a single-paint mode should call -- and did, until the
             // pass-through payload's one branch became a call and the test on its two words said
             // so.
-            const bool call = (mode == Mode::TailTwiceAtSixty) ? (paint == 0) : calls;
-            steps.push_back({call, kDisplayFrame});
+            steps.push_back(
+                {(mode == Mode::TailTwiceAtSixty) ? (paint == 0) : calls, kDisplayFrame});
         }
     }
 
@@ -798,30 +792,28 @@ std::string WindWakerPaint::enable(Mode mode) {
         }
         m_wroteInterval = true;
         lucent::info("paint", "display interval field {} -> {}", hex(field), hex(kSwapInterval));
-        if (wantsOneVblank) {
-            // And the pacing itself, which is the emulator's and not the title's
-            // memory. Both, so the title's record and the thing it records agree:
-            // a field saying one while the flip still takes two vblanks would be
-            // a claim nothing backs.
-            //
-            // **This is what takes the picture rate to sixty, and the field alone does not.**
-            // Measured with the field written and the pacing left alone: the report read `interval
-            // 1` and the paints still ran at thirty a second. The gate that opens the display
-            // thread is the emulator's flip pacing, and the title's own record of the interval it
-            // asked for is a statement about it rather than a thing that causes it.
-            m_savedPacing = m_swapInterval();
-            const uint32_t now = m_setSwapInterval(kSwapInterval);
-            if (now != kSwapInterval) {
-                m_refusal = "the flip pacing refused one vblank and is at " + hex(now);
-                (void)m_writeWord(display + kIntervalOffset, m_savedInterval);
-                m_wroteInterval = false;
-                m_savedInterval = 0;
-                return m_refusal;
-            }
-            m_wrotePacing = true;
-            lucent::info("paint", "flip pacing {} -> {} vblank(s), and the title's field agrees",
-                         hex(m_savedPacing), hex(kSwapInterval));
+        // And the pacing itself, which is the emulator's and not the title's
+        // memory. Both, so the title's record and the thing it records agree:
+        // a field saying one while the flip still takes two vblanks would be
+        // a claim nothing backs.
+        //
+        // **This is what takes the picture rate to sixty, and the field alone does not.**
+        // Measured with the field written and the pacing left alone: the report read `interval
+        // 1` and the paints still ran at thirty a second. The gate that opens the display
+        // thread is the emulator's flip pacing, and the title's own record of the interval it
+        // asked for is a statement about it rather than a thing that causes it.
+        m_savedPacing = m_swapInterval();
+        const uint32_t now = m_setSwapInterval(kSwapInterval);
+        if (now != kSwapInterval) {
+            m_refusal = "the flip pacing refused one vblank and is at " + hex(now);
+            (void)m_writeWord(display + kIntervalOffset, m_savedInterval);
+            m_wroteInterval = false;
+            m_savedInterval = 0;
+            return m_refusal;
         }
+        m_wrotePacing = true;
+        lucent::info("paint", "flip pacing {} -> {} vblank(s), and the title's field agrees",
+                     hex(m_savedPacing), hex(kSwapInterval));
     }
     if (m_block == 0) {
         m_refusal = m_reservationRefusal.empty()
@@ -884,14 +876,13 @@ std::string WindWakerPaint::enable(Mode mode) {
         // revision whose vtable points elsewhere is still refused by name -- the
         // vtable is read to learn the frame is the one this title has, not
         // because this mode writes there.
-        const uint32_t frameEntry = kDisplayFrame;
         uint32_t there = 0;
         // The word the probe sits on is checked, and named: a revision whose frame differs there is
         // refused by name rather than branched into. The frame's *entry* is checked too, and the
         // two are different checks -- the entry is what the stand-in branches to, the probe word is
         // what the probe displaces.
-        if (!m_readWord(frameEntry, there) || there != kDisplayFrameFirst) {
-            m_refusal = "the frame's entry at " + hex(frameEntry) + " holds " + hex(there) +
+        if (!m_readWord(kDisplayFrame, there) || there != kDisplayFrameFirst) {
+            m_refusal = "the frame's entry at " + hex(kDisplayFrame) + " holds " + hex(there) +
                         ", not " + hex(kDisplayFrameFirst) +
                         "; this stand-in is written for this title's frame";
             return m_refusal;
@@ -902,19 +893,19 @@ std::string WindWakerPaint::enable(Mode mode) {
                         ", so the probe would displace a different instruction";
             return m_refusal;
         }
-        if (!withinReach(frameEntry, m_block)) {
+        if (!withinReach(kDisplayFrame, m_block)) {
             m_refusal = "the stand-in's block at " + hex(m_block) +
                         " is out of a branch's reach "
                         "of " +
-                        hex(frameEntry);
+                        hex(kDisplayFrame);
             return m_refusal;
         }
-        const uint32_t branch = branchTo(frameEntry, m_block, false);
-        if (!m_writeWord(frameEntry, branch)) {
-            m_refusal = "the frame's entry at " + hex(frameEntry) + " would not take the branch";
+        const uint32_t branch = branchTo(kDisplayFrame, m_block, false);
+        if (!m_writeWord(kDisplayFrame, branch)) {
+            m_refusal = "the frame's entry at " + hex(kDisplayFrame) + " would not take the branch";
             return m_refusal;
         }
-        m_patched = frameEntry;
+        m_patched = kDisplayFrame;
         m_original = there;
         m_patchedIsSlot = false;
     } else if (!m_writeWord(slot, m_block)) {
