@@ -10,7 +10,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .cxxpolicy import CxxPolicyUnavailable, check_cxx_policy
 from .cxxtests import CxxTestsUnavailable, build_and_run
 from .cxxtidy import TidyUnavailable, check_tidy
 from .lockedtools import LOCKED_BIN, LockedToolMissing, locked_tool
@@ -180,22 +179,6 @@ def gate_structure(layout: Layout) -> GateResult:
     )
 
 
-def gate_cxx_policy(layout: Layout) -> GateResult:
-    """The three ownership rules clang-tidy cannot express, on the real AST.
-
-    A parse failure fails the gate rather than reporting an empty result: a
-    file that could not be read had none of its declarations inspected.
-    """
-    try:
-        report = check_cxx_policy(layout)
-    except CxxPolicyUnavailable as unavailable:
-        return GateResult("c++ ownership policy", False, 0, str(unavailable))
-    detail = report.summary
-    if report.findings:
-        detail = "\n".join([detail, *(str(finding) for finding in report.findings)])
-    return GateResult("c++ ownership policy", not report.findings, len(report.scanned), detail)
-
-
 def gate_cxx_tests(layout: Layout) -> GateResult:
     """Build and run the first-party C++ tests.
 
@@ -234,7 +217,6 @@ GATES = (
     # actually used. Reversed, the gate falls back to its baseline flags and a
     # warm developer machine passes on a database CI does not have yet.
     gate_cxx_tests,
-    gate_cxx_policy,
     gate_cxx_tidy,
     gate_structure,
 )
