@@ -35,7 +35,7 @@ namespace {
 // pacing's own summary rather than with the interpolated frame's counts.
 const char* const kRoutes =
     "GET /counters, GET /capture, "
-    "GET /controllers, GET /setup, "
+    "GET /controllers, GET /controller-choice, GET /setup, "
     "GET /recordings, GET /draws, GET /memory, GET /callers, "
     "GET /interpolation, GET /particles, GET /sea, GET /materials, GET /environment, "
     "GET /paint, GET /logic, GET /gate, "
@@ -147,8 +147,9 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_seaInterpolation(sources.seaInterpolation),
       m_materialInterpolation(sources.materialInterpolation), m_stageWarp(sources.stageWarp),
       m_environmentInterpolation(sources.environmentInterpolation), m_logic(sources.logic),
-      m_guestBytes(sources.guestBytes), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
-      m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
+      m_controllerChoice(sources.controllerChoice), m_guestBytes(sources.guestBytes),
+      m_snapshot(sources.snapshot), m_pacing(sources.pacing), m_scanOut(sources.scanOut),
+      m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
 }
 
 ControlChannel::~ControlChannel() = default;
@@ -652,6 +653,9 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
     }
     if (request.path() == "/controllers") {
         return lucent::http::Response::json(200, "OK", controllersJson());
+    }
+    if (request.path() == "/controller-choice") {
+        return lucent::http::Response::json(200, "OK", m_controllerChoice.json());
     }
     if (request.path() == "/setup") {
         return lucent::http::Response::json(200, "OK", setupJson());

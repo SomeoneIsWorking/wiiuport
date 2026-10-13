@@ -61,6 +61,8 @@ add_library(wiiuport STATIC
   guest/ProbeInstallation.h
   title/LogicGate.cpp
   title/LogicGate.h
+  title/ProControllerChoice.cpp
+  title/ProControllerChoice.h
   title/DrawInterpolation.cpp
   title/DrawInterpolation.h
   title/EnvironmentInterpolation.cpp

@@ -18,13 +18,13 @@ struct ButtonBinding {
     uint64_t physical;
 };
 
-// Attaches whatever gamepad is plugged in to the emulated GamePad, and lets
-// the player swap it mid-game.
+// Attaches whatever gamepad is plugged in to the emulated Pro Controller on WPAD
+// channel 0, and lets the player swap it mid-game.
 //
 // It exists because the product has no settings screen to map a pad in: a
 // first-party host that cannot be played with the controller already in the
 // player's hands is not a product. The layout is by position, not by letter,
-// so the button under the thumb is the one the Wii U had there.
+// so the button under the thumb is the one the Pro Controller had there.
 class ControllerAutoMap final : public control::ControllerStatusSource {
   public:
     // The default layout, and the only place it is written down.

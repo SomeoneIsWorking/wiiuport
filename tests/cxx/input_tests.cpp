@@ -6,8 +6,8 @@ using wiiuport::input::InputDriver;
 
 namespace {
 
-VPADInputHooks::Injection polled(InputDriver& driver, bool& driven) {
-    VPADInputHooks::Injection injection;
+InputHooks::Injection polled(InputDriver& driver, bool& driven) {
+    InputHooks::Injection injection;
     driven = driver.Poll(0, injection);
     return injection;
 }
@@ -26,12 +26,12 @@ void anUndrivenPlayerIsLeftToRealControllers() {
 
 void aPressIsHeldForTheRequestedReadsAndThenReleased() {
     InputDriver driver;
-    driver.press(VPADInputHooks::kButtonA, 2);
+    driver.press(InputHooks::kButtonA, 2);
     auto driven = false;
-    check::equal(polled(driver, driven).holdMask, uint32_t{VPADInputHooks::kButtonA},
+    check::equal(polled(driver, driven).holdMask, uint32_t{InputHooks::kButtonA},
                  "the first read holds A");
     check::isTrue(driven, "and the player is driven");
-    check::equal(polled(driver, driven).holdMask, uint32_t{VPADInputHooks::kButtonA},
+    check::equal(polled(driver, driven).holdMask, uint32_t{InputHooks::kButtonA},
                  "so does the second");
     // The release edge is the half a title actually acts on, so a press that
     // never ends is not a press.
@@ -41,11 +41,11 @@ void aPressIsHeldForTheRequestedReadsAndThenReleased() {
 
 void twoButtonsAreHeldTogether() {
     InputDriver driver;
-    driver.press(VPADInputHooks::kButtonA, 4);
-    driver.press(VPADInputHooks::kButtonPlus, 4);
+    driver.press(InputHooks::kButtonA, 4);
+    driver.press(InputHooks::kButtonPlus, 4);
     auto driven = false;
     check::equal(polled(driver, driven).holdMask,
-                 uint32_t{VPADInputHooks::kButtonA | VPADInputHooks::kButtonPlus},
+                 uint32_t{InputHooks::kButtonA | InputHooks::kButtonPlus},
                  "both buttons are held at once");
 }
 
@@ -72,7 +72,7 @@ void aCentredStickIsStillBeingDriven() {
 
 void releasingHandsThePlayerBack() {
     InputDriver driver;
-    driver.press(VPADInputHooks::kButtonA, 100);
+    driver.press(InputHooks::kButtonA, 100);
     driver.release();
     auto driven = true;
     polled(driver, driven);
@@ -82,8 +82,8 @@ void releasingHandsThePlayerBack() {
 
 void onlyTheDrivenPlayerIsTouched() {
     InputDriver driver;
-    driver.press(VPADInputHooks::kButtonA, 4);
-    VPADInputHooks::Injection injection;
+    driver.press(InputHooks::kButtonA, 4);
+    InputHooks::Injection injection;
     check::isTrue(!driver.Poll(1, injection), "a second gamepad is not driven");
 }
 

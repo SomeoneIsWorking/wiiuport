@@ -2,6 +2,7 @@ add_executable(wiiuport_tests
   main.cpp
   control_tests.cpp
   logic_gate_tests.cpp
+  pro_controller_choice_tests.cpp
   json_body_tests.cpp
   draw_interpolation_tests.cpp
   environment_interpolation_tests.cpp
