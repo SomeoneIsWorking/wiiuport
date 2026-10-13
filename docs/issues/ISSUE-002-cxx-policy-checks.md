@@ -1,6 +1,6 @@
 # ISSUE-002 — Syntax-aware C++ policy checks
 
-**State:** resolved. **Affects:** ST-VERIFIER.
+**State:** withdrawn (2026-10-14): the gate was removed because it took about 48 minutes, parsing each of 96 units through libclang in 16-45 s; the three rules below are no longer checked. **Affects:** ST-VERIFIER.
 
 Three rules `clang-tidy` cannot express now have a gate:
 
