@@ -70,7 +70,7 @@ def _logic_count(port: int) -> tuple[int, str]:
     if gate.calls_at_probe is not None:
         return (
             gate.calls_at_probe,
-            f"calls at the gate's probe on {gate.tick:#010x}, not ticks: "
+            f"calls at the gate's probe on {gate.entry:#010x}, not ticks: "
             + (
                 "the gate's block holds the pass-through control"
                 if gate.through
@@ -117,7 +117,7 @@ def measure(
                 f"at the tick's entry {gate.word_at_entry}, "
                 f"at the word after it {gate.word_at_body}, "
                 f"gate counters {gate.calls}/{gate.ticks}, "
-                f"probe calls {gate.calls_at_probe} at {gate.tick:#010x}",
+                f"probe calls {gate.calls_at_probe} at {gate.entry:#010x}",
                 flush=True,
             )
         except ControlUnavailable as unavailable:

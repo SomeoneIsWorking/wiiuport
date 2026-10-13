@@ -16,6 +16,7 @@ void runSeaInterpolationTests();
 void runEnvironmentInterpolationTests();
 void runMaterialInterpolationTests();
 void runStageWarpTests();
+void runSixtyHertzTests();
 void runGuestCallProbeTests();
 void runJsonBodyTests();
 void runInputTests();

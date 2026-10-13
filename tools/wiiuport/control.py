@@ -498,7 +498,7 @@ class GateState:
     words the gate works through actually hold right now.
     """
 
-    tick: int
+    entry: int
     enabled: bool
     calls: int | None
     ticks: int | None
@@ -529,7 +529,7 @@ class GateState:
             else "nothing"
         )
         return (
-            f"logic gate: {'in' if self.enabled else 'out'} at {self.tick:#010x}, "
+            f"logic gate: {'in' if self.enabled else 'out'} at {self.entry:#010x}, "
             f"{what} in {self.block}, {self.calls} calls, {self.ticks} ticks through it; "
             f"{self.calls_at_probe} calls at its probe ({self.holding_probe})"
         )
@@ -547,16 +547,16 @@ def read_gate(port: int = DEFAULT_PORT, timeout: float = 2.0) -> GateState:
     """
     payload = _get("/logic", port, timeout)
     require_fields(
-        "GET /logic", payload, ("tick", "enabled", "callsCount", "ticksCount"), "the logic gate"
+        "GET /logic", payload, ("entry", "enabled", "callsCount", "ticksCount"), "the logic gate"
     )
     return GateState(
-        tick=int(payload["tick"], 16),
+        entry=int(payload["entry"], 16),
         probe=str(payload.get("probe", "unreported")),
         gate_probe=str(payload.get("gateProbe", "unreported")),
         gate_entries=(None if payload.get("gateEntries") is None else int(payload["gateEntries"])),
         block=str(payload.get("block", "unreported")),
-        word_at_entry=str(payload.get("wordAtTickEntry", "unreported")),
-        word_at_body=str(payload.get("wordAtTickBody", "unreported")),
+        word_at_entry=str(payload.get("wordAtEntry", "unreported")),
+        word_at_body=str(payload.get("wordAtBody", "unreported")),
         holding_probe=str(payload.get("holdingProbe", "unreported")),
         calls_at_probe=(
             None if payload.get("callsAtProbe") is None else int(payload["callsAtProbe"])
@@ -596,9 +596,9 @@ def set_gate(
         raise ControlUnavailable(f"POST /logic answered something that is not JSON: {malformed}")
     return (
         read_gate(port, timeout)
-        if "tick" not in payload
+        if "entry" not in payload
         else GateState(
-            tick=int(payload["tick"], 16),
+            entry=int(payload["entry"], 16),
             enabled=bool(payload["enabled"]),
             calls=None if payload["callsCount"] is None else int(payload["callsCount"]),
             ticks=None if payload["ticksCount"] is None else int(payload["ticksCount"]),

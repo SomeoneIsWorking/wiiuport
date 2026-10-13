@@ -185,6 +185,11 @@ class WindWakerPaint {
     // the product down before it has printed a line.
     void install();
 
+    // Told of each paint, on the display thread; set before install.
+    void setPaintListener(std::function<void()> listener) {
+        m_frame.setPaintListener(std::move(listener));
+    }
+
     // What the stand-in does, kept separable so a failure says which part.
     enum class Mode : uint8_t {
         // One paint, reached by a plain branch at the frame, then back to the
@@ -439,6 +444,10 @@ class WindWakerPaint {
             m_reserve = std::move(reserve);
         }
 
+        void setPaintListener(std::function<void()> listener) {
+            m_paintListener = std::move(listener);
+        }
+
         void OnCall(std::span<const uint32_t, 32> gpr, uint32_t returnAddress) override;
 
         // `display+0x74` and `display+0x28`, sampled at every paint. The
@@ -478,6 +487,7 @@ class WindWakerPaint {
       private:
         std::atomic<uint64_t>& m_paints;
         ReadWord m_readWord;
+        std::function<void()> m_paintListener;
         // Called once, at link time, to take the stand-in's memory.
         std::function<void(std::string&)> m_reserve;
     };

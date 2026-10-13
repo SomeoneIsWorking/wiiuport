@@ -164,6 +164,27 @@ counted nothing while the title carried on. **A gate that was never installed lo
 that was not needed**, which is the whole argument for reporting an instrument's own installation
 state beside its counts.
 
+### The gate holds the frame logic, not only the tick
+
+The gate's probe is on `0x0203593c`, the title's frame logic, which the sead task tree calls once
+per paint. It runs, in order: the UI manager's event update `0x02614f74` (one event per call into
+`*0x101f4ff0 + 0x30`), the per-frame entry `0x025f172c` and its tick `0x025d42ec`, the layout
+manager `0x0270870c`, sound and the rest. Gated at the tick alone, the UI manager advanced its
+event at sixty while the menus that read it, which are processes under the tick, ran at thirty:
+an event raised on an in-between paint was replaced before any menu saw it. Controller Selection
+(`0x026d440c`, reading event `0x11` on its button) never confirmed. Holding the whole frame logic
+returns every part of it to the title's own thirty; a skipped call still runs only fpcM's draw half.
+
+Proof (`scratch/drawphase/menu_flow.py`, launched with no toggles): before, Controller Selection
+took twelve A presses and stayed; after, it confirms on the next press and the flow reaches Outset,
+60.00 paints/s and 30.00 ticks/s in gameplay, with Link walking on the stick.
+
+### On by default
+
+`title::SixtyHertz` switches both halves in once the display has painted: the stand-in in
+`LoopFrameLiteralTwice`, then the gate. Neither runs without the other; a gate that refuses takes
+the stand-in back out, and the outcome is logged on the `sixty` channel.
+
 ## The null case is a discriminator, not a uniformity
 
 Condition 4 asks that the null case -- two paints, no blend -- be identical to one paint, and that a
@@ -398,7 +419,7 @@ world from deriving its picture:
 
 | guest | TWW | role |
 |---|---|---|
-| `0x025d42ec` | `mDoMain` frame callback | the gated tick: `fpcM_Management(0, 0x025d42c4)` |
+| `0x025d42ec` | `mDoMain` frame callback | the tick, `fpcM_Management(0, 0x025d42c4)`, gated with the frame logic `0x0203593c` that calls it |
 | `0x025df948` | `fpcM_Management` | `MtxInit` `0x0200fac4`, `fpcDt` `0x025de024`, `fpcPi` `0x025e0ee4`, `fpcCt` `0x025ddac4`, then Ex, Dw, callback 2 |
 | `0x025df5c0(0x025df940)` | `fpcEx_Handler(fpcM_Execute)` | actor logic: advances state |
 | `0x025de37c(0x025df908, 0x025de2cc)` | `fpcDw_Handler(fpcM_DrawIterater, fpcM_Draw)` | actor draw: derives the picture |

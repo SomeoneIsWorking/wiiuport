@@ -44,8 +44,12 @@ void Runtime::installHooks() {
     m_drawInterpolation.install();
     m_particleInterpolation.install();
     m_materialInterpolation.install();
+    m_paint.setPaintListener([this] {
+        m_sixty.onPaint();
+    });
     m_paint.install();
     m_logic.install();
+    m_sixty.start();
     m_hooksInstalled = true;
     // Always open, on loopback: the channel is how an agent asks a running
     // product, the player's own session included, what it is doing.
