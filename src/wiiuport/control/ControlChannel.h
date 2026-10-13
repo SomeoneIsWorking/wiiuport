@@ -19,6 +19,7 @@
 #include "wiiuport/title/MaterialInterpolation.h"
 #include "wiiuport/title/ParticleInterpolation.h"
 #include "wiiuport/title/SeaInterpolation.h"
+#include "wiiuport/title/StageWarp.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
 #include <atomic>
@@ -73,6 +74,7 @@ class ControlChannel {
         const title::ParticleInterpolation& particleInterpolation;
         const title::SeaInterpolation& seaInterpolation;
         const title::MaterialInterpolation& materialInterpolation;
+        title::StageWarp& stageWarp;
         const title::EnvironmentInterpolation& environmentInterpolation;
         title::LogicGate& logic;
         GuestMemoryRead::GuestBytes guestBytes;
@@ -200,6 +202,7 @@ class ControlChannel {
     const title::ParticleInterpolation& m_particleInterpolation;
     const title::SeaInterpolation& m_seaInterpolation;
     const title::MaterialInterpolation& m_materialInterpolation;
+    title::StageWarp& m_stageWarp;
     const title::EnvironmentInterpolation& m_environmentInterpolation;
     title::LogicGate& m_logic;
     GuestMemoryRead::GuestBytes m_guestBytes;

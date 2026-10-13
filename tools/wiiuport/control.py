@@ -12,6 +12,7 @@ import http.client
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -396,6 +397,19 @@ def request_quit(port: int = DEFAULT_PORT, timeout: float = 5.0) -> None:
     substitute: the emulated system's handler ends the process on SIGTERM
     without the host's shutdown, so only this exercises the path players take."""
     request_bytes("POST", "/quit", port, timeout)
+
+
+def request_warp(
+    stage: str,
+    point: int,
+    room: int,
+    layer: int = -1,
+    port: int = DEFAULT_PORT,
+    timeout: float = 5.0,
+) -> None:
+    """Ask the title for another stage as its own exits do; refused while one is pending."""
+    query = urllib.parse.urlencode({"stage": stage, "point": point, "room": room, "layer": layer})
+    request_bytes("POST", f"/warp?{query}", port, timeout)
 
 
 @dataclass(frozen=True)

@@ -8,6 +8,7 @@ add_executable(wiiuport_tests
   material_interpolation_tests.cpp
   particle_interpolation_tests.cpp
   sea_interpolation_tests.cpp
+  stage_warp_tests.cpp
   guest_call_probe_tests.cpp
   paint_tests.cpp
   frame_tests.cpp
