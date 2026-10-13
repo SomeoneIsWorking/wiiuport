@@ -535,6 +535,32 @@ class GateState:
         )
 
 
+def _game_frame_count(gate: GateState) -> tuple[bool, int]:
+    """The title's frame-logic runs so far: the gate's ticks while it is in, every call while out."""
+    count = gate.ticks if gate.enabled else gate.calls_at_probe
+    if count is None:
+        raise ControlUnavailable("GET /logic reported no count of the title's frames")
+    return gate.enabled, count
+
+
+def wait_game_frames(frames: int, port: int = DEFAULT_PORT, seconds: float = 600.0) -> None:
+    """Return once the title has run `frames` more frames of its logic, however slowly it runs.
+
+    `seconds` only bounds a title that has stopped; it is not the measure.
+    """
+    mode, last = _game_frame_count(read_gate(port))
+    done = 0
+    deadline = time.monotonic() + seconds
+    while done < frames:
+        if time.monotonic() >= deadline:
+            raise ControlUnavailable(f"the title ran {done} of {frames} frames in {seconds:.0f}s")
+        time.sleep(0.02)
+        now_mode, now = _game_frame_count(read_gate(port))
+        if now_mode == mode:
+            done += now - last
+        mode, last = now_mode, now
+
+
 def read_gate(port: int = DEFAULT_PORT, timeout: float = 2.0) -> GateState:
     """The logic gate's own state, from `/logic`.
 

@@ -517,6 +517,13 @@ differed between the tick's draw and the skipped call's: then it was set in the 
 actor's blended placement, is the midpoint already, and is used as it is. Morphs and any per-joint
 callback are inside `W`, so they are blended too.
 
+A model can take another model's joint by copy before its own view pass: Link's hands
+(`daPy_lk_c::setDrawHandModel`) `setAnmMtx` the body's hand joints after the body's view pass, so on
+the in-between paint they already hold the body's blend. Each joint blended in a draw phase is kept
+as `held -> blended`; a later model holding exactly a `held` matrix is drawn at that blend, not
+blended again (`jointsCopied`). Before this the hands were blended twice and trailed the arms
+(ISSUE-008).
+
 **Measured** (`scratch/drawphase/idle.py`, Link idle, camera still, 5 consecutive presents per arm,
 pixels changed in the centre box): off `5233, 133, 4870, 83`, on `2832, 3116, 2701, 2373`. Walk
 (`scratch/drawphase/run.py`): 11,958 model blends, 628 with the base from the draw, 0 unblendable,

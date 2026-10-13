@@ -215,6 +215,9 @@ class DrawInterpolation {
     // The base each model's tick drew with, to learn whether the base follows the draw's inputs.
     std::map<uint32_t, Seen<kMatrixWords>> m_tickBases;
     std::set<uint32_t> m_viewedInDraw;
+    // Each joint a model held when it was blended in this draw phase, and its blend: a later model
+    // holding the same matrix took it by copy (setAnmMtx) and is drawn at that blend.
+    std::map<std::array<uint32_t, kMatrixWords>, std::array<uint32_t, kMatrixWords>> m_jointBlends;
     std::vector<Restore> m_restores;
 
     uint64_t m_ticks = 0;
@@ -227,6 +230,7 @@ class DrawInterpolation {
     uint64_t m_modelBlends = 0;
     uint64_t m_modelFirstSeen = 0;
     uint64_t m_modelBasesFromDraw = 0;
+    uint64_t m_jointsCopied = 0;
     uint64_t m_unblendable = 0;
     uint64_t m_unreadable = 0;
     uint64_t m_writeFailures = 0;

@@ -19,6 +19,9 @@ constexpr uint32_t kActor = 0x3b000000;
 constexpr uint32_t kModel = 0x3c000000;
 constexpr uint32_t kSkeleton = 0x3d000000;
 constexpr uint32_t kWorld = 0x3e000000;
+constexpr uint32_t kHands = 0x3f000000;
+constexpr uint32_t kHandsSkeleton = 0x3f100000;
+constexpr uint32_t kHandsWorld = 0x3f200000;
 
 using Matrix = std::array<float, 12>;
 
@@ -111,6 +114,21 @@ class Guest {
 
     float joint(uint32_t index) {
         return value(words[kWorld + (4 * index)]);
+    }
+
+    // A one-joint model whose joint is a copy of the model's, as setAnmMtx leaves it.
+    void hands(const Matrix& base) {
+        words[kHands + DrawInterpolation::kModelSkeleton] = kHandsSkeleton;
+        words[kHandsSkeleton + DrawInterpolation::kSkeletonWorld] = kHandsWorld;
+        words[kHandsSkeleton + DrawInterpolation::kSkeletonJoints] = 1U << 16;
+        for (uint32_t i = 0; i < 12; ++i) {
+            words[kHands + DrawInterpolation::kModelBase + (4 * i)] = word(base.at(i));
+            words[kHandsWorld + (4 * i)] = words[kWorld + (4 * i)];
+        }
+    }
+
+    float handsJoint(uint32_t index) {
+        return value(words[kHandsWorld + (4 * index)]);
     }
 
     // old.pos.x, current.pos.x and shape_angle.y.
@@ -262,6 +280,37 @@ void aBaseFromTheDrawsInputsIsNotBlendedTwice() {
     draw.onAfterDraw();
 }
 
+void bothViews(DrawInterpolation& draw) {
+    draw.onModelView(kModel);
+    draw.onModelView(kHands);
+}
+
+// Link's hands model takes the body's arm joint by copy in the draw, before the body's view pass.
+void aJointCopiedFromAModelDrawnBeforeItIsDrawnAtThatModelsBlend() {
+    Guest guest;
+    DrawInterpolation draw = guest.interpolation();
+    guest.model(translation(0, 0), translation(10, 0));
+    guest.hands(translation(0, 0));
+    draw.onManagement();
+    draw.onBeforeDraw();
+    bothViews(draw);
+    draw.onAfterDraw();
+    draw.onBeforeDraw();
+    bothViews(draw);
+    draw.onAfterDraw();
+    guest.model(turned(0, 0), turned(0, 20));
+    guest.hands(translation(0, 0));
+    draw.onManagement();
+    draw.onBeforeDraw();
+    bothViews(draw);
+    check::isTrue(guest.handsJoint(3) == 7.5f && guest.handsJoint(7) == 7.5f,
+                  "the copied joint is drawn where the body's joint is (7.5, 7.5), not blended "
+                  "again on its own (5, 10)");
+    draw.onAfterDraw();
+    check::isTrue(guest.handsJoint(3) == 0.0f && guest.handsJoint(7) == 20.0f,
+                  "and the tick's own copy is back after the draw phase");
+}
+
 void aModelSeenForTheFirstTimeIsDrawnAsItIs() {
     Guest guest;
     DrawInterpolation draw = guest.interpolation();
@@ -393,6 +442,7 @@ void wiiuport::tests::runDrawInterpolationTests() {
     aModelIsDrawnWithItsAnimationAndPlacementBlendedApart();
     aBaseFromTheDrawsInputsIsNotBlendedTwice();
     aModelSeenForTheFirstTimeIsDrawnAsItIs();
+    aJointCopiedFromAModelDrawnBeforeItIsDrawnAtThatModelsBlend();
     theInBetweenPaintIsTheOneAfterTheTicksDrawPhase();
     theInBetweenDrawPhaseIsOpenedAndClosedForItsListeners();
 }

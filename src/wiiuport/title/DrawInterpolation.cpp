@@ -5,6 +5,7 @@
 #include "wiiuport/interp/Blendable.h"
 #include "wiiuport/title/JsonBody.h"
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <utility>
@@ -324,6 +325,15 @@ bool DrawInterpolation::blendModel(uint32_t model, const ModelPose& pose) {
         seen->second.baseFromDraw ? *base : interp::midpoint(*previousBase, *base);
     std::vector<uint32_t> blended(pose.joints.size());
     for (size_t joint = 0; joint < pose.joints.size(); joint += kMatrixWords) {
+        std::array<uint32_t, kMatrixWords> held{};
+        std::copy_n(pose.joints.begin() + static_cast<std::ptrdiff_t>(joint), kMatrixWords,
+                    held.begin());
+        if (auto copied = m_jointBlends.find(held); copied != m_jointBlends.end()) {
+            std::copy(copied->second.begin(), copied->second.end(),
+                      blended.begin() + static_cast<std::ptrdiff_t>(joint));
+            m_jointsCopied++;
+            continue;
+        }
         auto from = affineAt(std::span(previous.joints).subspan(joint, kMatrixWords));
         auto to = affineAt(std::span(pose.joints).subspan(joint, kMatrixWords));
         if (!from || !to) {
@@ -335,6 +345,14 @@ bool DrawInterpolation::blendModel(uint32_t model, const ModelPose& pose) {
             m_unblendable++;
             return false;
         }
+    }
+    for (size_t joint = 0; joint < pose.joints.size(); joint += kMatrixWords) {
+        std::array<uint32_t, kMatrixWords> held{};
+        std::array<uint32_t, kMatrixWords> drawn{};
+        const auto at = static_cast<std::ptrdiff_t>(joint);
+        std::copy_n(pose.joints.begin() + at, kMatrixWords, held.begin());
+        std::copy_n(blended.begin() + at, kMatrixWords, drawn.begin());
+        m_jointBlends.try_emplace(held, drawn);
     }
     write(pose.world, {.blended = blended, .original = pose.joints});
     return true;
@@ -354,6 +372,7 @@ void DrawInterpolation::onBeforeDraw() {
     std::scoped_lock lock(m_mutex);
     m_inDraw = true;
     m_viewedInDraw.clear();
+    m_jointBlends.clear();
     if (m_inMidPaint) {
         m_inMidPaint = false;
         for (MidPaintListener* listener : m_midPaint) {
@@ -424,6 +443,7 @@ std::string DrawInterpolation::json() const {
     body.number("modelBlends", m_modelBlends);
     body.number("modelFirstSeen", m_modelFirstSeen);
     body.number("modelBasesFromDraw", m_modelBasesFromDraw);
+    body.number("jointsCopied", m_jointsCopied);
     body.number("unblendable", m_unblendable);
     body.number("unreadable", m_unreadable);
     body.number("writeFailures", m_writeFailures);
