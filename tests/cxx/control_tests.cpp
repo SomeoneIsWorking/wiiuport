@@ -80,6 +80,7 @@ struct Fixture {
         {.registerProbe = &noRegistration, .readWords = &noReadWords, .writeWords = nullptr}};
     wiiuport::title::EnvironmentInterpolation environmentInterpolation{
         {.readWords = &noReadWords, .writeWords = nullptr}};
+    wiiuport::title::StageWarp stageWarp{{.readWords = &noReadWords, .writeWords = nullptr}};
     wiiuport::title::MaterialInterpolation materialInterpolation{
         {.registerProbe = &noRegistration, .readWords = &noReadWords, .writeWords = nullptr}};
     wiiuport::title::SeaInterpolation seaInterpolation{
@@ -110,6 +111,7 @@ struct Fixture {
         .particleInterpolation = particleInterpolation,
         .seaInterpolation = seaInterpolation,
         .materialInterpolation = materialInterpolation,
+        .stageWarp = stageWarp,
         .environmentInterpolation = environmentInterpolation,
         .logic = logic,
         .guestBytes = &noGuestBytes,

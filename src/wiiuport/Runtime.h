@@ -18,6 +18,7 @@
 #include "wiiuport/title/MaterialInterpolation.h"
 #include "wiiuport/title/ParticleInterpolation.h"
 #include "wiiuport/title/SeaInterpolation.h"
+#include "wiiuport/title/StageWarp.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
 namespace wiiuport {
@@ -103,6 +104,8 @@ class Runtime {
          .writeWords = &GuestPatching::WriteDataWords}};
     title::EnvironmentInterpolation m_environmentInterpolation{
         {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
+    title::StageWarp m_stageWarp{
+        {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
     title::MaterialInterpolation m_materialInterpolation{
         {.registerProbe = &GuestCallProbes::Register,
          .readWords = &GuestPatching::ReadWords,
@@ -135,6 +138,7 @@ class Runtime {
         .particleInterpolation = m_particleInterpolation,
         .seaInterpolation = m_seaInterpolation,
         .materialInterpolation = m_materialInterpolation,
+        .stageWarp = m_stageWarp,
         .environmentInterpolation = m_environmentInterpolation,
         .logic = m_logic,
         .guestBytes = &GuestCallProbes::GuestBytes,

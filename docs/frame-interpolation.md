@@ -587,6 +587,19 @@ and actor teleports, which blend across the cut for one present. The game has no
 `dCamera_c::Set` is called every frame by event cameras and `Reset` by a handful of actors, so a cut
 is not told apart from a fast move.
 
+### Reaching a scene: the stage warp
+
+The test save stands on Outset's pier, so cuts, bosses and the open sea need another stage.
+`title/StageWarp` makes the request the title's own exits make through `dComIfGp_setNextStage`
+(`0x0252012c`), which `dStage_nextStage_c::set` (`0x025c3fec`) stores at `g_dComIfG_gameInfo.play`
+(`0x1046f0b0`) `+0x5140`: name (8 bytes), point (s16), room (s8), layer (s8, -1 the stage's own),
+enable, wipe. The setter also stores the restart point (save info `0x101f84dc` `+0x115c`), the last
+speed (`+0x1170`, 0) and the last mode (`+0x1174`, from the player's shield flags at `+0x3bc` and the
+tinkle state at `+0x699e`). The warp writes enable last and refuses while one is pending, as `set`
+does. Measured: `POST /warp?stage=M_NewD2&point=0&room=0` from Outset puts Link at Dragon Roost
+Cavern's entrance within a second (start stage at `play+0x5134` reads `M_NewD2`;
+`scratch/drawphase/warp.py`).
+
 ## The deleted mechanism, and where its evidence went
 
 The shipped mechanism used to be a host-side statistical lerp. It identified the camera by **searching

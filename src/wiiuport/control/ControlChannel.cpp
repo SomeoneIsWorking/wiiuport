@@ -40,7 +40,8 @@ const char* const kRoutes =
     "GET /interpolation, GET /particles, GET /sea, GET /materials, GET /environment, "
     "GET /paint, GET /logic, GET /gate, "
     "POST /capture, POST /pacing, "
-    "POST /draws, POST /recordings, POST /paint, POST /logic, POST /interpolation, POST /input "
+    "POST /draws, POST /recordings, POST /paint, POST /logic, POST /interpolation, POST /warp, "
+    "POST /input "
     "and POST /quit";
 
 lucent::http::Response notFound() {
@@ -144,7 +145,7 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_drawInterpolation(sources.drawInterpolation),
       m_particleInterpolation(sources.particleInterpolation),
       m_seaInterpolation(sources.seaInterpolation),
-      m_materialInterpolation(sources.materialInterpolation),
+      m_materialInterpolation(sources.materialInterpolation), m_stageWarp(sources.stageWarp),
       m_environmentInterpolation(sources.environmentInterpolation), m_logic(sources.logic),
       m_guestBytes(sources.guestBytes), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
       m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
@@ -566,6 +567,17 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
             return lucent::http::Response::text(409, "Conflict", refusal + "\n");
         }
         return lucent::http::Response::json(200, "OK", m_logic.json());
+    }
+    if (request.method == "POST" && request.path() == "/warp") {
+        std::string refusal;
+        auto wanted = title::StageWarp::parse(request.query(), refusal);
+        if (!wanted.has_value()) {
+            return lucent::http::Response::text(400, "Bad Request", refusal);
+        }
+        if (!m_stageWarp.warp(*wanted, refusal)) {
+            return lucent::http::Response::text(409, "Conflict", refusal);
+        }
+        return lucent::http::Response::text(200, "OK", "stage change requested.\n");
     }
     // Frame pacing measured from here on, so a walk is not averaged
     // with the boot and menus before it.
