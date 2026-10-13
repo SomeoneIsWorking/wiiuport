@@ -16,9 +16,9 @@ namespace wiiuport::title {
 // The stand-in paints twice per frame, and every paint runs the title's frame logic
 // `FUN_0203593c`: the UI manager's event update, the per-frame entry and its tick
 // `fapGm_Execute`, the 2D layouts and sound. The gate counts its calls and lets every other
-// one through; a skipped call runs only fpcM's draw half, so the in-between paint is drawn
-// from the logic's state. Gating the tick alone left the UI manager taking one event per
-// paint while the menus that read it ran at half that, and dropped the presses.
+// one through; a skipped call runs fpcM's draw half and the shadow buffer flip, so the in-between
+// paint is drawn from the logic's state. Gating the tick alone left the UI manager taking one event
+// per paint while the menus that read it ran at half that, and dropped the presses.
 //
 // It replaces the entry rather than wrapping it, because a return into the stand-in's memory
 // does not arrive; both branches out of the block go to the title's own code.
@@ -38,8 +38,14 @@ class LogicGate {
     static constexpr size_t kBranchWord = 13;
     // A skipped call runs the draw phase alone, so the in-between paint is drawn from the
     // logic's state by the title's own draw methods. It marks itself in the skipping word.
+    // It then flips the shadow prepass's per-frame buffers as the frame logic does after
+    // every draw, or the next paint writes the slot the GPU still reads for this one.
     static constexpr size_t kSkippedDrawWord = 14;
-    static constexpr size_t kGateWords = 40;
+    static constexpr size_t kGateWords = 53;
+    // The frame logic's guard and call, lifted from 0x020359f0: FUN_0278febc(layer + 0x15d4)
+    // for the shadow layer at **(*0x101f95d0 + 0x1024).
+    static constexpr uint32_t kShadowFlipGuard = 0x020359f0;
+    static constexpr uint32_t kShadowFlip = 0x0278febc;
     // dScnPly_Draw (0x025af8a0) advances the tick before its draw loop: collision, grass and
     // trees, particles, the frame counter 0x101ff560. A skipped call's draw phase goes from
     // the scene's view straight to the loop; no register set in between is read after it.

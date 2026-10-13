@@ -171,7 +171,7 @@ void wiiuport::tests::runLogicGateTests() {
     // title and a payload this size is mostly the cost of being sure.
     {
         const auto words = LogicGate::payload({.code = kBlock, .counters = kCounters});
-        check::isTrue(words.size() == LogicGate::kGateWords, "the gate is forty words");
+        check::isTrue(words.size() == LogicGate::kGateWords, "the gate is fifty-three words");
         if (words.size() != LogicGate::kGateWords) {
             return;
         }
@@ -288,9 +288,9 @@ void wiiuport::tests::runLogicGateTests() {
                    words.at(index + 1) ==
                        (0x60000000u | (reg << 21) | (reg << 16) | (address & 0xffffu));
         };
-        check::isTrue(words.size() == at + 26,
-                      "the skipped draw is the gate's last twenty-six words");
-        if (words.size() != at + 26) {
+        check::isTrue(words.size() == at + 39,
+                      "the skipped draw is the gate's last thirty-nine words");
+        if (words.size() != at + 39) {
             return;
         }
         check::isTrue(words[at] == 0x9421fff0 && words[at + 1] == 0x90010014,
@@ -309,8 +309,18 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(loads(at + 18, 11, kSkippingAt) && words[at + 20] == 0x39800000 &&
                           words[at + 21] == 0x918b0000,
                       "clears the skipping word: li r12,0; stw r12,0(r11)");
-        check::isTrue(words[at + 22] == 0x80010014 && words[at + 23] == 0x7c0803a6 &&
-                          words[at + 24] == 0x38210010 && words[at + 25] == 0x4e800020,
+        // The frame logic's own guard at 0x020359f0, its two `beq` re-aimed past the call.
+        check::isTrue(words[at + 22] == 0x3d801020 && words[at + 23] == 0x818c95d0 &&
+                          words[at + 24] == 0x816c1024 && words[at + 25] == 0x812b0000 &&
+                          words[at + 26] == 0x2c090000 && words[at + 27] == 0x41820020 &&
+                          words[at + 28] == 0x340915d4 && words[at + 29] == 0x41820018 &&
+                          words[at + 30] == 0x386915d4,
+                      "takes the shadow layer the frame logic takes, unless there is none");
+        check::isTrue(loads(at + 31, 12, 0x0278febc) && words[at + 33] == 0x7d8903a6 &&
+                          words[at + 34] == 0x4e800421,
+                      "and flips its prepass buffers, as every call of the frame logic does");
+        check::isTrue(words[at + 35] == 0x80010014 && words[at + 36] == 0x7c0803a6 &&
+                          words[at + 37] == 0x38210010 && words[at + 38] == 0x4e800020,
                       "and returns to the caller through the saved link register");
     }
     // In a skipped call's draw phase the scene's draw goes from its view to its draw loop.

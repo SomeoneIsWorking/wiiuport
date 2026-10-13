@@ -55,6 +55,15 @@ constexpr uint32_t kLoadLink = 0x80010014;        // lwz  r0,0x14(r1)
 constexpr uint32_t kMoveToLink = 0x7c0803a6;      // mtlr r0
 constexpr uint32_t kCloseFrame = 0x38210010;      // addi r1,r1,0x10
 constexpr uint32_t kBranchCountLink = 0x4e800421; // bctrl
+// The frame logic's shadow-layer guard at LogicGate::kShadowFlipGuard, as the image has it:
+//   lis r12,0x1020; lwz r12,-0x6a30(r12); lwz r11,0x1024(r12); lwz r9,0(r11); cmpwi r9,0;
+//   beq; addic. r0,r9,0x15d4; beq; addi r3,r9,0x15d4
+// Both `beq` are re-aimed past the gate's four-word call in place of the image's `bl`.
+constexpr std::array<uint32_t, 9> kShadowFlipGuardWords = {
+    0x3d801020, 0x818c95d0, 0x816c1024, 0x812b0000, 0x2c090000,
+    0x41820000, 0x340915d4, 0x41820000, 0x386915d4,
+};
+constexpr size_t kShadowFlipCallWords = 4;
 constexpr uint32_t kPrimaryBranch = 18;
 constexpr int64_t kRelativeBranchReach = 0x02000000;
 
@@ -339,6 +348,11 @@ std::vector<uint32_t> LogicGate::payload(Memory memory) {
     const auto iterator = loadAddress(3, kDrawIterator);
     const auto process = loadAddress(4, kDrawProcess);
     const auto handler = loadAddress(12, kDrawHandler);
+    const auto shadowFlip = loadAddress(12, kShadowFlip);
+    std::array<uint32_t, kShadowFlipGuardWords.size()> flipGuard = kShadowFlipGuardWords;
+    for (size_t word : {size_t{5}, size_t{7}}) {
+        flipGuard.at(word) |= 4 * (kShadowFlipGuardWords.size() - word + kShadowFlipCallWords);
+    }
     // The ticks counter is incremented on the path that *runs* the tick, not on
     // the one that skips it. It read the other way round, which made the report
     // say "0 ticks through it" for a gate that was letting every call through --
@@ -384,6 +398,19 @@ std::vector<uint32_t> LogicGate::payload(Memory memory) {
         skippingAt[1],
         kAddImmediate | (12 << 21),           // li   r12, 0
         kStoreWord | (12 << 21) | (11 << 16), // stw  r12, 0(r11)
+        flipGuard[0],
+        flipGuard[1],
+        flipGuard[2],
+        flipGuard[3],
+        flipGuard[4],
+        flipGuard[5],
+        flipGuard[6],
+        flipGuard[7],
+        flipGuard[8],
+        shadowFlip[0],
+        shadowFlip[1],
+        kMoveToCounter | (12 << 21),
+        kBranchCountLink,
         kLoadLink,
         kMoveToLink,
         kCloseFrame,

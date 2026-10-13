@@ -179,6 +179,19 @@ Proof (`scratch/drawphase/menu_flow.py`, launched with no toggles): before, Cont
 took twelve A presses and stayed; after, it confirms on the next press and the flow reaches Outset,
 60.00 paints/s and 30.00 ticks/s in gameplay, with Link walking on the stick.
 
+### A skipped call flips the shadow buffers
+
+The frame logic ends each call with `FUN_0278febc(shadowLayer + 0x15d4)` (`0x020359f0`, the layer
+at `**(*0x101f95d0 + 0x1024)`): it toggles `+0x5c0` and repoints each cascade's prepass buffers to
+the other slot. The shadow layer (`FUN_02736c10`) is drawn on the render thread (`0x02760af8`), which
+reads its camera `*(layer + 0x48)` live. A skipped call that ran the draw half alone left both paints
+of a tick in one slot, so the in-between paint's shadow maps were drawn from the next paint's
+constants while its lookup used its own: while the camera turned, cliff shadows covered the beach on
+every in-between paint (ISSUE-007). The skipped call now runs the frame logic's own guard and flip
+after the draw half. The frame logic's other post-draw step, `FUN_0273841c`/`FUN_02738438`
+(per-frame state rebuilt from the main layer's camera, behind `*0x101f8a20`), is still per tick;
+no symptom is traced to it.
+
 ### On by default
 
 `title::SixtyHertz` switches both halves in once the display has painted: the stand-in in
