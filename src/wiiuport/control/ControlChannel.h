@@ -18,6 +18,7 @@
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/MaterialInterpolation.h"
 #include "wiiuport/title/ParticleInterpolation.h"
+#include "wiiuport/title/ProControllerChoice.h"
 #include "wiiuport/title/SeaInterpolation.h"
 #include "wiiuport/title/StageWarp.h"
 #include "wiiuport/title/WindWakerPaint.h"
@@ -77,6 +78,7 @@ class ControlChannel {
         title::StageWarp& stageWarp;
         const title::EnvironmentInterpolation& environmentInterpolation;
         title::LogicGate& logic;
+        const title::ProControllerChoice& controllerChoice;
         GuestMemoryRead::GuestBytes guestBytes;
         frame::RecordingSnapshot& snapshot;
         frame::PresentPacing& pacing;
@@ -205,6 +207,7 @@ class ControlChannel {
     title::StageWarp& m_stageWarp;
     const title::EnvironmentInterpolation& m_environmentInterpolation;
     title::LogicGate& m_logic;
+    const title::ProControllerChoice& m_controllerChoice;
     GuestMemoryRead::GuestBytes m_guestBytes;
     frame::RecordingSnapshot& m_snapshot;
     frame::PresentPacing& m_pacing;

@@ -94,6 +94,9 @@ struct Fixture {
                                       .allocateData = &noCodeSpace,
                                       .writeWord = &noWriteWord,
                                       .readWord = &noReadWord}};
+    wiiuport::title::ProControllerChoice controllerChoice{{.registerProbe = &noRegistration,
+                                                           .allocateCode = &noCodeSpace,
+                                                           .writeWord = &noWriteWord}};
     wiiuport::title::WindWakerPaint paint{&noRegistration, &noCodeSpace,    &noWriteWord,
                                           &noReadWord,     &noPacingChange, &noPacing};
     wiiuport::frame::RecordingSnapshot snapshot;
@@ -114,6 +117,7 @@ struct Fixture {
         .stageWarp = stageWarp,
         .environmentInterpolation = environmentInterpolation,
         .logic = logic,
+        .controllerChoice = controllerChoice,
         .guestBytes = &noGuestBytes,
         .snapshot = snapshot,
         .pacing = pacing,

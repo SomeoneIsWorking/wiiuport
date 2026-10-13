@@ -1,6 +1,6 @@
 #pragma once
 
-#include "input/VPADInputHooks.h"
+#include "input/InputHooks.h"
 
 #include <cstdint>
 #include <mutex>
@@ -38,13 +38,13 @@ struct HeldPress {
 // something asks: with no press queued and no stick offset it reports that
 // this player is not driven, so the physical controllers keep working and a
 // build that never uses it behaves exactly as upstream.
-class InputDriver final : public VPADInputHooks::Source {
+class InputDriver final : public InputHooks::Source {
   public:
     // Null when the name is not one the control channel accepts, so a typo
     // refuses rather than silently pressing nothing.
     static const NamedButton* buttonNamed(const std::string& name);
 
-    bool Poll(std::size_t playerIndex, VPADInputHooks::Injection& injection) override;
+    bool Poll(std::size_t playerIndex, InputHooks::Injection& injection) override;
 
     // Hold `mask` for the next `reads` gamepad reads. Presses accumulate, so
     // two buttons can be held at once.

@@ -10,6 +10,7 @@ void runFrameTests();
 void runControlTests();
 void runPaintTests();
 void runLogicGateTests();
+void runProControllerChoiceTests();
 void runDrawInterpolationTests();
 void runParticleInterpolationTests();
 void runSeaInterpolationTests();

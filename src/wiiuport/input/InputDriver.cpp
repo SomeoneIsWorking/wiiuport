@@ -11,20 +11,20 @@ namespace {
 constexpr std::size_t kDrivenPlayerIndex = 0;
 
 constexpr auto kButtons = std::to_array<NamedButton>({
-    {"a", VPADInputHooks::kButtonA},
-    {"b", VPADInputHooks::kButtonB},
-    {"x", VPADInputHooks::kButtonX},
-    {"y", VPADInputHooks::kButtonY},
-    {"l", VPADInputHooks::kButtonL},
-    {"r", VPADInputHooks::kButtonR},
-    {"zl", VPADInputHooks::kButtonZL},
-    {"zr", VPADInputHooks::kButtonZR},
-    {"plus", VPADInputHooks::kButtonPlus},
-    {"minus", VPADInputHooks::kButtonMinus},
-    {"up", VPADInputHooks::kButtonUp},
-    {"down", VPADInputHooks::kButtonDown},
-    {"left", VPADInputHooks::kButtonLeft},
-    {"right", VPADInputHooks::kButtonRight},
+    {"a", InputHooks::kButtonA},
+    {"b", InputHooks::kButtonB},
+    {"x", InputHooks::kButtonX},
+    {"y", InputHooks::kButtonY},
+    {"l", InputHooks::kButtonL},
+    {"r", InputHooks::kButtonR},
+    {"zl", InputHooks::kButtonZL},
+    {"zr", InputHooks::kButtonZR},
+    {"plus", InputHooks::kButtonPlus},
+    {"minus", InputHooks::kButtonMinus},
+    {"up", InputHooks::kButtonUp},
+    {"down", InputHooks::kButtonDown},
+    {"left", InputHooks::kButtonLeft},
+    {"right", InputHooks::kButtonRight},
 });
 
 } // namespace
@@ -36,7 +36,7 @@ const NamedButton* InputDriver::buttonNamed(const std::string& name) {
     return found == kButtons.end() ? nullptr : &*found;
 }
 
-bool InputDriver::Poll(size_t playerIndex, VPADInputHooks::Injection& injection) {
+bool InputDriver::Poll(size_t playerIndex, InputHooks::Injection& injection) {
     if (playerIndex != kDrivenPlayerIndex) {
         return false;
     }

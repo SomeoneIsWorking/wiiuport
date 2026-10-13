@@ -17,6 +17,7 @@
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/MaterialInterpolation.h"
 #include "wiiuport/title/ParticleInterpolation.h"
+#include "wiiuport/title/ProControllerChoice.h"
 #include "wiiuport/title/SeaInterpolation.h"
 #include "wiiuport/title/SixtyHertz.h"
 #include "wiiuport/title/StageWarp.h"
@@ -96,6 +97,9 @@ class Runtime {
                               .allocateData = &GuestPatching::AllocateData,
                               .writeWord = &GuestPatching::WriteWord,
                               .readWord = &GuestPatching::ReadWord}};
+    title::ProControllerChoice m_controllerChoice{{.registerProbe = &GuestCallProbes::Register,
+                                                   .allocateCode = &GuestPatching::AllocateCode,
+                                                   .writeWord = &GuestPatching::WriteWord}};
     title::WindWakerPaint m_paint{&GuestCallProbes::Register,      &GuestPatching::AllocateCode,
                                   &GuestPatching::WriteWord,       &GuestPatching::ReadWord,
                                   &GuestPatching::SetSwapInterval, &GuestPatching::SwapInterval};
@@ -156,6 +160,7 @@ class Runtime {
         .stageWarp = m_stageWarp,
         .environmentInterpolation = m_environmentInterpolation,
         .logic = m_logic,
+        .controllerChoice = m_controllerChoice,
         .guestBytes = &GuestCallProbes::GuestBytes,
         .snapshot = m_snapshot,
         .pacing = m_pacing,

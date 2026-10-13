@@ -3,7 +3,7 @@
 #include "input/InputManager.h"
 #include "input/api/Controller.h"
 #include "input/api/SDL/SDLControllerProvider.h"
-#include "input/emulated/VPADController.h"
+#include "input/emulated/ProController.h"
 
 #include <algorithm>
 #include <array>
@@ -16,39 +16,40 @@
 namespace wiiuport::shell {
 namespace {
 
-// The player this host maps a pad to. One GamePad is what the title asks for.
+// The player this host maps a pad to: WPAD channel 0, the only one the title keeps a Pro
+// Controller on.
 constexpr size_t kPlayerIndex = 0;
 
-// By position: the Wii U's A is on the right of the diamond, so it is the
+// By position: the Pro Controller's A is on the right of the diamond, so it is the
 // button on the right of the pad in the player's hands, whatever letter is
 // printed on it. The stick directions carry SDL's sign convention, where Y
 // grows downwards.
 const std::array<ButtonBinding, 25> kLayout{{
-    {VPADController::kButtonId_A, SDL_GAMEPAD_BUTTON_EAST},
-    {VPADController::kButtonId_B, SDL_GAMEPAD_BUTTON_SOUTH},
-    {VPADController::kButtonId_X, SDL_GAMEPAD_BUTTON_NORTH},
-    {VPADController::kButtonId_Y, SDL_GAMEPAD_BUTTON_WEST},
-    {VPADController::kButtonId_L, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},
-    {VPADController::kButtonId_R, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
-    {VPADController::kButtonId_ZL, kTriggerXP},
-    {VPADController::kButtonId_ZR, kTriggerYP},
-    {VPADController::kButtonId_Plus, SDL_GAMEPAD_BUTTON_START},
-    {VPADController::kButtonId_Minus, SDL_GAMEPAD_BUTTON_BACK},
-    {VPADController::kButtonId_Home, SDL_GAMEPAD_BUTTON_GUIDE},
-    {VPADController::kButtonId_Up, SDL_GAMEPAD_BUTTON_DPAD_UP},
-    {VPADController::kButtonId_Down, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
-    {VPADController::kButtonId_Left, SDL_GAMEPAD_BUTTON_DPAD_LEFT},
-    {VPADController::kButtonId_Right, SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
-    {VPADController::kButtonId_StickL, SDL_GAMEPAD_BUTTON_LEFT_STICK},
-    {VPADController::kButtonId_StickR, SDL_GAMEPAD_BUTTON_RIGHT_STICK},
-    {VPADController::kButtonId_StickL_Up, kAxisYN},
-    {VPADController::kButtonId_StickL_Down, kAxisYP},
-    {VPADController::kButtonId_StickL_Left, kAxisXN},
-    {VPADController::kButtonId_StickL_Right, kAxisXP},
-    {VPADController::kButtonId_StickR_Up, kRotationYN},
-    {VPADController::kButtonId_StickR_Down, kRotationYP},
-    {VPADController::kButtonId_StickR_Left, kRotationXN},
-    {VPADController::kButtonId_StickR_Right, kRotationXP},
+    {ProController::kButtonId_A, SDL_GAMEPAD_BUTTON_EAST},
+    {ProController::kButtonId_B, SDL_GAMEPAD_BUTTON_SOUTH},
+    {ProController::kButtonId_X, SDL_GAMEPAD_BUTTON_NORTH},
+    {ProController::kButtonId_Y, SDL_GAMEPAD_BUTTON_WEST},
+    {ProController::kButtonId_L, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},
+    {ProController::kButtonId_R, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
+    {ProController::kButtonId_ZL, kTriggerXP},
+    {ProController::kButtonId_ZR, kTriggerYP},
+    {ProController::kButtonId_Plus, SDL_GAMEPAD_BUTTON_START},
+    {ProController::kButtonId_Minus, SDL_GAMEPAD_BUTTON_BACK},
+    {ProController::kButtonId_Home, SDL_GAMEPAD_BUTTON_GUIDE},
+    {ProController::kButtonId_Up, SDL_GAMEPAD_BUTTON_DPAD_UP},
+    {ProController::kButtonId_Down, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
+    {ProController::kButtonId_Left, SDL_GAMEPAD_BUTTON_DPAD_LEFT},
+    {ProController::kButtonId_Right, SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
+    {ProController::kButtonId_StickL, SDL_GAMEPAD_BUTTON_LEFT_STICK},
+    {ProController::kButtonId_StickR, SDL_GAMEPAD_BUTTON_RIGHT_STICK},
+    {ProController::kButtonId_StickL_Up, kAxisYN},
+    {ProController::kButtonId_StickL_Down, kAxisYP},
+    {ProController::kButtonId_StickL_Left, kAxisXN},
+    {ProController::kButtonId_StickL_Right, kAxisXP},
+    {ProController::kButtonId_StickR_Up, kRotationYN},
+    {ProController::kButtonId_StickR_Down, kRotationYP},
+    {ProController::kButtonId_StickR_Left, kRotationXN},
+    {ProController::kButtonId_StickR_Right, kRotationXP},
 }};
 
 } // namespace
@@ -58,6 +59,11 @@ std::span<const ButtonBinding> ControllerAutoMap::layout() {
 }
 
 void ControllerAutoMap::start() {
+    // The Pro Controller is there with no pad plugged in, so the title finds it and a tool
+    // can drive it.
+    if (!InputManager::instance().set_controller(kPlayerIndex, EmulatedController::Type::Pro)) {
+        lucent::error("input", "player {}'s Pro Controller could not be created", kPlayerIndex + 1);
+    }
     reconcile();
 }
 
@@ -77,7 +83,7 @@ void ControllerAutoMap::reconcile() {
     }
     std::vector<std::shared_ptr<ControllerBase>> controllers = provider->get_controllers();
 
-    auto emulated = InputManager::instance().get_vpad_controller(kPlayerIndex);
+    auto emulated = InputManager::instance().get_wpad_controller(kPlayerIndex);
     if (emulated) {
         for (const auto& attached : emulated->get_controllers()) {
             bool stillPresent =
@@ -110,7 +116,7 @@ bool ControllerAutoMap::attach(const std::shared_ptr<ControllerBase>& controller
         return false;
     }
     auto emulated = InputManager::instance().set_controller(
-        kPlayerIndex, EmulatedController::Type::VPAD, controller);
+        kPlayerIndex, EmulatedController::Type::Pro, controller);
     if (!emulated) {
         return false;
     }
@@ -119,8 +125,8 @@ bool ControllerAutoMap::attach(const std::shared_ptr<ControllerBase>& controller
     }
     m_attachedDevice = controller->display_name();
     ++m_devicesAttached;
-    lucent::info("input", "{} is now player {}'s GamePad, {} bindings applied", m_attachedDevice,
-                 kPlayerIndex + 1, layout().size());
+    lucent::info("input", "{} is now player {}'s Pro Controller, {} bindings applied",
+                 m_attachedDevice, kPlayerIndex + 1, layout().size());
     return true;
 }
 

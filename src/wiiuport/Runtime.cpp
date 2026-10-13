@@ -1,6 +1,6 @@
 #include "wiiuport/Runtime.h"
 
-#include "input/VPADInputHooks.h"
+#include "input/InputHooks.h"
 
 #include "Cafe/HW/Latte/Core/LatteFrameHooks.h"
 
@@ -40,7 +40,7 @@ void Runtime::installHooks() {
         return;
     }
     LatteFrameHooks::SetObserver(&m_recorder);
-    VPADInputHooks::SetSource(&m_input);
+    InputHooks::SetSource(&m_input);
     m_drawInterpolation.install();
     m_particleInterpolation.install();
     m_materialInterpolation.install();
@@ -49,6 +49,7 @@ void Runtime::installHooks() {
     });
     m_paint.install();
     m_logic.install();
+    m_controllerChoice.install();
     m_sixty.start();
     m_hooksInstalled = true;
     // Always open, on loopback: the channel is how an agent asks a running
