@@ -55,6 +55,7 @@ add_library(wiiuport STATIC
   frame/VertexChanges.cpp
   frame/VertexChanges.h
   guest/GuestWords.h
+  guest/PowerPcWords.h
   guest/CallerCensus.cpp
   guest/CallerCensus.h
   guest/ProbeInstallation.h
