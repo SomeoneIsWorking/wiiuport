@@ -10,7 +10,7 @@ draw phase at the midpoint camera, actor placements and model joint matrices
 and pose) and their census instruments are deleted. JPA particles are blended in the in-between
 paint (`title/ParticleInterpolation`); the sea grid in the in-between draw phase, its scroll held to
 one step a tick (`title/SeaInterpolation`); sea waves and sky clouds in the in-between paint
-(`title/EnvironmentInterpolation`); material animation in the draw phase (`title/MaterialInterpolation`). Next: camera cuts.
+(`title/EnvironmentInterpolation`); material animation in the draw phase (`title/MaterialInterpolation`). Sixty is on by default (`title/SixtyHertz`), and the gate holds the title's whole frame logic `0x0203593c`, so menus read every UI event: a launch with no toggles reaches Outset at 60.00 paints/s and 30.00 ticks/s and Link walks on the stick (`scratch/drawphase/menu_flow.py`). Next: camera cuts.
 
 **The host-side statistical lerp is deleted, not deferred.** It identified the camera by
 searching shaders for a 3x4 that moved like one, matched each draw's identity across ticks by

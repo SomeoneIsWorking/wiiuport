@@ -18,6 +18,7 @@
 #include "wiiuport/title/MaterialInterpolation.h"
 #include "wiiuport/title/ParticleInterpolation.h"
 #include "wiiuport/title/SeaInterpolation.h"
+#include "wiiuport/title/SixtyHertz.h"
 #include "wiiuport/title/StageWarp.h"
 #include "wiiuport/title/WindWakerPaint.h"
 
@@ -98,6 +99,20 @@ class Runtime {
     title::WindWakerPaint m_paint{&GuestCallProbes::Register,      &GuestPatching::AllocateCode,
                                   &GuestPatching::WriteWord,       &GuestPatching::ReadWord,
                                   &GuestPatching::SetSwapInterval, &GuestPatching::SwapInterval};
+    // The shipping configuration: the loop's dispatch painted twice, the logic held at thirty.
+    title::SixtyHertz m_sixty{{.enablePaint =
+                                   [this] {
+                                       return m_paint.enable(
+                                           title::WindWakerPaint::Mode::LoopFrameLiteralTwice);
+                                   },
+                               .disablePaint =
+                                   [this] {
+                                       return m_paint.disable();
+                                   },
+                               .enableGate =
+                                   [this] {
+                                       return m_logic.enable();
+                                   }}};
     title::ParticleInterpolation m_particleInterpolation{
         {.registerProbe = &GuestCallProbes::Register,
          .readWords = &GuestPatching::ReadWords,

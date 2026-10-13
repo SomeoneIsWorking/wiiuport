@@ -70,6 +70,8 @@ add_library(wiiuport STATIC
   title/ParticleInterpolation.h
   title/SeaInterpolation.cpp
   title/SeaInterpolation.h
+  title/SixtyHertz.cpp
+  title/SixtyHertz.h
   title/StageWarp.cpp
   title/StageWarp.h
   title/WindWakerPaint.cpp

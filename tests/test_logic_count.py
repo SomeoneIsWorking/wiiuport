@@ -32,7 +32,7 @@ _spec.loader.exec_module(probe_run)
 def gate(**overrides: object) -> GateState:
     """A gate report with the fields the rule reads, and sensible rest."""
     fields: dict[str, object] = {
-        "tick": 0x025D42EC,
+        "entry": 0x0203593C,
         "enabled": True,
         "calls": 0,
         "ticks": 0,
@@ -107,4 +107,4 @@ def test_a_gate_that_is_out_reports_the_calls_the_probe_saw(counts: Any) -> None
 def test_the_probe_label_carries_the_address_it_counted(counts: Any) -> None:
     """A call rate and a tick rate are different measurements; the label says so."""
     _, source = counts(gate(calls_at_probe=100))
-    assert "0x025d42ec" in source
+    assert "0x0203593c" in source

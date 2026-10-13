@@ -58,7 +58,7 @@ void keepRegistration(uint32_t entry, uint32_t, GuestCallProbes::Probe& probe, b
                       uint32_t resume) {
     g_probe = &probe;
     g_registrations.emplace_back(entry, holdsEntry);
-    if (holdsEntry && resume != 0 && entry == LogicGate::kTick) {
+    if (holdsEntry && resume != 0 && entry == LogicGate::kFrameLogic) {
         g_resume = resume;
     }
     if (entry == LogicGate::kSceneWork) {
@@ -118,7 +118,7 @@ LogicGate makeGate(FakeGuest& guest) {
 // is the word the gate takes for its branch, so that is what is here.
 void linked() {
     g_probe->OnInstall(GuestCallProbes::Installation::Installed);
-    g_fake->writeWord(LogicGate::kTickBody, LogicGate::kTickSecond);
+    g_fake->writeWord(LogicGate::kFrameLogicBody, LogicGate::kFrameLogicSecond);
 }
 
 // **Where the four counters live, in words.** Each is a named constant computed from another one,
@@ -133,7 +133,8 @@ constexpr uint32_t kBranchAt = kBlock + 4 * LogicGate::kBranchWord;
 // The bare pass-through a freshly allocated gate block holds: a branch to the tick's own body, by
 // the displacement from the block rather than an absolute address, because the block's address is
 // chosen at link time.
-constexpr uint32_t kPassThroughAt = (18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu);
+constexpr uint32_t kPassThroughAt =
+    (18u << 26) | ((LogicGate::kFrameLogicBody - kBlock) & 0x03fffffcu);
 
 // The report is read by a JSON parser and by nothing else, so "it has the field"
 // is not the claim: "it parses" is. One unquoted word -- which `raw` writes
@@ -147,16 +148,16 @@ void theReportParsesAsJson() {
     linked();
     // The entry holds the probe's own branch, which is what the report is for:
     // it says what the tick is being entered through.
-    guest.writeWord(LogicGate::kTick, 0x4a831598);
+    guest.writeWord(LogicGate::kFrameLogic, 0x4a831598);
     check::isTrue(gate.enable().empty(), "the gate installs for the report to describe");
     const std::string body = gate.json();
     // Every value is either quoted, a number, true, false or null. A bare `0x`
     // is the failure this is here for, so it is looked for directly as well as
     // through the pairing of quotes and colons.
-    check::isTrue(body.find("\"wordAtTickBody\":\"0x") != std::string::npos,
-                  "the word at the tick's body is quoted");
-    check::isTrue(body.find("\"wordAtTickEntry\":\"0x") != std::string::npos,
-                  "and so is the word at the tick's entry");
+    check::isTrue(body.find("\"wordAtBody\":\"0x") != std::string::npos,
+                  "the word at the body is quoted");
+    check::isTrue(body.find("\"wordAtEntry\":\"0x") != std::string::npos,
+                  "and so is the word at the entry");
     check::isTrue(body.find(":0x") == std::string::npos, "no value is left unquoted");
     check::isTrue(body.front() == '{' && body.find("}\n") != std::string::npos,
                   "and the body is one object that ends");
@@ -258,7 +259,7 @@ void wiiuport::tests::runLogicGateTests() {
         // instruction saved into the caller's frame, so a tick that skipped the
         // store returns through a register nobody saved.
         check::isTrue(words[13] ==
-                          ((18u << 26) | ((LogicGate::kTickBody - branchAt) & 0x03fffffcu)),
+                          ((18u << 26) | ((LogicGate::kFrameLogicBody - branchAt) & 0x03fffffcu)),
                       "and a call it lets through continues at the tick's own second instruction, "
                       "0x025d42f0, with the title running every instruction after it");
         // The displacement is measured from the word the branch stands in, which
@@ -273,7 +274,7 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(LogicGate::kThroughWord < LogicGate::kBranchWord,
                       "and the through path starts before it, so the path is what the branch ends");
         uint32_t landed = branchAt + ((words[13] & 0x03fffffcu));
-        check::isTrue(landed == LogicGate::kTickBody,
+        check::isTrue(landed == LogicGate::kFrameLogicBody,
                       "read back the way the guest would, the branch lands on the tick's own "
                       "second instruction and nowhere else");
     }
@@ -340,7 +341,7 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(direct.size() == 1, "the direct pass-through is one word");
         check::isTrue(direct.size() == 1 &&
                           direct[0] ==
-                              ((18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu)),
+                              ((18u << 26) | ((LogicGate::kFrameLogicBody - kBlock) & 0x03fffffcu)),
                       "and it branches to the tick's own second instruction");
         for (int flavour = 1; flavour <= 2; flavour++) {
             const auto words =
@@ -358,7 +359,7 @@ void wiiuport::tests::runLogicGateTests() {
             check::isTrue(target != kBlock,
                           "no pass-through flavour branches to the block it lives in, which "
                           "would be a loop with no exit");
-            check::isTrue(target == LogicGate::kTickBody,
+            check::isTrue(target == LogicGate::kFrameLogicBody,
                           "and every flavour reaches the tick's own second instruction, the "
                           "same place the direct form does");
         }
@@ -382,7 +383,7 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(g_registrations.size() >= 2,
                       "the gate registers twice on the tick: once for the moment, once to "
                       "hold the entry and redirect");
-        check::isTrue(!holdsEntry(LogicGate::kTick),
+        check::isTrue(!holdsEntry(LogicGate::kFrameLogic),
                       "and the momentary one does not keep the entry, so the standing one can "
                       "take it");
         check::isTrue(
@@ -406,7 +407,8 @@ void wiiuport::tests::runLogicGateTests() {
         // what an un-gated gate did: not run the tick, but fault inside the
         // simulation.
         check::isTrue(readWord(kBlock, word) &&
-                          word == ((18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu)),
+                          word ==
+                              ((18u << 26) | ((LogicGate::kFrameLogicBody - kBlock) & 0x03fffffcu)),
                       "and the gate's block is a bare pass-through to the tick's own body before "
                       "the gate is ever enabled");
         uint32_t passThrough = kPassThroughAt;
@@ -429,7 +431,8 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(gate.enable(true, 1).empty(), "but the pass-through control can be installed "
                                                     "over it");
         check::isTrue(readWord(kBlock, word) &&
-                          word == ((18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu)),
+                          word ==
+                              ((18u << 26) | ((LogicGate::kFrameLogicBody - kBlock) & 0x03fffffcu)),
                       "and the block is that control's one word");
         check::isTrue(gate.enable(false, 2).empty(),
                       "and the gate can be reached again from the control without going out "
@@ -439,7 +442,8 @@ void wiiuport::tests::runLogicGateTests() {
         // Nothing is written into the title's code. That is the change: a host
         // branch at an interior address does not arrive, and writing one would
         // also take the tick's second instruction away for good.
-        check::isTrue(readWord(LogicGate::kTickBody, word) && word == LogicGate::kTickSecond,
+        check::isTrue(readWord(LogicGate::kFrameLogicBody, word) &&
+                          word == LogicGate::kFrameLogicSecond,
                       "and the tick's own second instruction is left exactly as it was");
         check::isTrue(gate.resumeTarget() == kBlock, "and the probe resumes at the gate");
         check::isTrue(gate.enabled(), "the report says it is in");
@@ -451,25 +455,27 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(gate.resumeTarget() == kBlock,
                       "and out of the gate the call still arrives at the same block");
         check::isTrue(readWord(kBlock, word) &&
-                          word == ((18u << 26) | ((LogicGate::kTickBody - kBlock) & 0x03fffffcu)),
+                          word ==
+                              ((18u << 26) | ((LogicGate::kFrameLogicBody - kBlock) & 0x03fffffcu)),
                       "and the block is its pass-through word again, so a call that arrives now "
                       "runs the tick rather than whatever the payload left behind");
-        check::isTrue(readWord(LogicGate::kTickBody, word) && word == LogicGate::kTickSecond,
+        check::isTrue(readWord(LogicGate::kFrameLogicBody, word) &&
+                          word == LogicGate::kFrameLogicSecond,
                       "with the tick's own second instruction still where it was");
         check::isTrue(!gate.enabled(), "and the report says it is out");
         check::isTrue(gate.disable().empty(), "and disabling twice is not a refusal");
     }
-    // A tick that starts differently is refused by name, and the gate is not in.
+    // A frame logic that starts differently is refused by name, and the gate is not in.
     {
         FakeGuest guest;
         LogicGate gate = makeGate(guest);
         gate.install();
         g_probe->OnInstall(GuestCallProbes::Installation::Installed);
-        guest.writeWord(LogicGate::kTickBody, 0x60000000);
+        guest.writeWord(LogicGate::kFrameLogicBody, 0x60000000);
         const std::string refusal = gate.enable();
-        check::isTrue(refusal.find("this gate is written for this title's tick") !=
+        check::isTrue(refusal.find("this gate is written for this title's frame logic") !=
                           std::string::npos,
-                      "a foreign tick is refused by name");
+                      "a foreign frame logic is refused by name");
         check::isTrue(!gate.enabled(), "and nothing is installed");
     }
     // The counters are the report's measurement, so both words are named.

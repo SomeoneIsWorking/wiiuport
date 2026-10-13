@@ -665,6 +665,9 @@ void WindWakerPaint::Frame::OnCall(std::span<const uint32_t, 32> gpr, uint32_t /
         }
         samplesValid = m_paints.load(std::memory_order_relaxed) >= kFrameSamples;
     }
+    if (m_paintListener) {
+        m_paintListener();
+    }
 }
 
 bool WindWakerPaint::installed() const {

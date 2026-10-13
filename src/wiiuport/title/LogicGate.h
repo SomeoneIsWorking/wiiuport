@@ -13,77 +13,31 @@ namespace wiiuport::title {
 
 // Wind Waker HD's logic, gated on its own count instead of the flip.
 //
-// Measured on the real title: with the flip at one vblank, the display painted
-// 46.17 a second and the logic ticked 46.17 a second -- 277 paints and 277 calls
-// to `fapGm_Execute` in the same six-second window, one for one. The tick is not
-// merely correlated with the flip, it is called once per paint.
+// The stand-in paints twice per frame, and every paint runs the title's frame logic
+// `FUN_0203593c`: the UI manager's event update, the per-frame entry and its tick
+// `fapGm_Execute`, the 2D layouts and sound. The gate counts its calls and lets every other
+// one through; a skipped call runs only fpcM's draw half, so the in-between paint is drawn
+// from the logic's state. Gating the tick alone left the UI manager taking one event per
+// paint while the menus that read it ran at half that, and dropped the presses.
 //
-// Read out of the title's own code, `FUN_025f172c` is the per-frame entry and it
-// calls the tick unconditionally:
-//
-//     uVar1 = DAT_1048d0ac;                      /* a period */
-//     DAT_1048d0a8 = DAT_1048d0a8 + 1;            /* a counter  */
-//     if (uVar1 != 0 && DAT_1048d0a8 == (DAT_1048d0a8 / uVar1) * uVar1) {
-//         FUN_025f1654();                         /* every Nth frame */
-//     }
-//     FUN_025f2d74(); FUN_025e15e0(); FUN_025d42ec();   /* the tick, always */
-//
-// So the title already counts frames and already has a period, and uses both for
-// something else. The gate is the same shape applied to the tick: count the
-// calls, and let an even one through. Nothing is invented here -- the count, the
-// test and the skip are the title's own idiom, applied to the one call that
-// should have obeyed them.
-//
-// It replaces the tick's entry rather than wrapping it, because a wrapper would
-// have to *return into itself* and a return into the stand-in's memory does not
-// work here: both the branch out and the return go to the title's own code, which
-// is the only direction measured to hold.
+// It replaces the entry rather than wrapping it, because a return into the stand-in's memory
+// does not arrive; both branches out of the block go to the title's own code.
 class LogicGate {
   public:
-    // The tick, and the instruction the gate continues at.
-    //
-    // The probe holds the entry and its stub runs the entry's own first
-    // instruction, so the gate takes over at the *second*: kTickBody is
-    // kTick + 4, and a call the gate lets through is the title's tick entered the
-    // way the title enters it. That word is checked rather than assumed, because a
-    // revision whose tick starts differently gets a refusal instead of a gate that
-    // ran the wrong code -- and because the tick's epilogue reads the saved link
-    // register back out of the caller's frame, so entering it anywhere but here
-    // returns through a register nobody saved.
-    static constexpr uint32_t kTick = 0x025d42ec;
-    static constexpr uint32_t kTickFirst = 0x7c0802a6;  // mfspr r0,LR
-    static constexpr uint32_t kTickSecond = 0x90010004; // stw  r0,0x4(r1)
-    static constexpr uint32_t kTickBody = kTick + 4;
+    // The probe's stub runs the entry's first instruction, so a call let through continues
+    // at the second, which is checked: a revision that starts differently is refused.
+    static constexpr uint32_t kFrameLogic = 0x0203593c;
+    static constexpr uint32_t kFrameLogicFirst = 0x7c0802a6;  // mfspr r0,LR
+    static constexpr uint32_t kFrameLogicSecond = 0x9421ffe8; // stwu r1,-0x18(r1)
+    static constexpr uint32_t kFrameLogicBody = kFrameLogic + 4;
     // The per-frame entry, read so the report can name what it is gating.
     static constexpr uint32_t kFrameEntry = 0x025f172c;
-    // The block's shape: the gate's own words. `kThroughWord` is where the gate's
-    // through path starts, after the skipped path's return.
-    //
-    // The through path is where the ticks counter is incremented -- the path that
-    // runs the tick -- followed by a branch to the word *after* the gate's
-    // boundary, and the probe's stub has already run the entry's first
-    // instruction, so the title runs every remaining one itself. The path used to
-    // be three words that supplied the tick's prologue and branched to the word
-    // after it -- correct for a gate that replaced the tick's second instruction,
-    // wrong for a gate entered at it. It skipped the tick's `stw r0,0x4(r1)`, so
-    // the tick returned through a link register it had never saved and the title
-    // spun in a wait loop at 0x027f09d8, forever, with a control channel still
-    // answering.
-    //
-    // And the ticks counter used to be incremented on the *skipped* path, so the
-    // count the report calls ticks counted the calls that did not run.
-    //
-    // `kBranchWord` is separate from `kThroughWord` on purpose. The through path
-    // starts at `kThroughWord` and ends in a branch at `kBranchWord`, and a
-    // displacement is measured from the word it stands in: measured from the
-    // start of the path instead, it lands twenty bytes past the tick's second
-    // instruction, which hangs the title with the gate armed and reads as a
-    // title that has stopped. The two were one constant when the through path was
-    // a single word, and one is not one when it is six.
+    // The through path counts a tick and branches to kFrameLogicBody from kBranchWord; a
+    // displacement is measured from the word it stands in, not from kThroughWord.
     static constexpr size_t kThroughWord = 8;
     static constexpr size_t kBranchWord = 13;
     // A skipped call runs the draw phase alone, so the in-between paint is drawn from the
-    // tick's state by the title's own draw methods. It marks itself in the skipping word.
+    // logic's state by the title's own draw methods. It marks itself in the skipping word.
     static constexpr size_t kSkippedDrawWord = 14;
     static constexpr size_t kGateWords = 40;
     // dScnPly_Draw (0x025af8a0) advances the tick before its draw loop: collision, grass and
@@ -113,10 +67,9 @@ class LogicGate {
     static constexpr uint32_t kCounterBytes = 4 * kCounterWords;
 
     // The fork's seams, injected so this is testable without a guest. The last
-    // argument says the probe does not keep the tick's entry: this one wants the
-    // moment the title was linked and nothing after, and holding the entry would
-    // take it from the caller census for the rest of the run -- which showed up as
-    // the tick being counted zero times while the display thread painted 1479.
+    // argument says the probe does not keep the frame logic's entry: this one wants the
+    // moment the title was linked and nothing after; holding the entry would take it from
+    // the caller census for the rest of the run.
     // `resume` is where the call continues: zero is the instruction after the
     // entry, and the gate passes its own block, which is the only way into the
     // trampoline area that is known to arrive.
@@ -160,22 +113,18 @@ class LogicGate {
     void install();
 
     // Puts the gate in. Empty on success, otherwise the refusal by cause.
-    // `through` installs a payload that only branches back to the tick and keeps
-    // no state at all: the control for whether a direct branch out of recompiled
-    // code into the loader's arena runs. Everything else about the install is
-    // identical, and the observer is the caller census, which keeps counting the
-    // tick either way -- so a tick rate that holds says the branch executed and a
-    // tick rate that stops says it did not, with no counter of the gate's own
-    // involved and so nothing resting on the gate's payload.
+    // `through` installs a payload that only branches back to the frame logic and keeps no
+    // state: the control for whether a branch out of recompiled code into the loader's arena
+    // runs, observed by the caller census.
     std::string enable(bool through = false, int throughFlavour = 2);
 
     // The pass-through control: a payload of one word (direct branch) or four
-    // (through the count register) that does nothing but let the tick run. Which
+    // (through the count register) that does nothing but let the frame logic run. Which
     // one is the experiment, and the census is the observer.
     static std::vector<uint32_t> throughPayload(uint32_t blockAddress, Through flavour);
 
-    // Puts the gate's block back to its pass-through word, so the tick runs on
-    // every call again. The title's own code is not touched: the probe holds the
+    // Puts the gate's block back to its pass-through word, so the frame logic runs
+    // on every call again. The title's own code is not touched: the probe holds the
     // entry and the block is where the decision lives.
     std::string disable();
 
@@ -191,8 +140,8 @@ class LogicGate {
     }
 
     // The gate's words for a block at `blockAddress`: count the call, let every
-    // other one through. Every branch is direct, and the tick is reached by a
-    // tail branch so that its return goes to the title's caller.
+    // other one through. Every branch is direct, and the frame logic is reached
+    // by a tail branch so that its return goes to the title's caller.
     // Sixteen words for `blockAddress` to branch to, counting in
     // `countersAddress`: two addresses because the two are different kinds of
     // memory, instructions the guest executes and words it writes.
@@ -208,7 +157,7 @@ class LogicGate {
     void onInstalled(GuestCallProbes::Installation installation);
     void onCounted(GuestCallProbes::Installation installation);
     // Writes the gate's block as a bare pass-through to the instruction after the
-    // tick's entry. True when the block took it. This is the gate's out state,
+    // frame logic's entry. True when the block took it. This is the gate's out state,
     // and it is why the block is never empty while a call can reach it.
     bool passThrough();
 
@@ -236,7 +185,7 @@ class LogicGate {
     // look the same from the outside: zeros.
     class Moment;
     Moment* m_moment = nullptr;
-    // The standing probe on the tick: it counts the calls and its resume is the
+    // The standing probe on the frame logic: it counts the calls and its resume is the
     // gate's block.
     class Counter;
     Counter* m_counter = nullptr;
