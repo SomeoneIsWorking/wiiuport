@@ -5,6 +5,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <utility>
 
 // A deliberately small harness rather than a test framework dependency.
 //
@@ -58,6 +59,12 @@ template <typename T>
 inline const T* valueOf(const std::optional<T>& optional, const std::string& what) {
     isTrue(optional.has_value(), what);
     return optional.has_value() ? &optional.value() : nullptr;
+}
+
+// The value, counting a check that it is there; a default stands in so a failure keeps going.
+template <typename T> T present(std::optional<T> value, const std::string& what) {
+    isTrue(value.has_value(), what);
+    return std::move(value).value_or(T{});
 }
 
 } // namespace check

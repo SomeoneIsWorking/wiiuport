@@ -41,7 +41,8 @@ const char* const kRoutes =
     "/environment, "
     "GET /paint, GET /logic, GET /gate, "
     "POST /capture, POST /pacing, "
-    "POST /draws, POST /recordings, POST /paint, POST /logic, POST /interpolation, POST /warp, POST /item, "
+    "POST /draws, POST /recordings, POST /paint, POST /logic, POST /interpolation, POST /warp, "
+    "POST /item, "
     "POST /input "
     "and POST /quit";
 
@@ -146,11 +147,11 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_drawInterpolation(sources.drawInterpolation), m_cameraCuts(sources.cameraCuts),
       m_particleInterpolation(sources.particleInterpolation),
       m_seaInterpolation(sources.seaInterpolation),
-      m_materialInterpolation(sources.materialInterpolation), m_stageWarp(sources.stageWarp), m_itemGrant(sources.itemGrant),
-      m_environmentInterpolation(sources.environmentInterpolation), m_logic(sources.logic),
-      m_controllerChoice(sources.controllerChoice), m_guestBytes(sources.guestBytes),
-      m_snapshot(sources.snapshot), m_pacing(sources.pacing), m_scanOut(sources.scanOut),
-      m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
+      m_materialInterpolation(sources.materialInterpolation), m_stageWarp(sources.stageWarp),
+      m_itemGrant(sources.itemGrant), m_environmentInterpolation(sources.environmentInterpolation),
+      m_logic(sources.logic), m_controllerChoice(sources.controllerChoice),
+      m_guestBytes(sources.guestBytes), m_snapshot(sources.snapshot), m_pacing(sources.pacing),
+      m_scanOut(sources.scanOut), m_vertexChanges(sources.vertexChanges), m_gate(sources.gate) {
 }
 
 ControlChannel::~ControlChannel() = default;
