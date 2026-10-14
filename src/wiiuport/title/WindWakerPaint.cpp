@@ -279,6 +279,36 @@ std::string WindWakerPaint::enable() {
                     hex(first) + ", not this title's loop";
         return m_refusal;
     }
+    if (m_block == 0) {
+        m_refusal = m_reservationRefusal.empty()
+                        ? "no executable guest memory was reserved for the stand-in"
+                        : m_reservationRefusal;
+        return m_refusal;
+    }
+    const std::optional<std::vector<uint32_t>> at = payload(m_block);
+    if (!at.has_value()) {
+        m_refusal = "the stand-in at " + hex(m_block) + " cannot reach the loop it returns to";
+        return m_refusal;
+    }
+    // Written before the title's pacing changes, so a refusal here leaves the title as it was.
+    std::string written;
+    for (size_t word = 0; word < at->size(); word++) {
+        const uint32_t address = m_block + (4 * static_cast<uint32_t>(word));
+        uint32_t held = 0;
+        // A write discards the block's recompiled code, which a display thread may still be in.
+        if (m_readWord(address, held) && held == (*at)[word]) {
+            written += " " + hex(held);
+            continue;
+        }
+        if (!m_writeWord(address, (*at)[word])) {
+            m_refusal = "the stand-in's block at " + hex(m_block) + " would not take word " +
+                        std::to_string(word);
+            return m_refusal;
+        }
+        written += " " + hex((*at)[word]);
+    }
+    // Logged before arming: a fault right after leaves nothing alive to ask.
+    lucent::info("paint", "stand-in at {} holds:{}", hex(m_block), written);
     m_original = frame;
     // The title's record of the interval; restored on disable.
     uint32_t field = 0;
@@ -309,39 +339,14 @@ std::string WindWakerPaint::enable() {
     m_wrotePacing = true;
     lucent::info("paint", "flip pacing {} -> {} vblank(s), and the title's field agrees",
                  hex(m_savedPacing), hex(kSwapInterval));
-    if (m_block == 0) {
-        m_refusal = m_reservationRefusal.empty()
-                        ? "no executable guest memory was reserved for the stand-in"
-                        : m_reservationRefusal;
-        return m_refusal;
-    }
-    const std::optional<std::vector<uint32_t>> at = payload(m_block);
-    if (!at.has_value()) {
-        m_refusal = "the stand-in at " + hex(m_block) + " cannot reach the loop it returns to";
-        return m_refusal;
-    }
-    // Held across the block and the slot so the display thread is not inside the stand-in.
+    // Held so the display thread is not mid-frame when the slot changes.
     std::scoped_lock displayThread(m_frame.mutex);
-    std::string written;
-    for (size_t word = 0; word < at->size(); word++) {
-        const uint32_t address = m_block + (4 * static_cast<uint32_t>(word));
-        uint32_t held = 0;
-        // A write discards the block's recompiled code, which a display thread may still be in.
-        if (m_readWord(address, held) && held == (*at)[word]) {
-            written += " " + hex(held);
-            continue;
-        }
-        if (!m_writeWord(address, (*at)[word])) {
-            m_refusal = "the stand-in's block at " + hex(m_block) + " would not take word " +
-                        std::to_string(word);
-            return m_refusal;
-        }
-        written += " " + hex((*at)[word]);
-    }
-    // Logged before arming: a fault right after leaves nothing alive to ask.
-    lucent::info("paint", "stand-in at {} holds:{}", hex(m_block), written);
     if (!m_writeWord(slot, m_block)) {
         m_refusal = "vtable slot " + hexField(kFrameSlot) + " would not take the write";
+        (void)m_writeWord(display + kIntervalOffset, m_savedInterval);
+        (void)m_setSwapInterval(m_savedPacing);
+        m_wroteInterval = false;
+        m_wrotePacing = false;
         return m_refusal;
     }
     m_installed = true;

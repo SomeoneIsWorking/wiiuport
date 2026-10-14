@@ -434,6 +434,19 @@ void wiiuport::tests::runPaintTests() {
                       "re-arming leaves a block that already holds the stand-in unwritten");
     }
     {
+        FakeGuest guest = loadedTitle();
+        guest.code = 0;
+        WindWakerPaint mod = makeMod(guest);
+        mod.install();
+        linked();
+        paintOnce(kDisplay);
+        check::isTrue(!mod.enable().empty(), "with no block reserved the stand-in refuses");
+        uint32_t field = 0;
+        check::isTrue(readWord(kDisplay + WindWakerPaint::kIntervalOffset, field) && field == 2 &&
+                          g_pacing == 2,
+                      "and leaves the title's field and the pacing at two");
+    }
+    {
         // A pacing the emulator refuses is a refusal, and the title's field is
         // not left saying one when the pacing is not.
         FakeGuest guest = loadedTitle();
