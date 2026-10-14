@@ -73,6 +73,13 @@ def test_a_diagnostic_is_parsed_once_however_often_it_repeats() -> None:
     assert parse_diagnostics("clang-tidy ran over 3 files\n") == []
 
 
+def test_a_finding_keeps_the_notes_that_say_where() -> None:
+    escape = "/r/m.cpp:9:5: error: an exception may be thrown in function 'main' [bugprone-exception-escape]"
+    note = "/r/h.h:4:7: note: frame #0: unhandled exception of type 'E' may be thrown here"
+    output = f"{escape}\n    9 | int main() {{\n{note}\n{FINDING}\n"
+    assert parse_diagnostics(output) == sorted([f"{escape}\n    {note}", FINDING])
+
+
 def test_an_unrun_check_group_is_named() -> None:
     assert missing_check_groups(ALL_GROUPS) == []
     assert missing_check_groups(ALL_GROUPS.replace("performance-enum-size", "")) == ["performance-"]
