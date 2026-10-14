@@ -75,6 +75,8 @@ class DrawInterpolation {
     using ReadWords = std::function<bool(uint32_t address, uint32_t* words, uint32_t count)>;
     using WriteWords = std::function<bool(uint32_t address, const uint32_t* words, uint32_t count)>;
     using Gated = std::function<bool()>;
+    // Whether the camera (camera_class) starts a new shot this tick: its view is not blended.
+    using StartsShot = std::function<bool(uint32_t camera)>;
 
     // Told when the paint drawn from a tick's draw phase, the in-between one, begins and ends:
     // what the paint itself reads is blended for that window.
@@ -102,6 +104,7 @@ class DrawInterpolation {
         WriteWords writeWords;
         // Whether the logic gate is in: without it there is no in-between paint to draw.
         Gated gated;
+        StartsShot startsShot;
         std::vector<MidPaintListener*> midPaint;
         std::vector<DrawPhaseListener*> drawPhase;
     };
@@ -159,7 +162,8 @@ class DrawInterpolation {
         std::vector<uint32_t> words;
     };
 
-    bool blendCamera(uint32_t camera, const std::array<uint32_t, kCameraWords>& words);
+    bool blendCamera(uint32_t camera, const std::array<uint32_t, kCameraWords>& words,
+                     bool startsShot);
     bool blendActor(uint32_t actor, const std::array<uint32_t, kPlacementWords>& words);
 
     // A model's base TR matrix, where its world matrices are, and the matrices.
@@ -185,6 +189,7 @@ class DrawInterpolation {
     ReadWords m_readWords;
     WriteWords m_writeWords;
     Gated m_gated;
+    StartsShot m_startsShot;
     std::vector<MidPaintListener*> m_midPaint;
     std::vector<DrawPhaseListener*> m_drawPhase;
     Entry m_management{*this, Event::Management};
@@ -223,6 +228,7 @@ class DrawInterpolation {
     uint64_t m_ticks = 0;
     uint64_t m_cameraBlends = 0;
     uint64_t m_cameraFirstSeen = 0;
+    uint64_t m_cameraCuts = 0;
     uint64_t m_actorDraws = 0;
     uint64_t m_actorBlends = 0;
     uint64_t m_actorsNotExecuted = 0;

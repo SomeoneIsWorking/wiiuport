@@ -623,10 +623,32 @@ in its actor's draw (`scratch/drawphase/material_speed.py`): 216 steps in 4 s wi
 115.5 over 116 gated ticks with it on.
 
 Not interpolated, so still stepping at the tick rate: anything a draw method takes from state other
-than these inputs (the sea's texture scroll, held to one step a tick; texture-pattern and visibility animation, which are discrete), and camera cuts
-and actor teleports, which blend across the cut for one present. The game has no cut flag:
-`dCamera_c::Set` is called every frame by event cameras and `Reset` by a handful of actors, so a cut
-is not told apart from a fast move.
+than these inputs (the sea's texture scroll, held to one step a tick; texture-pattern and visibility animation, which are discrete), and actor teleports, which blend
+across the move for one present.
+
+### Camera cuts
+
+A tick whose camera starts a new shot draws that shot as it is (`title/CameraCuts`, asked by
+`DrawInterpolation` at the camera draw); the next tick blends from it. The game has no cut flag, so
+the signals are its own shot boundaries:
+
+- **Cutscene shots.** Every JStudio paragraph value passes through
+  `TAdaptor::adaptor_setVariableValue` (`0x02839fac`, adaptor in r3; `update_immediate_` is
+  `0x02839da0`). A paragraph on the adaptor whose JStage camera (`adaptor+0xec`) is dDemo's active
+  camera (`*(*0x101d5ffc + 0x84)`) marks a shot, consumed by the next tick's camera draw.
+- **Event camera shots.** `eventCamera` (`0x024ff164`) zeroes the body's per-cut counter
+  (`camera+0x248+0x11c`) on a new staff cut and `NotRun` counts it up after, so it reads 1 at the
+  camera draw of a cut's first tick while the event manager's `cameraPlay` (`play+0x52e4`) is set.
+
+Measured on the title screen's attract cutscene (`scratch/drawphase/cut_probe.py`, every present
+captured): before, the presents at each of three shot changes showed a view between the two shots
+(5,757, 2,919 and 1,118 units of eye travel); after, each goes straight from one shot to the next,
+with 3 cuts from 8 demo-camera paragraphs over 1,063 ticks. On a warp's arrival the event cut reads
+`cutTicks 1` exactly at a 690-unit jump, behind the fade-in.
+
+Not handled: `dCamera_c::Reset` (`0x02515048`, bosses and shops) and the switch from gameplay to a
+demo camera; neither has a reproduction yet. A stage change reuses the camera process's address,
+and its first view comes after ticks without a camera draw, so it is a first sight.
 
 ### Reaching a scene: the stage warp
 

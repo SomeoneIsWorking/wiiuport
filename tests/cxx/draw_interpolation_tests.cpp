@@ -63,6 +63,7 @@ class Guest {
   public:
     std::map<uint32_t, uint32_t> words;
     bool gated = true;
+    bool startsShot = false;
 
     DrawInterpolation
     interpolation(std::vector<DrawInterpolation::MidPaintListener*> midPaint = {},
@@ -85,6 +86,10 @@ class Guest {
                                   .gated =
                                       [this] {
                                           return gated;
+                                      },
+                                  .startsShot =
+                                      [this](uint32_t /*camera*/) {
+                                          return startsShot;
                                       },
                                   .midPaint = std::move(midPaint),
                                   .drawPhase = std::move(drawPhase)}};
@@ -167,6 +172,29 @@ void theCameraIsDrawnFromTheMidpointOfTwoTicksAndPutBack() {
     check::isTrue(value(guest.words[kCamera + 0xdc]) == 200.0f &&
                       guest.words[kCamera + 0x100] == ((uint32_t{0x8100} << 16) | 0xabcd),
                   "and the tick's own inputs are back once the draw phase is done");
+}
+
+void aCameraStartingAShotIsDrawnAsItIs() {
+    Guest guest;
+    DrawInterpolation draw = guest.interpolation();
+    guest.camera({.fovy = 60.0f, .eyeX = 100.0f, .bank = 0});
+    draw.onManagement();
+    draw.onCameraDraw(kCamera);
+    draw.onAfterDraw();
+    guest.camera({.fovy = 60.0f, .eyeX = 5000.0f, .bank = 0});
+    guest.startsShot = true;
+    draw.onManagement();
+    draw.onCameraDraw(kCamera);
+    check::isTrue(value(guest.words[kCamera + 0xdc]) == 5000.0f,
+                  "a tick that starts a shot draws the new shot, not a view between the two");
+    draw.onAfterDraw();
+    guest.camera({.fovy = 60.0f, .eyeX = 5100.0f, .bank = 0});
+    guest.startsShot = false;
+    draw.onManagement();
+    draw.onCameraDraw(kCamera);
+    check::isTrue(value(guest.words[kCamera + 0xdc]) == 5050.0f,
+                  "and the next tick blends from the new shot");
+    draw.onAfterDraw();
 }
 
 void anExecutedActorIsDrawnBetweenItsOldAndCurrentPlacement() {
@@ -436,6 +464,7 @@ void theInBetweenDrawPhaseIsOpenedAndClosedForItsListeners() {
 
 void wiiuport::tests::runDrawInterpolationTests() {
     theCameraIsDrawnFromTheMidpointOfTwoTicksAndPutBack();
+    aCameraStartingAShotIsDrawnAsItIs();
     anExecutedActorIsDrawnBetweenItsOldAndCurrentPlacement();
     anActorThatDidNotRunIsDrawnAsItIs();
     nothingIsWrittenOutsideAGatedTick();

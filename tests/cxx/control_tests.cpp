@@ -88,7 +88,10 @@ struct Fixture {
     wiiuport::title::DrawInterpolation drawInterpolation{{.registerProbe = &noRegistration,
                                                           .readWords = &noReadWords,
                                                           .writeWords = nullptr,
-                                                          .gated = nullptr}};
+                                                          .gated = nullptr,
+                                                          .startsShot = nullptr}};
+    wiiuport::title::CameraCuts cameraCuts{
+        {.registerProbe = &noRegistration, .readWords = &noReadWords}};
     wiiuport::title::LogicGate logic{{.registerProbe = &noRegistration,
                                       .allocateCode = &noCodeSpace,
                                       .allocateData = &noCodeSpace,
@@ -111,6 +114,7 @@ struct Fixture {
         .callers = callers,
         .paint = paint,
         .drawInterpolation = drawInterpolation,
+        .cameraCuts = cameraCuts,
         .particleInterpolation = particleInterpolation,
         .seaInterpolation = seaInterpolation,
         .materialInterpolation = materialInterpolation,
