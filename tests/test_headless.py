@@ -113,6 +113,16 @@ def test_a_default_session_enables_no_logging(tmp_path: Path) -> None:
     assert "<logflag>0</logflag>" in settings
 
 
+def test_the_console_language_is_english_unless_asked(tmp_path: Path) -> None:
+    english = HeadlessSession(layout=Layout(root=tmp_path / "en"))
+    english.prepare()
+    french = HeadlessSession(layout=Layout(root=tmp_path / "fr"), console_language=2)
+    french.prepare()
+    read = lambda s: (s.config_home / "Cemu" / "settings.xml").read_text()
+    assert "<console_language>1</console_language>" in read(english)
+    assert "<console_language>2</console_language>" in read(french)
+
+
 def test_runtime_overrides_reach_the_child_environment(tmp_path: Path) -> None:
     session = HeadlessSession(layout=Layout(root=tmp_path), runtime_env={"CAPTURE_START": "3000"})
     assert session.environment()["CAPTURE_START"] == "3000"
