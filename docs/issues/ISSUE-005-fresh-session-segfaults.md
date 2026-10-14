@@ -1,6 +1,6 @@
 # ISSUE-005 — the runtime segfaults on a fresh session directory
 
-**State:** open. Reproduced twice, cause unknown.
+**State:** not reproducing. Reproduced twice before 2026-10-09; cause unknown.
 
 ## What happens
 
@@ -44,3 +44,9 @@ The first run in a fresh `scratch/drawphase/` stopped at boot with signal 5: `ce
 `VulkanRenderer::draw_execute_continued` (`VulkanRendererCore.cpp:1770`, no active vertex
 descriptor set), from `LatteCP_processCommandBuffer_continuousDrawPass`. The next three runs in the
 same directory, same binary, reached gameplay.
+
+## Not reproduced (2026-10-14)
+
+Seven never-used activity dirs (`scratch/fresh1`..`fresh7`, `scratch/drawphase/fresh_boot.py`), at
+wiiuport `6f77b3e` and cemu `de8c15a`, all reached the title and ran 900 game frames. Neither symptom
+appeared. Reopen with the crash report and the activity dir kept as found.

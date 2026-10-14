@@ -15,3 +15,13 @@ a change:
 | Draw methods with state | `d_a_bgn`, `d_a_ff`, `d_a_himo2` (rope settles per computation), `d_a_obj_ajav` (flash counted in `0x02313e28`, timer `+0x56`) | double-speed animation |
 | Material animation outside an actor's draw | key animator `0x027df40c` | stepping at 30 |
 | Cloth | KoRL sail upload `0x021625dc`, `dCloth 0x0251d864` | stepping at 30 |
+
+## Checked
+
+- **NODRAW (2026-10-14).** `NODRAW` status is set only by the talk camera's inlined `hideActor`
+  (`talktoCamera 0x02508a60`; the stores to `+0x2e0` at `0x02509d2c`..`0x0250b16c`). Free talk with
+  Grandma in `LinkRM` (`scratch/drawphase/talk.py`): 351 talk camera calls, 0 at the hide sites
+  `0x02509d18`, `0x02509eac`, `0x0250a038`, `0x0250a1d0`, `0x0250b158`, and Link drawn on both presents
+  of every tick. A reproduction needs a talk where an actor stands between the camera and the speaker.
+- **Light count.** Same room, lamp-lit: consecutive presents' mean luminance pairs match (`293.08`,
+  `293.04`; `292.96`, `292.96`), no alternation.
