@@ -116,14 +116,16 @@ void LogicGate::Counter::OnCall(std::span<const uint32_t, 32>, uint32_t) {
     calls.fetch_add(1, std::memory_order_relaxed);
 }
 
-class LogicGate::SceneWork final : public GuestCallProbes::Probe {
+class LogicGate::Held final : public GuestCallProbes::Probe {
   public:
-    explicit SceneWork(LogicGate& owner) : m_owner(owner) {
+    using Slot = std::optional<GuestCallProbes::Installation> LogicGate::*;
+
+    Held(LogicGate& owner, Slot slot) : m_owner(owner), m_slot(slot) {
     }
 
     void OnInstall(GuestCallProbes::Installation installation) override {
         std::scoped_lock lock(m_owner.m_mutex);
-        m_owner.m_sceneProbe = installation;
+        m_owner.*m_slot = installation;
     }
 
     void OnCall(std::span<const uint32_t, 32>, uint32_t) override {
@@ -134,6 +136,7 @@ class LogicGate::SceneWork final : public GuestCallProbes::Probe {
 
   private:
     LogicGate& m_owner;
+    Slot m_slot;
 };
 
 class LogicGate::Moment final : public GuestCallProbes::Probe {
@@ -159,7 +162,8 @@ LogicGate::LogicGate(Seams seams)
     : m_register(seams.registerProbe), m_allocateCode(seams.allocateCode),
       m_allocateData(seams.allocateData), m_writeWord(seams.writeWord), m_readWord(seams.readWord),
       m_moment(new Moment(*this)), m_counter(new Counter(*this)),
-      m_sceneWork(new SceneWork(*this)) {
+      m_sceneWork(new Held(*this, &LogicGate::m_sceneProbe)),
+      m_controllerCalc(new Held(*this, &LogicGate::m_controllerProbe)) {
 }
 
 void LogicGate::install() {
@@ -225,6 +229,17 @@ void LogicGate::onInstalled(GuestCallProbes::Installation installation) {
     }
     m_register(kSceneWork, kSceneWorkFirst, *m_sceneWork, true,
                m_block + 4 * static_cast<uint32_t>(kSceneGateWord));
+    if (!controllerPassThrough()) {
+        m_refusal = "the controller gate at " + hex(m_block) + " would not take its pass-through";
+        return;
+    }
+    m_register(kControllerCalc, kControllerCalcFirst, *m_controllerCalc, true,
+               m_block + 4 * static_cast<uint32_t>(kControllerGateWord));
+}
+
+bool LogicGate::controllerPassThrough() {
+    const uint32_t at = m_block + 4 * static_cast<uint32_t>(kControllerGateWord);
+    return m_writeWord(at, branchTo(at, kControllerCalcBody, false));
 }
 
 bool LogicGate::passThrough() {
@@ -381,6 +396,31 @@ std::vector<uint32_t> LogicGate::scenePayload(Memory memory) {
     };
 }
 
+std::vector<uint32_t> LogicGate::controllerPayload(Memory memory) {
+    const uint32_t at = memory.code + 4 * static_cast<uint32_t>(kControllerGateWord);
+    const uint32_t branchAt = at + 4 * 9;
+    if (!withinReach(branchAt, kControllerCalcBody)) {
+        return {};
+    }
+    const auto counters = loadAddress(12, memory.counters);
+    constexpr uint32_t kTicksOffset = 4 * kTicksWord;
+    constexpr uint32_t kSeenOffset = 4 * kControllerTicksWord;
+    // r11, r12 and cr0 are free at the calc's entry; r0 holds the caller's link register.
+    return {
+        counters[0],
+        counters[1],
+        kLoadWord | (11 << 21) | (12 << 16) | kTicksOffset, // lwz   r11, ticks(r12)
+        kLoadWord | (12 << 21) | (12 << 16) | kSeenOffset,  // lwz   r12, seen(r12)
+        kCompareLogical | (11 << 16) | (12 << 11),          // cmplw r11, r12
+        kBranchEqual | (4 * 5),                             // beq   the return
+        counters[0],
+        counters[1],
+        kStoreWord | (11 << 21) | (12 << 16) | kSeenOffset, // stw   r11, seen(r12)
+        branchTo(branchAt, kControllerCalcBody, false),     // b     the calc's body
+        kReturn,
+    };
+}
+
 std::vector<uint32_t> LogicGate::throughPayload(uint32_t blockAddress, Through flavour) {
     // One word that branches to the title's own second instruction: no state,
     // nothing to keep right, and the frame logic either runs or does not. The census says
@@ -442,6 +482,12 @@ std::string LogicGate::enable(bool through, int throughFlavour) {
                     "; this gate is written for this title's frame logic";
         return m_refusal;
     }
+    uint32_t calcSecond = 0;
+    if (!m_readWord(kControllerCalcBody, calcSecond) || calcSecond != kControllerCalcSecond) {
+        m_refusal = "the controller calc at " + hex(kControllerCalcBody) + " holds " +
+                    hex(calcSecond) + ", not " + hex(kControllerCalcSecond);
+        return m_refusal;
+    }
     // `through` is the control, and which way it branches *is* the experiment:
     // 1 is a direct branch and 2 an indirect one through the count register, which
     // is the mechanism the recompiler's jump table serves. Everything else about
@@ -461,6 +507,24 @@ std::string LogicGate::enable(bool through, int throughFlavour) {
                         std::to_string(word);
             return m_refusal;
         }
+    }
+    const std::vector<uint32_t> controller =
+        through ? std::vector<uint32_t>{}
+                : controllerPayload({.code = m_block, .counters = m_counters});
+    if (!through && controller.size() != kControllerGateWords) {
+        m_refusal = "the controller gate at " + hex(m_block) + " cannot reach the calc";
+        return m_refusal;
+    }
+    const uint32_t controllerAt = m_block + 4 * static_cast<uint32_t>(kControllerGateWord);
+    for (size_t word = 0; word < controller.size(); word++) {
+        if (!m_writeWord(controllerAt + 4 * static_cast<uint32_t>(word), controller[word])) {
+            m_refusal = "the controller gate would not take word " + std::to_string(word);
+            return m_refusal;
+        }
+    }
+    if (through && !controllerPassThrough()) {
+        m_refusal = "the controller gate would not take its pass-through";
+        return m_refusal;
     }
     // Nothing is written into the title's code. The probe's own stub sends the
     // call here, and the words in the frame logic's body are left exactly as they were:
@@ -487,7 +551,7 @@ std::string LogicGate::disable() {
     // The gate's own block goes back to its pass-through word. The title's code
     // is untouched and always was: the probe holds the entry, and the block is
     // where the decision lives.
-    if (!passThrough()) {
+    if (!passThrough() || !controllerPassThrough()) {
         m_refusal = "the gate's block at " + hex(m_block) + " would not take its pass-through word";
         return m_refusal;
     }
@@ -527,6 +591,9 @@ std::string LogicGate::json() const {
     body.number("callsAtProbe", m_counter != nullptr ? m_counter->calls.load() : 0);
     body.string("sceneProbe", std::string(installationName(m_sceneProbe)));
     body.number("sceneCalls", m_sceneWork != nullptr ? m_sceneWork->calls.load() : 0);
+    body.string("controllerProbe", std::string(installationName(m_controllerProbe)));
+    body.number("controllerCalls",
+                m_controllerCalc != nullptr ? m_controllerCalc->calls.load() : 0);
     // Which payload the block holds, because "enabled" alone cannot say it: the
     // pass-through control is enabled too, and it is the control, not the gate.
     body.raw("through", m_through ? "true" : "false");

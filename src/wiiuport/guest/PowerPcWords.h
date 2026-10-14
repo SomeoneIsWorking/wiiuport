@@ -41,6 +41,7 @@ inline constexpr uint32_t kAndImmediate = 0x70000000; // andi. rS, rA, K
 inline constexpr uint32_t kBranchNotEqual = 0x40820000;   // bne, relative
 inline constexpr uint32_t kBranchEqual = 0x41820000;      // beq, relative (0x02035a04)
 inline constexpr uint32_t kCompareImmediate = 0x2c000000; // cmpwi rA, simm (0x025b020c)
+inline constexpr uint32_t kCompareLogical = 0x7c000040;   // cmplw rA, rB (0x0273cc04)
 inline constexpr uint32_t kReturn = 0x4e800020;           // blr
 inline constexpr uint32_t kMoveToCounter = 0x7c0903a6;    // mtctr rS
 inline constexpr uint32_t kBranchCount = 0x4e800420;      // bctr
