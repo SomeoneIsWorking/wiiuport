@@ -19,6 +19,8 @@ void runEnvironmentInterpolationTests();
 void runMaterialInterpolationTests();
 void runStageWarpTests();
 void runItemGrantTests();
+void runContentTests();
+void runXboxGlyphsTests();
 void runSixtyHertzTests();
 void runGuestCallProbeTests();
 void runJsonBodyTests();

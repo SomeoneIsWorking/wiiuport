@@ -38,6 +38,19 @@ add_library(wiiuport STATIC
   control/ControlChannel.h
   control/GuestMemoryRead.cpp
   control/GuestMemoryRead.h
+  content/BigEndian.h
+  content/FontSheets.cpp
+  content/FontSheets.h
+  content/LayoutPanes.cpp
+  content/LayoutPanes.h
+  content/MessageText.cpp
+  content/MessageText.h
+  content/RgbaImage.h
+  content/SarcArchive.cpp
+  content/SarcArchive.h
+  content/SurfaceTiling.h
+  content/Yaz0.cpp
+  content/Yaz0.h
   frame/FrameCapture.cpp
   frame/FrameCapture.h
   frame/FrameGate.cpp
@@ -59,6 +72,10 @@ add_library(wiiuport STATIC
   guest/CallerCensus.cpp
   guest/CallerCensus.h
   guest/ProbeInstallation.h
+  glyphs/VectorCanvas.cpp
+  glyphs/VectorCanvas.h
+  glyphs/XboxGlyphArt.cpp
+  glyphs/XboxGlyphArt.h
   title/ItemGrant.cpp
   title/ItemGrant.h
   title/LogicGate.cpp
@@ -83,6 +100,8 @@ add_library(wiiuport STATIC
   title/StageWarp.h
   title/WindWakerPaint.cpp
   title/WindWakerPaint.h
+  title/XboxGlyphs.cpp
+  title/XboxGlyphs.h
     input/InputDriver.cpp
   input/InputDriver.h
   interp/Blendable.h
@@ -135,6 +154,8 @@ if(TARGET CemuCafe)
   add_library(wiiuport_host STATIC
     shell/ControllerAutoMap.cpp
     shell/ControllerAutoMap.h
+    shell/GlyphPacks.cpp
+    shell/GlyphPacks.h
     shell/HostPaths.cpp
     shell/HostPaths.h
     shell/ProductCommandLine.cpp
