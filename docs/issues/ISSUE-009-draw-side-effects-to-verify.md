@@ -43,6 +43,13 @@ a change:
   glow eases only when it goes in or out of view, and did not change in `Omori`. `Nh` (313) recomputes
   its glow alpha from the material colour each draw.
 
+- **Grappling rope (2026-10-14).** `Himo2` is process 446, profile `0x101b6e7c`, draw `0x0216ca5c`.
+  The draw eases three angles, `+0x21f8`, `+0x21fa` and `+0x21fc`, with `cLib_addCalcAngleS2` (step 2)
+  toward targets from the hook's movement since the last draw, then stores the position it used at
+  `+0x21ec`. Drawn twice a tick, the second draw sees no movement and eases them back toward zero.
+  Not reproduced: in Hyrule with the hook on X (`POST /item`), an injected X aims but a second X,
+  held 8 or 40 reads, does not throw (`scratch/drawphase/rope`).
+
 ## Where the rest are
 
 Stage archives (`content/Common/Stage/*.szs`, Yaz0 SARC, the `.dzr`/`.dzs` inside the `.bfres`)
