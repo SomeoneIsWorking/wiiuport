@@ -630,6 +630,19 @@ void aGetReportsAndDoesNotChangeAnything() {
         "and the refusal's own list does not advertise it: " + retired.body.substr(0, 90));
 }
 
+// The paint mod has one stand-in, so a parameter that once chose another is refused.
+void aPaintParameterItDoesNotKnowIsRefused() {
+    Fixture fixture;
+    lucent::http::Request arm;
+    arm.method = "POST";
+    arm.target = "/paint?on=1&mode=3";
+    auto refused = fixture.channel.dispatch(arm);
+    check::isTrue(refused.status == 400, "POST /paint with a mode is a bad request");
+    check::isTrue(contains(refused.body, "unknown parameter mode"),
+                  "naming the parameter: " + refused.body);
+    check::isTrue(!fixture.paint.installed(), "and nothing is installed");
+}
+
 } // namespace
 
 namespace wiiuport::tests {
@@ -650,6 +663,7 @@ void runControlTests() {
     pacingIsReadWithoutRestarting();
     everyAdvertisedRouteIsReachableByItsOwnMethod();
     aGetReportsAndDoesNotChangeAnything();
+    aPaintParameterItDoesNotKnowIsRefused();
 }
 
 } // namespace wiiuport::tests

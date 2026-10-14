@@ -461,7 +461,6 @@ class PaintState:
     block: int
     paints: int
     probe: str
-    mode: str
     display: int
     fields: dict[str, int]
     refusal: str
@@ -476,7 +475,7 @@ class PaintState:
     def render(self) -> str:
         fields = ", ".join(f"{name} {value}" for name, value in sorted(self.fields.items()))
         body = (
-            f"display paint: installed {self.installed} ({self.mode}), probe "
+            f"display paint: installed {self.installed}, probe "
             f"{self.probe}, block {self.block:#010x}, {self.paints} paints"
         )
         if self.display:
@@ -762,10 +761,8 @@ def read_paint(port: int = DEFAULT_PORT, timeout: float = 2.0) -> PaintState:
     return _paint_state(_get("/paint", port, timeout), "GET /paint")
 
 
-def set_paint(
-    on: bool, port: int = DEFAULT_PORT, timeout: float = 5.0, mode: int = 3
-) -> PaintState:
-    body = request_bytes("POST", f"/paint?on={1 if on else 0}&mode={mode}", port, timeout)
+def set_paint(on: bool, port: int = DEFAULT_PORT, timeout: float = 5.0) -> PaintState:
+    body = request_bytes("POST", f"/paint?on={1 if on else 0}", port, timeout)
     try:
         return _paint_state(json.loads(body.decode("utf-8")), "POST /paint")
     except json.JSONDecodeError as malformed:
@@ -779,7 +776,7 @@ def _paint_state(payload: dict, url: str) -> PaintState:
     require_fields(
         url,
         payload,
-        ("frame", "vtable", "installed", "block", "paints", "probe", "mode", "display", "fields"),
+        ("frame", "vtable", "installed", "block", "paints", "probe", "display", "fields"),
         "the display paint mod",
     )
     return PaintState(
@@ -789,7 +786,6 @@ def _paint_state(payload: dict, url: str) -> PaintState:
         block=int(payload["block"], 16),
         paints=int(payload["paints"]),
         probe=str(payload["probe"]),
-        mode=str(payload["mode"]),
         display=int(payload["display"], 16),
         fields={str(name): int(value) for name, value in payload["fields"].items()},
         refusal=str(payload.get("refusal", "")),
