@@ -25,3 +25,33 @@ a change:
   of every tick. A reproduction needs a talk where an actor stands between the camera and the speaker.
 - **Light count.** Same room, lamp-lit: consecutive presents' mean luminance pairs match (`293.08`,
   `293.04`; `292.96`, `292.96`), no alternation.
+- **Sky cloud scroll (2026-10-14).** `daVrbox2_Draw` (`0x024d1d44`) adds actor `+0x3c8` to four cloud
+  texture translations (one material's twice) and wraps each in `texScrollCheck` (`0x024d1c44`, into
+  [0, 1]); both draw phases run it (599 draws, 3,594 checks over 300 ticks). Not doubled: the draw
+  zeroes `+0x3c8` after using it, so the gated draw phase takes the tick's step and the tick's own
+  adds 0 (read per present through the frame gate: the translations move once a tick). The step
+  shows half a frame early, at about 0.0003 of the texture a tick.
+- **Actor state a draw changes (2026-10-14).** Each actor drawn in the gated draw phase read whole
+  (size from its profile) before its draw, after the draw phase and after its paint, on Outset
+  (`scratch/drawphase/instruments/actor_draw_state_census.diff`): the draw phase changes only actor
+  fields, the paint only process list links (once per scene change). The common fields, `+0x110`..
+  `+0x1d8`, are the actor's `dKy_tevstr_c` from `settingTevStruct` (`0x025626a4`), whose point-light
+  part (`settingTevStruct_plightcol_plus`) eases `mLightPosWorld` toward the light by
+  `cLib_addCalc(0.5)` and draws a `cM_rndF` flicker per call: both twice a tick. Nothing visible
+  reproduced yet; a reproduction is an actor walking past a torch.
+- **Fireflies.** `ho` (process 187, `daFf_Draw`): its brk play is held by `MaterialInterpolation`; its
+  glow eases only when it goes in or out of view, and did not change in `Omori`. `Nh` (313) recomputes
+  its glow alpha from the material colour each draw.
+
+## Where the rest are
+
+Stage archives (`content/Common/Stage/*.szs`, Yaz0 SARC, the `.dzr`/`.dzs` inside the `.bfres`)
+indexed by the 8-byte actor names their `ACTR`/`SCOB`/`TRES` chunks place
+(`scratch/re/stage_actors.py`): `Bgn` in `GanonK` room 0; `ho` in `Omori` 0, `TyuTyu`, `Otkura`;
+`AjavW` in `Pjavdou` 0; `TrFlag` (cloth) in `Adanmae` and `sea` rooms 14 and 43; `SieFlag` in `sea`
+rooms 8, 22, 24, 25, 37, 46. `Himo2` is the grappling hook's rope and `Ajav` flashes when hit, so
+both need items this save lacks.
+
+Names to process numbers: `l_objectName` (`{name[8], s16 process, s8, s8}`, 809 entries) at
+`0x101ebfdc`. Profiles: `process_profile_definition` with the process name at `+0x8`, instance
+size at `+0x10` and the actor methods (create, delete, execute, isDelete, draw) through `+0x24`.
