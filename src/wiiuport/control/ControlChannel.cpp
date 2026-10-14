@@ -144,7 +144,7 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_shapeLog(sources.shapeLog), m_callers(sources.callers), m_paint(sources.paint),
       m_drawInterpolation(sources.drawInterpolation), m_cameraCuts(sources.cameraCuts),
       m_particleInterpolation(sources.particleInterpolation),
-      m_seaInterpolation(sources.seaInterpolation),
+      m_seaInterpolation(sources.seaInterpolation), m_ropeInterpolation(sources.ropeInterpolation),
       m_materialInterpolation(sources.materialInterpolation), m_stageWarp(sources.stageWarp),
       m_itemGrant(sources.itemGrant), m_environmentInterpolation(sources.environmentInterpolation),
       m_logic(sources.logic), m_controllerChoice(sources.controllerChoice),
@@ -707,6 +707,9 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
     }
     if (request.path() == "/sea") {
         return lucent::http::Response::json(200, "OK", m_seaInterpolation.json());
+    }
+    if (request.path() == "/rope") {
+        return lucent::http::Response::json(200, "OK", m_ropeInterpolation.json());
     }
     if (request.path() == "/materials") {
         return lucent::http::Response::json(200, "OK", m_materialInterpolation.json());

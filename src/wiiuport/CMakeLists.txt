@@ -94,6 +94,8 @@ add_library(wiiuport STATIC
   title/MaterialInterpolation.h
   title/ParticleInterpolation.cpp
   title/ParticleInterpolation.h
+  title/RopeInterpolation.cpp
+  title/RopeInterpolation.h
   title/SeaInterpolation.cpp
   title/SeaInterpolation.h
   title/SixtyHertz.cpp

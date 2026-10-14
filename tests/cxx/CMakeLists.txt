@@ -9,6 +9,7 @@ add_executable(wiiuport_tests
   environment_interpolation_tests.cpp
   material_interpolation_tests.cpp
   particle_interpolation_tests.cpp
+  rope_interpolation_tests.cpp
   sea_interpolation_tests.cpp
   item_grant_tests.cpp
   quest_log_names_tests.cpp
