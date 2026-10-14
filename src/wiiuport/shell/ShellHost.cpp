@@ -1,6 +1,7 @@
 #include "wiiuport/shell/ShellHost.h"
 
 #include "wiiuport/Runtime.h"
+#include "wiiuport/shell/GlyphPacks.h"
 #include "wiiuport/shell/SetupScreen.h"
 
 #include "Boot/SystemBringup.h"
@@ -228,6 +229,7 @@ bool ShellHost::launchTitle(const std::filesystem::path& path) {
                     std::to_string(static_cast<int>(status)) + ")";
         return false;
     }
+    GlyphPacks{}.install(ActiveSettings::GetCachePath());
     CafeSystem::LaunchForegroundTitle();
     m_titleRunning = true;
     return true;
