@@ -447,8 +447,7 @@ void everyReportIsOneJsonDocument() {
     Fixture fixture;
     fixture.recorder.OnDisplayList(LatteFrameHooks::DisplayList{0, nullptr, 0});
     fixture.recorder.OnFrameComplete();
-    // Each report with the method it answers under: `/pacing` restarts the pacing, so it is a POST
-    // and asking it under GET is a refusal about a method rather than about the body.
+    // Each report with the method it answers under.
     for (const auto& [method, path] :
          std::vector<std::pair<std::string, std::string>>{{"GET", "/counters"},
                                                           {"GET", "/paint"},
@@ -459,6 +458,7 @@ void everyReportIsOneJsonDocument() {
                                                           {"GET", "/sea"},
                                                           {"GET", "/materials"},
                                                           {"GET", "/environment"},
+                                                          {"GET", "/pacing"},
                                                           {"POST", "/interpolation"},
                                                           {"POST", "/pacing"}}) {
         lucent::http::Request read;
@@ -473,6 +473,30 @@ void everyReportIsOneJsonDocument() {
                           "one inside it: " +
                           answer.body.substr(0, 60));
     }
+}
+
+// GET /pacing reads the window so far; POST /pacing starts a new one.
+void pacingIsReadWithoutRestarting() {
+    Fixture fixture;
+    fixture.pacing.onDisplayed(false);
+    fixture.pacing.onDisplayed(true);
+    fixture.pacing.onDisplayed(false);
+    lucent::http::Request read;
+    read.method = "GET";
+    read.target = "/pacing";
+    auto first = fixture.channel.dispatch(read);
+    check::isTrue(contains(first.body, "\"present\":{\"guestFrames\":2,\"runtimeFrames\":1,"
+                                       "\"intervals\":2") &&
+                      contains(first.body, "\"scanOut\":{"),
+                  "GET /pacing reports the presents measured and scan-out: " + first.body);
+    auto again = fixture.channel.dispatch(read);
+    check::isTrue(again.body == first.body, "and reading it does not restart it");
+    lucent::http::Request restart;
+    restart.method = "POST";
+    restart.target = "/pacing";
+    fixture.channel.dispatch(restart);
+    check::isTrue(contains(fixture.channel.dispatch(read).body, "\"present\":{\"guestFrames\":0"),
+                  "POST /pacing starts a new window");
 }
 
 void everyAdvertisedRouteIsReachableByItsOwnMethod() {
@@ -623,6 +647,7 @@ void runControlTests() {
     aCallsChainIsItsReturnAddressThenEachSavedLinkRegister();
     anIdleCensusReportsNoEntriesRatherThanNothing();
     aMemoryReadNamesItsRangeAndIsBounded();
+    pacingIsReadWithoutRestarting();
     everyAdvertisedRouteIsReachableByItsOwnMethod();
     aGetReportsAndDoesNotChangeAnything();
 }
