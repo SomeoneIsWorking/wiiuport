@@ -19,6 +19,7 @@ void runEnvironmentInterpolationTests();
 void runMaterialInterpolationTests();
 void runStageWarpTests();
 void runItemGrantTests();
+void runQuestLogNamesTests();
 void runContentTests();
 void runXboxGlyphsTests();
 void runSixtyHertzTests();

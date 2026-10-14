@@ -11,6 +11,7 @@ add_executable(wiiuport_tests
   particle_interpolation_tests.cpp
   sea_interpolation_tests.cpp
   item_grant_tests.cpp
+  quest_log_names_tests.cpp
   content_tests.cpp
   xbox_glyphs_tests.cpp
   stage_warp_tests.cpp

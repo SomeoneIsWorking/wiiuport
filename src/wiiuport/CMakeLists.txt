@@ -77,6 +77,8 @@ add_library(wiiuport STATIC
   glyphs/XboxGlyphArt.cpp
   glyphs/XboxGlyphArt.h
   title/ItemGrant.cpp
+  title/QuestLogNames.cpp
+  title/QuestLogNames.h
   title/ItemGrant.h
   title/LogicGate.cpp
   title/LogicGate.h
@@ -172,6 +174,8 @@ if(TARGET CemuCafe)
     shell/TitleIdentity.h
     shell/TitleSelection.cpp
     shell/TitleSelection.h
+    shell/TitleSave.cpp
+    shell/TitleSave.h
     shell/WindowSystemBridge.cpp
   )
   target_link_libraries(wiiuport_host

@@ -10,6 +10,7 @@
 #include "Cafe/HW/Latte/Renderer/Renderer.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanAPI.h"
 #include "Cafe/HW/Latte/Renderer/Vulkan/VulkanRenderer.h"
+#include "Cafe/OS/libs/swkbd/SwkbdHooks.h"
 #include "Cafe/TitleList/TitleList.h"
 #include "config/ActiveSettings.h"
 #include "config/CemuConfig.h"
@@ -230,6 +231,7 @@ bool ShellHost::launchTitle(const std::filesystem::path& path) {
         return false;
     }
     GlyphPacks{}.install(ActiveSettings::GetCachePath());
+    SwkbdHooks::SetInitialText(&m_questLogNames);
     CafeSystem::LaunchForegroundTitle();
     m_titleRunning = true;
     return true;
@@ -244,6 +246,7 @@ void ShellHost::shutdown() {
         CafeSystem::ShutdownTitle();
         m_titleRunning = false;
     }
+    SwkbdHooks::SetInitialText(nullptr);
     m_window.close();
     g_renderer.reset();
 }
