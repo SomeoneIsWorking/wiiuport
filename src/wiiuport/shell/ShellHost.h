@@ -5,7 +5,11 @@
 #include "wiiuport/shell/HostPaths.h"
 #include "wiiuport/shell/ShellWindow.h"
 #include "wiiuport/shell/TitleIdentity.h"
+#include "wiiuport/shell/TitleSave.h"
 #include "wiiuport/shell/TitleSelection.h"
+#include "wiiuport/title/QuestLogNames.h"
+
+#include "Cafe/HW/Espresso/GuestPatching.h"
 
 #include <filesystem>
 #include <optional>
@@ -62,6 +66,10 @@ class ShellHost final : public HostEventObserver, public control::HostStopTarget
     std::filesystem::path m_executable;
     std::optional<TitleIdentity> m_expectedTitle;
     ShellWindow m_window;
+    title::QuestLogNames m_questLogNames{{.readWords = &GuestPatching::ReadWords, .readSave = [] {
+                                              return TitleSave::read(
+                                                  title::QuestLogNames::kSaveFile);
+                                          }}};
     bool m_titleRunning{false};
     std::string m_failure;
 };

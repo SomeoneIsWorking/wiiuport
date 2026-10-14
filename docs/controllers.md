@@ -42,6 +42,20 @@ frame.
 - Live: boot headless with a save and press only A; the run goes title, File Selection, gameplay,
   and `/controller-choice` reports `"probe":"installed"` with `displayFrames` 1.
 
+## Name entry
+
+New Game asks for a name through the system keyboard (`SwkbdAppearKeyboard`, keyboard-only: the
+title draws the box and takes each change through its receiver). The keyboard opens with Link, or
+Lunk when a quest log in use is already named Link, or Lonk when both are; the player can still
+edit it, and Menu accepts it. Other keyboards, on other stages, open empty.
+
+- `cking.sav`: three quest logs of `0xa94` bytes; a log is in use once its save time (u64 at
+  `+0x18`) is set, since a fresh one is zero. The names follow at `0x2034`, `0x12` bytes each,
+  UTF-16BE; an unused log carries Link.
+- The stage is the start stage name at `0x1046f0b0 + 0x5134`, `Name` from File Selection on.
+- The control channel's presses reach the title, not the keyboard overlay, so accepting it is
+  checked by hand.
+
 ## Button glyphs
 
 The game shows Xbox-layout glyphs by position, matching the bindings above: the right face button
