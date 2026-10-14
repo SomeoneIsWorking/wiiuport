@@ -37,6 +37,8 @@ _DIAGNOSTIC = re.compile(
     r"^(?P<file>.+?):(?P<line>\d+):(?P<column>\d+): (?:warning|error): .+ \[(?P<check>[^\]]+)\]$"
 )
 
+_NOTE = re.compile(r"^.+?:\d+:\d+: note: ")
+
 
 class TidyUnavailable(RuntimeError):
     """clang-tidy could not be run at all, so nothing was analysed."""
@@ -138,8 +140,18 @@ def tidy_database(database: Path, into: Path) -> Path:
 
 
 def parse_diagnostics(output: str) -> list[str]:
-    """Each distinct diagnostic line; a header's finding repeats once per unit including it."""
-    found = {line for line in output.splitlines() if _DIAGNOSTIC.match(line)}
+    """Each distinct finding with its notes; a header's finding repeats once per unit including it."""
+    found: set[str] = set()
+    current: list[str] = []
+    for line in output.splitlines():
+        if _DIAGNOSTIC.match(line):
+            if current:
+                found.add("\n    ".join(current))
+            current = [line]
+        elif current and _NOTE.match(line):
+            current.append(line)
+    if current:
+        found.add("\n    ".join(current))
     return sorted(found)
 
 
