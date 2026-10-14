@@ -37,7 +37,7 @@ std::optional<ItemGrant::Request> ItemGrant::parse(std::string_view query, std::
         }
     }
     if (!item) {
-        refusal = "item is grappling_hook or bomb_bag.\n";
+        refusal = "item is telescope, picto_box, grappling_hook or bomb_bag.\n";
         return std::nullopt;
     }
     if (!button) {
