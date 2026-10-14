@@ -59,9 +59,9 @@ void theBombBagIsGivenAsItsItemGetFunctionGivesIt() {
     Guest guest = freshFile();
     ItemGrant grant = guest.grant();
     std::string refusal;
-    auto request = ItemGrant::parse("item=bomb_bag&button=y", refusal);
-    check::isTrue(request.has_value(), "a known item and button parse");
-    check::isTrue(grant.grant(*request, refusal), "and are given");
+    auto request = check::present(ItemGrant::parse("item=bomb_bag&button=y", refusal),
+                                  "a known item and button parse");
+    check::isTrue(grant.grant(request, refusal), "and are given");
     check::equal(guest.byte(0x69), 0x31, "the bomb bag in slot 13");
     check::equal(guest.byte(0x71 + 13), 1, "got");
     check::equal(guest.byte(0x8a), 30, "thirty bombs");
@@ -76,8 +76,11 @@ void theGrapplingHookTakesItsSlot() {
     Guest guest = freshFile();
     ItemGrant grant = guest.grant();
     std::string refusal;
-    check::isTrue(grant.grant(*ItemGrant::parse("item=grappling_hook&button=x", refusal), refusal),
-                  "the grappling hook is given");
+    check::isTrue(
+        grant.grant(
+            check::present(ItemGrant::parse("item=grappling_hook&button=x", refusal), "parsed"),
+            refusal),
+        "the grappling hook is given");
     check::equal(guest.byte(0x5f), 0x25, "in slot 3");
     check::equal(guest.byte(0x71 + 3), 1, "got");
     check::equal(guest.byte(0x29), 3, "on X");
@@ -90,8 +93,10 @@ void unknownItemsAndButtonsAreRefused() {
     check::isTrue(!ItemGrant::parse("item=bomb_bag", refusal), "no button");
     Guest guest;
     ItemGrant grant = guest.grant();
-    check::isTrue(!grant.grant(*ItemGrant::parse("item=bomb_bag&button=x", refusal), refusal),
-                  "no save info yet");
+    check::isTrue(
+        !grant.grant(check::present(ItemGrant::parse("item=bomb_bag&button=x", refusal), "parsed"),
+                     refusal),
+        "no save info yet");
 }
 
 } // namespace

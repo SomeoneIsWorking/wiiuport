@@ -47,18 +47,18 @@ std::optional<ItemGrant::Request> ItemGrant::parse(std::string_view query, std::
     return Request{.item = *item, .button = *button};
 }
 
-// One byte of a big-endian word, written over or merged into what is there.
-bool ItemGrant::setByte(uint32_t address, uint8_t value, bool merge) {
+bool ItemGrant::setByte(ByteWrite write) {
+    const uint32_t address = write.address;
     uint32_t word = 0;
     const uint32_t aligned = address & ~3U;
     const uint32_t shift = 24 - (8 * (address & 3U));
     if (!m_readWords(aligned, &word, 1)) {
         return false;
     }
-    if (!merge) {
+    if (!write.merge) {
         word &= ~(0xffU << shift);
     }
-    word |= uint32_t{value} << shift;
+    word |= uint32_t{write.value} << shift;
     return m_writeWords(aligned, &word, 1);
 }
 
@@ -69,12 +69,16 @@ bool ItemGrant::grant(const Request& request, std::string& refusal) {
         return false;
     }
     const Item& item = request.item;
-    bool written = setByte(saveInfo + kGotItems + item.slot, 1, true) &&
-                   setByte(saveInfo + kItems + item.slot, item.number, false) &&
-                   setByte(saveInfo + kSelectItem + request.button, item.slot, false);
+    bool written =
+        setByte({.address = saveInfo + kGotItems + item.slot, .value = 1, .merge = true}) &&
+        setByte({.address = saveInfo + kItems + item.slot, .value = item.number, .merge = false}) &&
+        setByte({.address = saveInfo + kSelectItem + request.button,
+                 .value = item.slot,
+                 .merge = false});
     if (written && item.count != 0) {
-        written = setByte(saveInfo + item.count, item.amount, false) &&
-                  setByte(saveInfo + item.maximum, item.amount, false);
+        written =
+            setByte({.address = saveInfo + item.count, .value = item.amount, .merge = false}) &&
+            setByte({.address = saveInfo + item.maximum, .value = item.amount, .merge = false});
     }
     if (!written) {
         refusal = "the save info did not write.\n";

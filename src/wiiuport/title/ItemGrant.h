@@ -74,7 +74,14 @@ class ItemGrant {
     bool grant(const Request& request, std::string& refusal);
 
   private:
-    bool setByte(uint32_t address, uint8_t value, bool merge);
+    // One byte of a big-endian word, written over or merged into what is there.
+    struct ByteWrite {
+        uint32_t address;
+        uint8_t value;
+        bool merge;
+    };
+
+    bool setByte(ByteWrite write);
 
     DrawInterpolation::ReadWords m_readWords;
     DrawInterpolation::WriteWords m_writeWords;
