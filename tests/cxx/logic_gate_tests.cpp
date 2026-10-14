@@ -53,6 +53,7 @@ GuestCallProbes::Probe* g_probe = nullptr;
 std::vector<std::pair<uint32_t, bool>> g_registrations;
 uint32_t g_resume = 0;
 uint32_t g_sceneResume = 0;
+uint32_t g_controllerResume = 0;
 
 void keepRegistration(uint32_t entry, uint32_t, GuestCallProbes::Probe& probe, bool holdsEntry,
                       uint32_t resume) {
@@ -63,6 +64,9 @@ void keepRegistration(uint32_t entry, uint32_t, GuestCallProbes::Probe& probe, b
     }
     if (entry == LogicGate::kSceneWork) {
         g_sceneResume = resume;
+    }
+    if (entry == LogicGate::kControllerCalc) {
+        g_controllerResume = resume;
     }
 }
 
@@ -105,6 +109,7 @@ LogicGate makeGate(FakeGuest& guest) {
     g_registrations.clear();
     g_resume = 0;
     g_sceneResume = 0;
+    g_controllerResume = 0;
     return LogicGate({.registerProbe = &keepRegistration,
                       .allocateCode = &allocateCode,
                       .allocateData = &allocateData,
@@ -119,6 +124,7 @@ LogicGate makeGate(FakeGuest& guest) {
 void linked() {
     g_probe->OnInstall(GuestCallProbes::Installation::Installed);
     g_fake->writeWord(LogicGate::kFrameLogicBody, LogicGate::kFrameLogicSecond);
+    g_fake->writeWord(LogicGate::kControllerCalcBody, LogicGate::kControllerCalcSecond);
 }
 
 // **Where the four counters live, in words.** Each is a named constant computed from another one,
@@ -128,6 +134,9 @@ void linked() {
 constexpr uint32_t kCallsAt = kCounters + 4 * LogicGate::kCallsWord;
 constexpr uint32_t kTicksAt = kCounters + 4 * LogicGate::kTicksWord;
 constexpr uint32_t kSkippingAt = kCounters + 4 * LogicGate::kSkippingWord;
+constexpr uint32_t kControllerAt = kBlock + 4 * LogicGate::kControllerGateWord;
+constexpr uint32_t kControllerPassThrough =
+    (18u << 26) | ((LogicGate::kControllerCalcBody - kControllerAt) & 0x03fffffcu);
 constexpr uint32_t kThroughAt = kBlock + 4 * LogicGate::kThroughWord;
 constexpr uint32_t kBranchAt = kBlock + 4 * LogicGate::kBranchWord;
 // The bare pass-through a freshly allocated gate block holds: a branch to the tick's own body, by
@@ -342,6 +351,34 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(at + 24 + (words[6] & 0x03fffffcu) == LogicGate::kSceneDrawLoop,
                       "and when set at its draw loop");
     }
+    // The controller calc runs once per tick: when the tick count moved since it last ran.
+    {
+        const auto words = LogicGate::controllerPayload({.code = kBlock, .counters = kCounters});
+        check::isTrue(words.size() == LogicGate::kControllerGateWords,
+                      "the controller gate is eleven words");
+        if (words.size() != LogicGate::kControllerGateWords) {
+            return;
+        }
+        check::isTrue(words[0] == (0x3d800000u | (kCounters >> 16)) &&
+                          words[1] == (0x618c0000u | (kCounters & 0xffffu)),
+                      "it names the counters: lis/ori r12");
+        check::isTrue(words[2] == (0x816c0000u | (4 * LogicGate::kTicksWord)),
+                      "reads the tick count: lwz r11,ticks(r12)");
+        check::isTrue(words[3] == (0x818c0000u | (4 * LogicGate::kControllerTicksWord)),
+                      "and the count the calc last ran at: lwz r12,seen(r12)");
+        check::isTrue(words[4] == 0x7c0b6040u, "compares them: cmplw r11,r12");
+        check::isTrue(words[5] == 0x41820014u && words[10] == 0x4e800020u,
+                      "and when equal returns to the caller without running: beq; blr");
+        check::isTrue(words[6] == words[0] && words[7] == words[1] &&
+                          words[8] == (0x916c0000u | (4 * LogicGate::kControllerTicksWord)),
+                      "otherwise records the tick: stw r11,seen(r12)");
+        check::isTrue(kControllerAt + 36 + (words[9] & 0x03fffffcu) ==
+                          LogicGate::kControllerCalcBody,
+                      "and continues at the calc's own second instruction");
+        check::isTrue(
+            LogicGate::controllerPayload({.code = 0x40000000, .counters = kCounters}).empty(),
+            "a controller gate too far from the calc is refused");
+    }
     // The pass-through control has to reach the same instruction the gate's own
     // through path does. The indirect flavour used to load the *block's* address,
     // which branches the payload to itself: a loop with no exit, measured as the
@@ -401,6 +438,12 @@ void wiiuport::tests::runLogicGateTests() {
                 g_sceneResume == kBlock + (4 * LogicGate::kSceneGateWord) &&
                 holdsEntry(LogicGate::kSceneWork),
             "the scene's draw is held at addi r3,r3,0x26a4 and resumes at the scene gate");
+        uint32_t controllerWord = 0;
+        check::isTrue(
+            g_controllerResume == kControllerAt && holdsEntry(LogicGate::kControllerCalc) &&
+                readWord(kControllerAt, controllerWord) && controllerWord == kControllerPassThrough,
+            "the controller calc is held, resumes at its gate, and runs every call "
+            "until the gate is in");
         uint32_t sceneWord = 0;
         check::isTrue(readWord(kBlock + (4 * LogicGate::kSceneGateWord), sceneWord) &&
                           sceneWord ==
@@ -423,6 +466,10 @@ void wiiuport::tests::runLogicGateTests() {
                       "the gate is ever enabled");
         uint32_t passThrough = kPassThroughAt;
         check::isTrue(gate.enable().empty(), "the gate installs");
+        check::isTrue(
+            readWord(kControllerAt, word) &&
+                word == LogicGate::controllerPayload({.code = kBlock, .counters = kCounters})[0],
+            "and with it the controller gate");
         check::isTrue(readWord(kBlock, word) && word != passThrough,
                       "and enabling it puts the counting payload there instead of the "
                       "pass-through");
@@ -444,6 +491,9 @@ void wiiuport::tests::runLogicGateTests() {
                           word ==
                               ((18u << 26) | ((LogicGate::kFrameLogicBody - kBlock) & 0x03fffffcu)),
                       "and the block is that control's one word");
+        check::isTrue(readWord(kControllerAt, word) && word == kControllerPassThrough,
+                      "with the controller calc running every call, since the control counts no "
+                      "ticks");
         check::isTrue(gate.enable(false, 2).empty(),
                       "and the gate can be reached again from the control without going out "
                       "first");
@@ -472,6 +522,8 @@ void wiiuport::tests::runLogicGateTests() {
         check::isTrue(readWord(LogicGate::kFrameLogicBody, word) &&
                           word == LogicGate::kFrameLogicSecond,
                       "with the tick's own second instruction still where it was");
+        check::isTrue(readWord(kControllerAt, word) && word == kControllerPassThrough,
+                      "and the controller calc runs every call again");
         check::isTrue(!gate.enabled(), "and the report says it is out");
         check::isTrue(gate.disable().empty(), "and disabling twice is not a refusal");
     }
@@ -487,6 +539,17 @@ void wiiuport::tests::runLogicGateTests() {
                           std::string::npos,
                       "a foreign frame logic is refused by name");
         check::isTrue(!gate.enabled(), "and nothing is installed");
+    }
+    // A controller calc that starts differently is refused by name.
+    {
+        FakeGuest guest;
+        LogicGate gate = makeGate(guest);
+        gate.install();
+        linked();
+        guest.writeWord(LogicGate::kControllerCalcBody, 0x60000000);
+        check::isTrue(gate.enable().find("the controller calc") != std::string::npos,
+                      "a foreign controller calc is refused by name");
+        check::isTrue(!gate.enabled(), "and the gate is not in");
     }
     // The counters are the report's measurement, so both words are named.
     {

@@ -179,6 +179,17 @@ Proof (`scratch/drawphase/menu_flow.py`, launched with no toggles): before, Cont
 took twelve A presses and stayed; after, it confirms on the next press and the flow reaches Outset,
 60.00 paints/s and 30.00 ticks/s in gameplay, with Link walking on the stick.
 
+### The controller calc runs once per tick
+
+The pads are read outside the frame logic: `game_procFrameBody` (`0x02034ffc`) runs the task tree,
+whose controller manager calc `FUN_0273cbd0` reads KPAD and VPAD (`0x0273d8ec`, `0x0273e3fc`) and
+turns each controller's hold into its presses. It ran on every paint while the logic ran on every
+other, so a press whose first held paint was a skipped one was gone before any logic saw it: on File
+Selection 7 of 12 cursor presses were dropped with the gate in and none with it out. The gate holds
+the calc too (`controllerPayload`): a call runs only when the tick count differs from the one it last
+ran at (`kControllerTicksWord`), so every tick sees one controller update, whichever runs first.
+With the gate in, 24 of 24 presses moved the cursor (`scratch/drawphase/menuloss.py`).
+
 ### A skipped call flips the shadow buffers
 
 The frame logic ends each call with `FUN_0278febc(shadowLayer + 0x15d4)` (`0x020359f0`, the layer

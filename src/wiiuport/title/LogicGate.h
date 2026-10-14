@@ -54,6 +54,15 @@ class LogicGate {
     static constexpr uint32_t kSceneDrawLoop = 0x025b0234;
     static constexpr size_t kSceneGateWord = kGateWords;
     static constexpr size_t kSceneGateWords = 7;
+    // The controller manager's calc (0x0273cbd0) reads the pads and turns holds into presses.
+    // It runs only when the logic has ticked since it last ran, so no press lands on a paint
+    // whose logic is skipped.
+    static constexpr uint32_t kControllerCalc = 0x0273cbd0;
+    static constexpr uint32_t kControllerCalcFirst = 0x7c0802a6;  // mfspr r0,LR
+    static constexpr uint32_t kControllerCalcSecond = 0x9421ffe8; // stwu r1,-0x18(r1)
+    static constexpr uint32_t kControllerCalcBody = kControllerCalc + 4;
+    static constexpr size_t kControllerGateWord = kSceneGateWord + kSceneGateWords;
+    static constexpr size_t kControllerGateWords = 11;
     // fpcM_Management's draw half: MtxInit, then fpcDw_Handler(fpcM_DrawIterater, fpcM_Draw).
     static constexpr uint32_t kMatrixInit = 0x0200fac4;
     static constexpr uint32_t kDrawHandler = 0x025de37c;
@@ -61,12 +70,14 @@ class LogicGate {
     static constexpr uint32_t kDrawProcess = 0x025de2cc;
     // The code block holds only the sixteen instructions; the two counters the
     // guest writes are in a block of their own, in memory it may write.
-    static constexpr size_t kBlockWords = kGateWords + kSceneGateWords;
+    static constexpr size_t kBlockWords = kGateWords + kSceneGateWords + kControllerGateWords;
     static constexpr size_t kCallsWord = 0;
     static constexpr size_t kTicksWord = 1;
     // Non-zero while a skipped call's draw phase runs.
     static constexpr size_t kSkippingWord = 2;
-    static constexpr size_t kCounterWords = 3;
+    // The tick count the controller calc last ran at.
+    static constexpr size_t kControllerTicksWord = 3;
+    static constexpr size_t kCounterWords = 4;
     // How many bytes the gate asks the loader's arena for, reported so a report
     // that says the counters are zero can be read against the space they are in.
     static constexpr uint32_t kBlockBytes = 4 * kBlockWords;
@@ -157,6 +168,10 @@ class LogicGate {
     // draw loop; otherwise at the instruction after kSceneWork. Empty when out of reach.
     static std::vector<uint32_t> scenePayload(Memory memory);
 
+    // The controller gate's words: the calc runs when the tick count differs from the one it last
+    // ran at, and otherwise returns. Empty when out of reach.
+    static std::vector<uint32_t> controllerPayload(Memory memory);
+
     std::string json() const;
 
   private:
@@ -166,6 +181,8 @@ class LogicGate {
     // frame logic's entry. True when the block took it. This is the gate's out state,
     // and it is why the block is never empty while a call can reach it.
     bool passThrough();
+    // The controller gate's out state: a branch to the calc's own body.
+    bool controllerPassThrough();
 
     Register m_register;
     AllocateCode m_allocateCode;
@@ -195,10 +212,12 @@ class LogicGate {
     // gate's block.
     class Counter;
     Counter* m_counter = nullptr;
-    // The standing probe in the scene's draw; its resume is the scene gate.
-    class SceneWork;
-    SceneWork* m_sceneWork = nullptr;
+    // A standing probe whose resume is one of the gate's own blocks.
+    class Held;
+    Held* m_sceneWork = nullptr;
+    Held* m_controllerCalc = nullptr;
     std::optional<GuestCallProbes::Installation> m_sceneProbe;
+    std::optional<GuestCallProbes::Installation> m_controllerProbe;
     std::optional<GuestCallProbes::Installation> m_counted;
     std::optional<GuestCallProbes::Installation> m_probe;
 };
