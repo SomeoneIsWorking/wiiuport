@@ -41,7 +41,7 @@ const char* const kRoutes =
     "/environment, "
     "GET /paint, GET /logic, GET /gate, "
     "POST /capture, POST /pacing, "
-    "POST /draws, POST /recordings, POST /paint, POST /logic, POST /interpolation, POST /warp, "
+    "POST /draws, POST /recordings, POST /paint, POST /logic, POST /interpolation, POST /warp, POST /item, "
     "POST /input "
     "and POST /quit";
 
@@ -146,7 +146,7 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_drawInterpolation(sources.drawInterpolation), m_cameraCuts(sources.cameraCuts),
       m_particleInterpolation(sources.particleInterpolation),
       m_seaInterpolation(sources.seaInterpolation),
-      m_materialInterpolation(sources.materialInterpolation), m_stageWarp(sources.stageWarp),
+      m_materialInterpolation(sources.materialInterpolation), m_stageWarp(sources.stageWarp), m_itemGrant(sources.itemGrant),
       m_environmentInterpolation(sources.environmentInterpolation), m_logic(sources.logic),
       m_controllerChoice(sources.controllerChoice), m_guestBytes(sources.guestBytes),
       m_snapshot(sources.snapshot), m_pacing(sources.pacing), m_scanOut(sources.scanOut),
@@ -569,6 +569,17 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
             return lucent::http::Response::text(409, "Conflict", refusal + "\n");
         }
         return lucent::http::Response::json(200, "OK", m_logic.json());
+    }
+    if (request.method == "POST" && request.path() == "/item") {
+        std::string refusal;
+        auto wanted = title::ItemGrant::parse(request.query(), refusal);
+        if (!wanted.has_value()) {
+            return lucent::http::Response::text(400, "Bad Request", refusal);
+        }
+        if (!m_itemGrant.grant(*wanted, refusal)) {
+            return lucent::http::Response::text(409, "Conflict", refusal);
+        }
+        return lucent::http::Response::text(200, "OK", "item given.\n");
     }
     if (request.method == "POST" && request.path() == "/warp") {
         std::string refusal;

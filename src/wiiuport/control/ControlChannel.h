@@ -16,6 +16,7 @@
 #include "wiiuport/title/CameraCuts.h"
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/EnvironmentInterpolation.h"
+#include "wiiuport/title/ItemGrant.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/MaterialInterpolation.h"
 #include "wiiuport/title/ParticleInterpolation.h"
@@ -78,6 +79,7 @@ class ControlChannel {
         const title::SeaInterpolation& seaInterpolation;
         const title::MaterialInterpolation& materialInterpolation;
         title::StageWarp& stageWarp;
+        title::ItemGrant& itemGrant;
         const title::EnvironmentInterpolation& environmentInterpolation;
         title::LogicGate& logic;
         const title::ProControllerChoice& controllerChoice;
@@ -208,6 +210,7 @@ class ControlChannel {
     const title::SeaInterpolation& m_seaInterpolation;
     const title::MaterialInterpolation& m_materialInterpolation;
     title::StageWarp& m_stageWarp;
+    title::ItemGrant& m_itemGrant;
     const title::EnvironmentInterpolation& m_environmentInterpolation;
     title::LogicGate& m_logic;
     const title::ProControllerChoice& m_controllerChoice;

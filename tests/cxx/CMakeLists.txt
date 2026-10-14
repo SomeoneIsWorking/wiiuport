@@ -10,6 +10,7 @@ add_executable(wiiuport_tests
   material_interpolation_tests.cpp
   particle_interpolation_tests.cpp
   sea_interpolation_tests.cpp
+  item_grant_tests.cpp
   stage_warp_tests.cpp
   sixty_hertz_tests.cpp
   guest_call_probe_tests.cpp
