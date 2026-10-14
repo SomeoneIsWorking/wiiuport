@@ -716,8 +716,8 @@ walked, draws issued -- and what the recorder took from the guest's own frames. 
 paint mod's own state, its mode, whether the stand-in is installed, the swap interval asked for, the
 pacing that took, and its paint count. `GET /logic` reports the gate's own counters, read from guest
 memory. `GET /draws` the per-vertex-shader census of draws
-whose vertex bytes the title rewrote; `GET /pacing` the intervals between displayed frames with p50, p95,
-p99 and longest. `POST /recordings?frames=K` keeps the next K frames' assemblies and `GET /recordings`
+whose vertex bytes the title rewrote; `GET /pacing` the intervals between presents and between scan-outs
+with p50, p95, p99 and longest, and `POST /pacing` restarts both windows. `POST /recordings?frames=K` keeps the next K frames' assemblies and `GET /recordings`
 returns them, for offline questions the counters cannot answer.
 
 The channel's route table is asserted against its own dispatch, and a route that was deleted is asserted

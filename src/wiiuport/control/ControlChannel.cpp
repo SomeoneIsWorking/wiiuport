@@ -31,15 +31,13 @@ namespace {
 // recorded and read back, the paint path, the logic gate, the data-area pose scan, and the input
 // and pacing an agent needs to drive a run.
 //
-// A route that keeps a name keeps an answer, so `/pacing` is still here and answers with the
-// pacing's own summary rather than with the interpolated frame's counts.
 const char* const kRoutes =
     "GET /counters, GET /capture, "
     "GET /controllers, GET /controller-choice, GET /setup, "
     "GET /recordings, GET /draws, GET /memory, GET /callers, "
     "GET /interpolation, GET /camera-cuts, GET /particles, GET /sea, GET /materials, GET "
     "/environment, "
-    "GET /paint, GET /logic, GET /gate, "
+    "GET /paint, GET /logic, GET /gate, GET /pacing, "
     "POST /capture, POST /pacing, "
     "POST /draws, POST /recordings, POST /paint, POST /logic, POST /interpolation, POST /warp, "
     "POST /item, "
@@ -242,7 +240,8 @@ std::string ControlChannel::countersJson() const {
 }
 
 std::string ControlChannel::pacingJson() const {
-    return control::pacingJson(m_pacing.summary());
+    return "{\"present\":" + control::pacingJson(m_pacing.summary()) +
+           ",\"scanOut\":" + control::pacingJson(m_scanOut.summary()) + "}\n";
 }
 
 std::string ControlChannel::framesJson() const {
@@ -678,6 +677,9 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
     }
     if (request.path() == "/counters") {
         return lucent::http::Response::json(200, "OK", countersJson());
+    }
+    if (request.path() == "/pacing") {
+        return lucent::http::Response::json(200, "OK", pacingJson());
     }
     if (request.path() == "/capture") {
         size_t slot = requestedSlot(std::string(request.query()));
