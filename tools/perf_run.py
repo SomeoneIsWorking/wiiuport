@@ -14,7 +14,8 @@ import sys
 import time
 from pathlib import Path
 
-from wiiuport.drive import press, send_input
+from wiiuport.drive import send_input
+from wiiuport.gameplay import press_into_world
 from wiiuport.headless import Display, HeadlessSession
 from wiiuport.paths import find_layout
 from wiiuport.perf import Percentiles, Window
@@ -30,14 +31,6 @@ from wiiuport.control import (
     wait_game_frames,
 )
 from wiiuport.title import TitleUnavailable, resolve_game, resolve_keys, resolve_save
-
-START_STAGE = 0x1046F0B0 + 0x5134
-FRONT_END = {"", "sea_T", "Name", "ENDumi"}
-
-
-def stage(port: int) -> str:
-    raw = request_bytes("GET", f"/memory?address={START_STAGE:#x}&size=8", port, 5)
-    return raw.split(b"\0")[0].decode("latin-1")
 
 
 def cpu_name() -> str:
@@ -80,13 +73,8 @@ def main(argv: list[str] | None = None) -> int:
             print("refused: the control channel never answered.", file=sys.stderr)
             return 1
         try:
-            for _ in range(60):
-                press("a", port=args.port)
-                wait_game_frames(60, port=args.port)
-                if stage(args.port) not in FRONT_END:
-                    break
-            else:
-                print(f"refused: still in the front end at {stage(args.port)!r}.", file=sys.stderr)
+            if press_into_world(args.port) is None:
+                print("refused: the title never left its front end.", file=sys.stderr)
                 return 1
             wait_game_frames(300, port=args.port)
             send_input(port=args.port, leftx=0.7, lefty=0.7, rightx=1.0)

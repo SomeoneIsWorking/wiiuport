@@ -160,6 +160,8 @@ if(TARGET CemuCafe)
     shell/GlyphPacks.h
     shell/HostPaths.cpp
     shell/HostPaths.h
+    shell/PadRoster.cpp
+    shell/PadRoster.h
     shell/ProductCommandLine.cpp
     shell/ProductCommandLine.h
     shell/RunProduct.cpp

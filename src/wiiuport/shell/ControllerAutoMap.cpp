@@ -1,5 +1,7 @@
 #include "wiiuport/shell/ControllerAutoMap.h"
 
+#include "wiiuport/shell/PadRoster.h"
+
 #include "input/InputManager.h"
 #include "input/api/Controller.h"
 #include "input/api/SDL/SDLControllerProvider.h"
@@ -7,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <utility>
 
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_gamepad.h>
@@ -85,18 +88,28 @@ void ControllerAutoMap::reconcile() {
 
     auto emulated = InputManager::instance().get_wpad_controller(kPlayerIndex);
     if (emulated) {
-        for (const auto& attached : emulated->get_controllers()) {
-            bool stillPresent =
-                std::any_of(controllers.begin(), controllers.end(),
-                            [&attached](const std::shared_ptr<ControllerBase>& candidate) {
-                                return candidate->uuid() == attached->uuid();
-                            });
-            if (stillPresent) {
-                // What the player is holding is still what is mapped.
-                return;
+        std::vector<std::string> present;
+        present.reserve(controllers.size());
+        for (const auto& controller : controllers) {
+            present.push_back(controller->uuid());
+        }
+        const std::vector<std::shared_ptr<ControllerBase>> mappedPads = emulated->get_controllers();
+        std::vector<std::string> mapped;
+        mapped.reserve(mappedPads.size());
+        for (const auto& pad : mappedPads) {
+            mapped.push_back(pad->uuid());
+        }
+        const PadRoster::Change change = PadRoster(std::move(mapped)).against(present);
+        for (const auto& pad : mappedPads) {
+            if (std::find(change.lost.begin(), change.lost.end(), pad->uuid()) !=
+                change.lost.end()) {
+                emulated->remove_controller(pad);
+                ++m_devicesLost;
+                lucent::info("input", "{} was unplugged", pad->display_name());
             }
-            ++m_devicesLost;
-            lucent::info("input", "{} was unplugged", attached->display_name());
+        }
+        if (change.keep) {
+            return;
         }
     }
     m_attachedDevice.clear();

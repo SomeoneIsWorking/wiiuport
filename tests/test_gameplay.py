@@ -9,20 +9,37 @@ from wiiuport import gameplay
 def pressed(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     buttons: list[str] = []
     monkeypatch.setattr(gameplay, "press", lambda button, port: buttons.append(button))
-    monkeypatch.setattr(gameplay, "release", lambda port: buttons.append("release"))
     return buttons
 
 
-def test_alternates_a_and_plus_then_backs_out_of_a_pause(pressed: list[str]) -> None:
-    made = gameplay.press_into_world(1, presses=3, interval=0, sleep=lambda _s: None)
-    assert made == 3
-    assert pressed == ["a", "plus", "a", "release", "b"]
+def _no_wait(_frames: int, _port: int) -> None:
+    pass
 
 
-def test_a_runtime_that_exited_stops_the_presses_and_says_how_many(pressed: list[str]) -> None:
-    alive = iter([True, True, False])
-    made = gameplay.press_into_world(
-        1, presses=5, interval=0, still_running=lambda: next(alive), sleep=lambda _s: None
+def test_presses_a_until_the_stage_leaves_the_front_end(pressed: list[str]) -> None:
+    stages = iter(["", "sea_T", "sea_T", "sea"])
+    reached = gameplay.press_into_world(
+        1, read_stage=lambda _port: next(stages), wait_frames=_no_wait
     )
-    assert made == 2
-    assert pressed == ["a", "plus"]
+    assert reached == "sea"
+    assert pressed == ["a", "a", "a", "a"]
+
+
+def test_name_entry_is_still_the_front_end(pressed: list[str]) -> None:
+    reached = gameplay.press_into_world(
+        1, presses=3, read_stage=lambda _port: "Name", wait_frames=_no_wait
+    )
+    assert reached is None
+    assert pressed == ["a", "a", "a"]
+
+
+def test_a_runtime_that_exited_stops_the_presses(pressed: list[str]) -> None:
+    alive = iter([True, False])
+    reached = gameplay.press_into_world(
+        1,
+        still_running=lambda: next(alive),
+        read_stage=lambda _port: "",
+        wait_frames=_no_wait,
+    )
+    assert reached is None
+    assert pressed == ["a"]

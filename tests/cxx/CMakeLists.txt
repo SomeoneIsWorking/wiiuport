@@ -12,6 +12,7 @@ add_executable(wiiuport_tests
   sea_interpolation_tests.cpp
   item_grant_tests.cpp
   quest_log_names_tests.cpp
+  pad_roster_tests.cpp
   content_tests.cpp
   xbox_glyphs_tests.cpp
   stage_warp_tests.cpp
@@ -30,5 +31,6 @@ add_executable(wiiuport_tests
   ../../src/wiiuport/shell/TitleIdentity.cpp
   ../../src/wiiuport/shell/TitleSelection.cpp
   ../../src/wiiuport/shell/ProductCommandLine.cpp
+  ../../src/wiiuport/shell/PadRoster.cpp
 )
 target_link_libraries(wiiuport_tests PRIVATE wiiuport::wiiuport)
