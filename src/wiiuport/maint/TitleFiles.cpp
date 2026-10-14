@@ -15,7 +15,6 @@
 
 #include <lucent/log.h>
 
-#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -93,10 +92,5 @@ int run(int argc, char** argv) {
 } // namespace wiiuport::maint
 
 int main(int argc, char* argv[]) {
-    try {
-        return wiiuport::maint::run(argc, argv);
-    } catch (const std::exception& failure) {
-        lucent::error("titlefiles", "stopped: {}", failure.what());
-        return 1;
-    }
+    return wiiuport::maint::run(argc, argv);
 }
