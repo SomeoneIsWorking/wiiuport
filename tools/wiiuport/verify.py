@@ -10,6 +10,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .cxxpolicy import PolicyUnavailable, check_policy
 from .cxxtests import CxxTestsUnavailable, build_and_run
 from .cxxtidy import TidyUnavailable, check_tidy
 from .lockedtools import LOCKED_BIN, LockedToolMissing, locked_tool
@@ -207,6 +208,17 @@ def gate_cxx_tidy(layout: Layout) -> GateResult:
     return GateResult("c++ lint (clang-tidy)", report.passed, report.units, detail)
 
 
+def gate_cxx_policy(layout: Layout) -> GateResult:
+    """The shared ownership rules clang-tidy cannot express, and the clang config audit."""
+    try:
+        report = check_policy(layout)
+    except PolicyUnavailable as unavailable:
+        return GateResult("c++ ownership (cpp_policy)", False, 0, str(unavailable))
+    return GateResult(
+        "c++ ownership (cpp_policy)", report.passed, report.units, "\n".join(report.findings)
+    )
+
+
 GATES = (
     gate_python_lint,
     gate_python_format,
@@ -218,6 +230,7 @@ GATES = (
     # warm developer machine passes on a database CI does not have yet.
     gate_cxx_tests,
     gate_cxx_tidy,
+    gate_cxx_policy,
     gate_structure,
 )
 

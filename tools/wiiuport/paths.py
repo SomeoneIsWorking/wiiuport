@@ -39,6 +39,11 @@ class Layout:
         return self.build / "cemu"
 
     @property
+    def re_harness_checkouts(self) -> tuple[Path, ...]:
+        """Where the shared re-harness checkout may be: CI's, then the workspace's."""
+        return (self.build / "re-harness", self.root.parent.parent / "shared" / "re-harness")
+
+    @property
     def release(self) -> Path:
         """The release build's own tree, mounted in its container at ``/build``."""
         return self.build / "release"
