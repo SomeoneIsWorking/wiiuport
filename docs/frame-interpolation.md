@@ -472,8 +472,9 @@ exactly on in-between paints (`0, 21742, 0, 19169` pixels changed; `133` and `83
 doubled particles).
 
 Draw methods that still advance state, from the decomp (874 draw functions scanned): Puppet Ganon's
-smoothing (`d_a_bgn`), fireflies (`d_a_ff`), the grappling rope (`d_a_himo2`) and Jabun's cave
-flash timer (`d_a_obj_ajav`). On the in-between paint these run a second time per tick. The Z-target
+smoothing (`d_a_bgn`), fireflies (`d_a_ff`), the grappling rope (`d_a_himo2`, held by
+`title/RopeInterpolation`, below) and Jabun's cave flash timer (`d_a_obj_ajav`). On the in-between
+paint these run a second time per tick. The Z-target
 cursor is not one: TWW plays its morf in `dAttention_c::runDrawProc`, called from `Run` in
 `dScnPly_Execute`, and `Draw` only copies the morf's frame to the colour animation. Material
 animations played in an actor's draw (two a tick on Outset) are held to one step a tick by
@@ -566,6 +567,17 @@ corner and every height to the midpoint of the last two ticks', unless the corne
 (a warp), and puts the counter back afterwards so it steps once a tick. Measured: 120 steps over 120
 gated ticks, every hold restored. The grid blend is covered by `tests/cxx/sea_interpolation_tests.cpp`
 only: the test save's sea is culled where Link stands, so it has not yet been seen live.
+
+**The grappling rope.** `daHimo2_c` (process 446, profile `0x101b6e7c`) places the rope in execute
+(`0x0216e194`): hand `+0x408`, hook `+0x414`, rope end `+0x3d0`, and 98 segments from `+0x450`, stride
+`0x24`, position at `+0x10`, live from the index at `+0x3e8`. Its draw (`0x0216ca5c`) builds the line
+from them, so both draw phases of a tick drew the same rope: consecutive presents in the hook's flight
+changed `0.007, 0.027, 0.005, 0.023` RMSE in turn (30 Hz: `0.069, 0.069, 0.070, 0.080`). The draw also
+eases its sway (`+0x21d8`..`+0x21ff`, tilt `+0x2388`) toward the hook's movement since its last draw.
+`title/RopeInterpolation` sets the hand, hook, end and every segment both ticks paid out to their
+midpoint for the gated draw phase and puts the sway back after it, so the skipped call's draw eases
+it once a tick with the full tick's movement. Measured (`scratch/drawphase/pauses.py`, Hyrule, hook
+on X): 128 blends over 129 rope draws, every write restored, presents changed `0.023, 0.021, 0.020`.
 
 **Sea waves and sky clouds.** The weather effects move them in execute (`dKyeff_c::execute`'s
 `wave_move`, `dKyeff2_c::execute`'s `vrkumo_move`) and the paint draws them from two packets the

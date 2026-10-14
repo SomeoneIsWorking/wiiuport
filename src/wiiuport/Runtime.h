@@ -20,6 +20,7 @@
 #include "wiiuport/title/MaterialInterpolation.h"
 #include "wiiuport/title/ParticleInterpolation.h"
 #include "wiiuport/title/ProControllerChoice.h"
+#include "wiiuport/title/RopeInterpolation.h"
 #include "wiiuport/title/SeaInterpolation.h"
 #include "wiiuport/title/SixtyHertz.h"
 #include "wiiuport/title/StageWarp.h"
@@ -132,6 +133,8 @@ class Runtime {
         {.registerProbe = &GuestCallProbes::Register,
          .readWords = &GuestPatching::ReadWords,
          .writeWords = &GuestPatching::WriteDataWords}};
+    title::RopeInterpolation m_ropeInterpolation{
+        {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
     title::SeaInterpolation m_seaInterpolation{
         {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
     title::CameraCuts m_cameraCuts{
@@ -149,7 +152,7 @@ class Runtime {
                  return m_cameraCuts.startsShot(camera);
              },
          .midPaint = {&m_particleInterpolation, &m_environmentInterpolation},
-         .drawPhase = {&m_seaInterpolation, &m_materialInterpolation}}};
+         .drawPhase = {&m_seaInterpolation, &m_ropeInterpolation, &m_materialInterpolation}}};
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
     frame::PresentPacing m_scanOut{&frame::PresentPacing::Clock::now};
@@ -166,6 +169,7 @@ class Runtime {
         .cameraCuts = m_cameraCuts,
         .particleInterpolation = m_particleInterpolation,
         .seaInterpolation = m_seaInterpolation,
+        .ropeInterpolation = m_ropeInterpolation,
         .materialInterpolation = m_materialInterpolation,
         .stageWarp = m_stageWarp,
         .itemGrant = m_itemGrant,

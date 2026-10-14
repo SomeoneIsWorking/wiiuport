@@ -15,6 +15,7 @@ void runCameraCutsTests();
 void runDrawInterpolationTests();
 void runParticleInterpolationTests();
 void runSeaInterpolationTests();
+void runRopeInterpolationTests();
 void runEnvironmentInterpolationTests();
 void runMaterialInterpolationTests();
 void runStageWarpTests();
