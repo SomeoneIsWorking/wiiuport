@@ -49,37 +49,22 @@ eleven-word stand-in into executable guest memory obtained from
 thread's loop at `0x0274c00c` -- eleven instructions, no callers, no callees, never returning -- then
 branches to the stand-in where it would have branched to the frame.
 
-**The eleven words are lifted verbatim from this image**, not hand-derived:
-`819f0024 800c00cc 7c0903a6 7fe3fb78 4e800421 4e800421 4e800020`, as `kDisplayFrameFirst` and the
-loop's own dispatch words beside it. The *forms* of the two address words are lifted too -- `lis` and
-`ori` -- with the immediates being the address the mod read out of the slot before rewriting it, and
-the two address words are checked by **reconstructing** the frame from them rather than by asserting
-two constants.
+**The stand-in is the display loop's own dispatch at `0x0274c020`, twice**, with the vtable load
+replaced by the frame as a literal: `lis r0,0x0274; ori r0,r0,0xc264; mtspr CTR,r0; or r3,r31,r31;
+bctrl` (`3c000274 6000c264 7c0903a6 7fe3fb78 4e800421`), twice, then a `b` back to the loop top whose
+displacement is computed from where the block lands. The last three words of each group are the
+loop's own; the `lis`/`ori` forms are the image's, with the frame as their immediates. Re-reading slot
+`0xcc` instead would call the stand-in itself, and the test checks no word loads displacement `0xcc`.
 
 `display+0x50` is set to 1: the field the title's single `GX2SetSwapInterval` call at `0x0274bafc`
 passes, and the same field `0x0274c874` tests afterwards to decide whether to wait for the flip.
 
-### Which stand-in, and what the modes are for
+### Retired stand-ins
 
-The mode number is the product's own mapping, so a run names what it did. The thirteen modes are
-each a *different claim*, and the ones that fault are kept for the same reason the falsifier is
-kept: a run that paints is not evidence that a run that does not was the right shape.
-
-| mode | name | what it claims |
-|---|---|---|
-| 1 | `PassThrough` | The redirect alone changes nothing; a run where this does not hold the title's rate says the redirect is at fault, not the second paint. |
-| 2 | `Twice` | Two paints, the title's own two vblanks a flip. |
-| 3 | `TwiceAtSixty` | Two paints, one vblank a flip. |
-| 4 | `IndirectOnce` | Re-reads the frame from the vtable through the count register. **Does not run**, and is kept because it is the falsifier for that choice: same block, same words, same one rewritten word of vtable, and the only difference from mode 1 is `mtctr`/`bctr` against `b`. |
-| 5 | `IntervalField` | Not a paint count at all: the interval field alone, nothing else changed. |
-| 6 | `OneAtSixty` | One paint, one vblank a flip, reached by a plain branch so the frame's return goes to the title's loop. The rate the mechanism is for: the flip paces the loop, so one vblank a flip is what doubles the picture, and the second paint is what carries the blend. |
-| 7 | `BranchEntry` | The control for *how* a stand-in is reached: a direct branch at the frame's entry rather than an indirect call through the vtable. A falsifier with a known-good control in the same mechanism -- payload, interval and rate unchanged, the only difference the kind of branch. |
-| 8 | `TailTwiceAtSixty` | Two paints where only the *first* is a call; the second is a tail branch, so the frame's return goes to the title's own loop and the payload never sets the link register. Separates "the frame is not re-entrant" from "the second `bl`'s link register is the problem", and is the more faithful shape. |
-| 9 | `RestoreDisplayTwice` | Two paints, with a field the first paint's path changes saved before it and put back before the second, so both paints run the path the first one chose. **Every word is the frame's own, verbatim.** |
-| 10 | `SamePhaseTwice` | Two paints at the same phase of the flip. |
-| 11 | `ObjectivePayload` | The objective's own eleven words, as written. |
-| 12 | `LoopDispatchTwice` | The loop's own dispatch, reached twice, with the frame re-read from the vtable. |
-| 13 | `LoopFrameLiteralTwice` | The same dispatch with the frame carried as a **literal** in the payload. **This is the one that paints at sixty.** |
+Twelve other shapes were run and deleted: one paint, two `bl` calls at the frame, a tail-branched
+second paint, a frame re-read through CTR, the dispatch re-reading slot `0xcc`, and others. The `bl`
+shapes faulted because the frame treats `r3` as scratch and the second call entered without the
+display; the loop rebuilds it from `r31` before every dispatch, which is why the stand-in does too.
 
 ### The interval field alone does not open the gate, and that is measured
 
@@ -97,8 +82,8 @@ Adjacent 8.00 s windows on the real disc, through the control channel, in one dr
 ```
 unmodded, first window:                    240 paints = 30.00/s
 unmodded, second window:                   241 paints = 30.12/s
-mode 13, first window:                     480 paints = 59.99/s
-mode 13, second window:                    478 paints = 59.73/s
+stand-in, first window:                    480 paints = 59.99/s
+stand-in, second window:                   478 paints = 59.73/s
 ```
 
 **The loop's pass sets the rate, and the stand-in adds a paint inside a pass rather than a pass.**
@@ -143,8 +128,8 @@ logic path and re-measure.* **It doubled.** With the probe refusal gone (below),
 | window | paints | paint rate | tick calls | call rate | ticks run | tick rate |
 |---|---|---|---|---|---|---|
 | unmodded | 241 | 30.12/s | 241 | 30.12/s | 120 | 15.00/s |
-| mode 13, first | 474 | 59.24/s | 474 | 59.24/s | 237 | 29.62/s |
-| mode 13, second | 480 | 59.99/s | 480 | 59.99/s | 240 | **30.00/s** |
+| stand-in, first | 474 | 59.24/s | 474 | 59.24/s | 237 | 29.62/s |
+| stand-in, second | 480 | 59.99/s | 480 | 59.99/s | 240 | **30.00/s** |
 
 Two instruments, one number, and the gate's counter is read straight out of guest memory rather than
 from its own report: 90 calls in 3.0 s on the host probe and 90 on the gate's own guest counter, and 45
@@ -205,8 +190,8 @@ no symptom is traced to it.
 
 ### On by default
 
-`title::SixtyHertz` switches both halves in once the display has painted: the stand-in in
-`LoopFrameLiteralTwice`, then the gate. Neither runs without the other; a gate that refuses takes
+`title::SixtyHertz` switches both halves in once the display has painted: the stand-in, then the
+gate. Neither runs without the other; a gate that refuses takes
 the stand-in back out, and the outcome is logged on the `sixty` channel.
 
 ## The null case is a discriminator, not a uniformity
@@ -240,8 +225,8 @@ each is recorded because the failure mode is the reusable part.
 
 ### 1. A reservation of seven words against an eleven-word payload
 
-`kMaxWords = 7` was the size of the block the mod reserves from the loader's arena, and modes 12 and 13
-need eleven. **The write path had no bound against the reservation**, and the arena is a bump allocator
+`kMaxWords = 7` was the size of the block the mod reserves from the loader's arena, and the stand-in
+needs eleven. **The write path had no bound against the reservation**, and the arena is a bump allocator
 shared with every other module, so a payload that outgrows its reservation does not fail -- it writes
 over whatever module asked for memory next. Measured, in one run, from the harness's own report:
 
@@ -252,21 +237,12 @@ logic gate's block  0x00e0589c      inside it, at the stand-in's seventh word
 
 The gate's counter stub landed in the stand-in's **second** call, so the stand-in's second paint ran
 the gate's pass-through code and branched to the tick instead of painting. The run that produced this
-reported `mode 13 with the gate halving: 480 paints in 8.00s = 59.99/s; 0 tick calls and 0 ticks run`
+reported `the stand-in with the gate halving: 480 paints in 8.00s = 59.99/s; 0 tick calls and 0 ticks run`
 -- **and the sixty was one paint and half a gate.** A rate measured with the second paint calling into
 someone else's stub is not a rate.
 
-The fix is at the cause, in two parts and one owner. `payload()` now refuses a payload that does not
-fit, beside the refusal it already gives a branch that cannot reach -- a stand-in that cannot be built
-correctly must not be built. And `paint_tests.cpp` enumerates every mode and asserts each one's payload
-fits, so a mode added later that outgrows the reservation fails the build rather than a display thread
-that may not survive the arming. The reservation is renamed `kReservedWords`, because a reservation and
-a description of the largest payload are different numbers and only the first is true.
-
-**The test has been shown the other answer.** With the reservation put back to seven, the same binary
-fails `mode 12 (loopDispatchTwice) is built where the loop is in reach`, `mode 13` likewise, and
-reports `9 failures`; with it at eleven, `0 failures`. An instrument that has only ever agreed is not
-evidence.
+The fix is at the cause: `kReservedWords` is derived from the payload's own shape (two dispatch
+groups and the branch back), so the reservation and the payload cannot disagree.
 
 ### 2. A probe refusal that silenced every instrument with a frame
 
@@ -403,7 +379,7 @@ commit about 0.3 MB per tick; view blocks are about 100 KB of it.
 
 A blend of key 1 per context, holding the tick's own upload and writing the midpoint at the
 register file on the in-between paint, paired different panes' model-views: on in-between paints
-the hearts moved and HUD fragments were drawn in the world (`POST /paint` mode 13, gate on,
+the hearts moved and HUD fragments were drawn in the world (`POST /paint`, gate on,
 walking). It was deleted with the fork's `OnAluConstants` hook. Key 1 was never the camera; a pane
 blend would key on the pane at `LoadMtx`.
 
@@ -518,7 +494,7 @@ each camera's eye, center, up, fovy and bank, and each executed actor's `current
 and `shape_angle` (from the previous tick's draw), at their midpoints; AfterOfDraw puts the tick's
 own values back. The skipped call's draw phase draws them as they are.
 
-**Measured** (`scratch/drawphase/pan.py`, gameplay, mode 13, gate on, right stick held, 5
+**Measured** (`scratch/drawphase/pan.py`, gameplay, stand-in on, gate on, right stick held, 5
 consecutive presents per arm): the image's horizontal shift between presents was `0, -124, 0, -124`
 px with interpolation off and `-64, -64, -60, -60` with it on. Counters over the run: 117 camera
 blends of 118 ticks (1 first sight), 17,278 actor blends, 2,074 actors not executed, 0 unblendable,
@@ -571,7 +547,7 @@ emitter's calc in the same `calc3D`: axis, scale out, x and y, alpha out, prm an
 each byte halfway) and the rotation angle (u16 `+0xc0`, the short way round; HD's `calcParticle`
 `0x0282dcbc` adds the speed at `+0xc2` to it). Walk, with them: 293 blends, 0 unblendable.
 
-**Measured** (gameplay, mode 13, gate on): Link idle, whole-frame pixels changed between presents, off
+**Measured** (gameplay, stand-in on, gate on): Link idle, whole-frame pixels changed between presents, off
 `0, 11259, 0, 10271`, on `8098, 9191, 7783, 9386`. Walk: 316 particle blends over 313 ticks, 17 first
 seen, 18 reused slots, 0 unblendable, unreadable or failed writes, every write restored.
 
@@ -713,7 +689,7 @@ is renderer-independent in principle, but the hooks that observe a frame's end a
 
 `GET /counters` reports how far each runtime submission got -- submissions, packets the command processor
 walked, draws issued -- and what the recorder took from the guest's own frames. `GET /paint` reports the
-paint mod's own state, its mode, whether the stand-in is installed, the swap interval asked for, the
+paint mod's own state, whether the stand-in is installed, the swap interval asked for, the
 pacing that took, and its paint count. `GET /logic` reports the gate's own counters, read from guest
 memory. `GET /draws` the per-vertex-shader census of draws
 whose vertex bytes the title rewrote; `GET /pacing` the intervals between presents and between scan-outs

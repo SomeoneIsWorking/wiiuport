@@ -108,8 +108,7 @@ class Runtime {
     // The shipping configuration: the loop's dispatch painted twice, the logic held at thirty.
     title::SixtyHertz m_sixty{{.enablePaint =
                                    [this] {
-                                       return m_paint.enable(
-                                           title::WindWakerPaint::Mode::LoopFrameLiteralTwice);
+                                       return m_paint.enable();
                                    },
                                .disablePaint =
                                    [this] {

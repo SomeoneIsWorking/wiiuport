@@ -97,7 +97,7 @@ def measure(
         on = name == "on"
         try:
             if args.arm in ("both", "paint"):
-                set_paint(on, port=args.port, mode=args.mode)
+                set_paint(on, port=args.port)
             if args.arm in ("both", "gate"):
                 set_gate(on, port=args.port, through=args.through, flavour=args.flavour)
         except ControlUnavailable as unavailable:
@@ -168,13 +168,6 @@ def main(argv: list[str] | None = None) -> int:
         help="measure the presentation rate instead of only surviving: arm the paint "
         "stand-in and the logic gate, read both rates over alternating off and on "
         "windows, and report the counts each rate came from",
-    )
-    parser.add_argument(
-        "--mode",
-        type=int,
-        default=6,
-        help="which stand-in to install: 1 paints once, 2 twice, 3 twice at two vblanks a "
-        "flip, 6 twice at one",
     )
     parser.add_argument(
         "--through",

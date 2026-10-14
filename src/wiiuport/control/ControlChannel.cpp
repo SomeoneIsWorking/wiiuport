@@ -491,10 +491,14 @@ std::string_view ControlChannel::routeList() {
 // in a run that needs the route -- nine minutes in, with the title pressed
 // through a menu. Here it is asked about every route it advertises, by name.
 lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& request) {
-    // Arming is a deliberate one-shot: the next frame to end is
-    // replayed, and nothing after it. A replay that repeated every
-    // frame would make a crash impossible to attribute.
     if (request.method == "POST" && request.path() == "/paint") {
+        std::string_view rest = request.query();
+        while (auto parameter = nextParameter(rest)) {
+            if (parameter->key != "on") {
+                return lucent::http::Response::text(
+                    400, "Bad Request", "unknown parameter " + std::string(parameter->key) + ".\n");
+            }
+        }
         if (!requestedFlag(std::string(request.query()), "on", true)) {
             std::string refusal = m_paint.disable();
             if (!refusal.empty()) {
@@ -502,21 +506,7 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
             }
             return lucent::http::Response::json(200, "OK", m_paint.json());
         }
-        // **The cast is stated, because `requestedCount` counts and a count is a `size_t`.** It was
-        // narrowed into the signed type `modeFrom` takes without a word, which is a conversion fine
-        // for every count a title can make and a defect in the reader.
-        const auto asked =
-            static_cast<long long>(requestedCount(std::string(request.query()), "mode", 3));
-        const std::optional<title::WindWakerPaint::Mode> mode =
-            title::WindWakerPaint::modeFrom(asked);
-        if (!mode.has_value()) {
-            return lucent::http::Response::text(
-                400, "Bad Request",
-                "mode " + std::to_string(asked) +
-                    " is not 1 (paint once), "
-                    "2 (paint twice) or 3 (paint twice at one vblank a flip)\n");
-        }
-        std::string refusal = m_paint.enable(*mode);
+        std::string refusal = m_paint.enable();
         if (!refusal.empty()) {
             return lucent::http::Response::text(409, "Conflict", refusal + "\n");
         }

@@ -1,6 +1,6 @@
 # ISSUE-010 — Switching the paint mode while armed segfaults
 
-**State:** open. **Affects:** ST-CONTROL, `title::WindWakerPaint::enable`.
+**State:** fixed. **Affects:** ST-CONTROL, `title::WindWakerPaint::enable`.
 
 **Reproduction.** Boot with the save, reach play, then `POST /paint?on=1&mode=3` while mode 13
 (`loopFrameLiteralTwice`, the default) is armed. The log shows the slot put back, `twiceAtSixty`
@@ -12,6 +12,12 @@ probe's lock only proves the display thread is not inside the probe; the stand-i
 twice, so between the calls the thread is in the block being rewritten, and its recompiled function
 is deleted under it.
 
-**Fix to make.** On a mode change, put the slot back and write the new block only after a paint has
-gone through the title's own frame, or write the new block elsewhere and switch the slot.
-Switching off and on in the same mode does not hit it (measured: four alternating windows).
+**Since the modes were deleted** there is one stand-in and `POST /paint` takes no `mode`, so the
+mode switch above can no longer be requested. `enable()` still rewrites every word of the block on each
+off-to-on (`WindWakerPaint.cpp`, the `m_writeWord(m_block + ...)` loop), and `GuestPatching::WriteBytes`
+invalidates the recompiled range even when the words are unchanged, so a display thread still inside
+the old stand-in at re-arm is the same hazard.
+
+**Fix.** `enable()` writes only the words the block does not already hold, so re-arming the one
+stand-in writes nothing and the recompiled block stays (`tests/cxx/paint_tests.cpp`, re-arming
+leaves the block unwritten). Live: on, off, on, off on the save with no fault.

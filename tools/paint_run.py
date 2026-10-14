@@ -70,13 +70,8 @@ LOGIC_RANGE = (29.5, 30.5)
 # taken from a counter the gate owns and a rate taken from a probe are not the
 # same measurement and the report should not read as though they were.
 
-# What each stand-in should do to the display's rate, and why. The frame waits
-# for its own flip at the end, so a paint costs a flip however many of them
-# there are per loop: painting twice with the title's two vblanks a flip
-# repaints the same thirty frames a second and only doubles the work, and only
-# the one-vblank stand-in can present at sixty. The first two modes are asked
-# whether the title survives them at all.
-EXPECTED_MULTIPLE = {1: 1.0, 2: 1.0, 3: 2.0, 4: 1.0, 5: 1.0, 6: 2.0}
+# The stand-in paints twice at one vblank a flip, so the display's rate doubles.
+EXPECTED_MULTIPLE = 2.0
 RATE_TOLERANCE = 0.9
 
 
@@ -248,17 +243,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--settle", type=int, default=30, help="seconds to watch before measuring")
     parser.add_argument("--window", type=float, default=6.0, help="seconds per window")
     parser.add_argument(
-        "--mode",
-        type=int,
-        choices=[1, 2, 3, 4, 5, 6],
-        default=6,
-        help="what the stand-in does: 1 paints once (the redirect alone), 2 paints "
-        "twice at the title's two vblanks a flip, 3 paints twice at one, 4 is the "
-        "indirect variant that does not run, 5 paints once and writes the title's "
-        "own interval field to one, 6 paints once and asks the game's own setter "
-        "for one vblank a flip",
-    )
-    parser.add_argument(
         "--display",
         choices=[display.value for display in Display],
         default=Display.GPU.value,
@@ -373,7 +357,7 @@ def main(argv: list[str] | None = None) -> int:
                     for line in _last_log_lines(session, 4):
                         print(f"  {line}", file=sys.stderr)
                     return 1
-                set_paint(name == "on", port=args.port, mode=args.mode)
+                set_paint(name == "on", port=args.port)
                 # The gate with it: the paint rate and the logic rate are the
                 # same measurement until something separates them, and the
                 # gate is what separates them.
@@ -446,7 +430,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     device = session.rendered_on()
     print(f"rendered on: {device}")
-    print(f"stand-in mode {args.mode} requested")
     if state is not None:
         print(state.render())
     if comparison:
@@ -456,21 +439,20 @@ def main(argv: list[str] | None = None) -> int:
     on = [w.paints_per_second for w in windows if w.installed]
     logic = [w.logic_per_second for w in windows]
     failures: list[str] = []
-    wanted = EXPECTED_MULTIPLE[args.mode]
     if not on:
         failures.append("no window ran with the mod on, so nothing was compared")
     elif min(off) < 1.0:
         failures.append(f"the mod-off windows painted {min(off):.2f}/s, too few to be a control")
-    elif min(on) < wanted * RATE_TOLERANCE * max(off):
+    elif min(on) < EXPECTED_MULTIPLE * RATE_TOLERANCE * max(off):
         failures.append(
             f"with the mod on the display painted {min(on):.2f}/s against "
-            f"{max(off):.2f}/s off, short of the {wanted:.1f}x this stand-in is for: "
+            f"{max(off):.2f}/s off, short of the {EXPECTED_MULTIPLE:.1f}x this stand-in is for: "
             "it did not take"
         )
-    elif max(on) > (wanted + 0.5) * max(off):
+    elif max(on) > (EXPECTED_MULTIPLE + 0.5) * max(off):
         failures.append(
             f"with the mod on the display painted {max(on):.2f}/s against "
-            f"{max(off):.2f}/s off, more than the {wanted:.1f}x this stand-in is for: "
+            f"{max(off):.2f}/s off, more than the {EXPECTED_MULTIPLE:.1f}x this stand-in is for: "
             "something else is painting"
         )
     for window in windows:
@@ -489,8 +471,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(
         f"\npassed: the display painted {max(off):.2f}/s with the mod off and "
-        f"{min(on):.2f}-{max(on):.2f}/s with it on, against the {wanted:.1f}x mode "
-        f"{args.mode} is for, and the logic stayed at "
+        f"{min(on):.2f}-{max(on):.2f}/s with it on, against the {EXPECTED_MULTIPLE:.1f}x "
+        "the stand-in is for, and the logic stayed at "
         f"{min(logic):.2f}-{max(logic):.2f}/s throughout"
     )
     return 0
