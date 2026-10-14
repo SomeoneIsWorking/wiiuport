@@ -59,6 +59,8 @@ add_library(wiiuport STATIC
   guest/CallerCensus.cpp
   guest/CallerCensus.h
   guest/ProbeInstallation.h
+  title/ItemGrant.cpp
+  title/ItemGrant.h
   title/LogicGate.cpp
   title/LogicGate.h
   title/ProControllerChoice.cpp

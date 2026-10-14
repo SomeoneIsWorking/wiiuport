@@ -15,6 +15,7 @@
 #include "wiiuport/title/CameraCuts.h"
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/EnvironmentInterpolation.h"
+#include "wiiuport/title/ItemGrant.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/MaterialInterpolation.h"
 #include "wiiuport/title/ParticleInterpolation.h"
@@ -124,6 +125,8 @@ class Runtime {
          .writeWords = &GuestPatching::WriteDataWords}};
     title::EnvironmentInterpolation m_environmentInterpolation{
         {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
+    title::ItemGrant m_itemGrant{
+        {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
     title::StageWarp m_stageWarp{
         {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
     title::MaterialInterpolation m_materialInterpolation{
@@ -166,6 +169,7 @@ class Runtime {
         .seaInterpolation = m_seaInterpolation,
         .materialInterpolation = m_materialInterpolation,
         .stageWarp = m_stageWarp,
+        .itemGrant = m_itemGrant,
         .environmentInterpolation = m_environmentInterpolation,
         .logic = m_logic,
         .controllerChoice = m_controllerChoice,
