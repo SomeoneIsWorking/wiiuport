@@ -37,7 +37,8 @@ const char* const kRoutes =
     "GET /counters, GET /capture, "
     "GET /controllers, GET /controller-choice, GET /setup, "
     "GET /recordings, GET /draws, GET /memory, GET /callers, "
-    "GET /interpolation, GET /particles, GET /sea, GET /materials, GET /environment, "
+    "GET /interpolation, GET /camera-cuts, GET /particles, GET /sea, GET /materials, GET "
+    "/environment, "
     "GET /paint, GET /logic, GET /gate, "
     "POST /capture, POST /pacing, "
     "POST /draws, POST /recordings, POST /paint, POST /logic, POST /interpolation, POST /warp, "
@@ -142,7 +143,7 @@ std::string pacingJson(const frame::PresentPacing::Summary& pacing) {
 ControlChannel::ControlChannel(const Sources& sources)
     : m_recorder(sources.recorder), m_input(sources.input), m_capture(sources.capture),
       m_shapeLog(sources.shapeLog), m_callers(sources.callers), m_paint(sources.paint),
-      m_drawInterpolation(sources.drawInterpolation),
+      m_drawInterpolation(sources.drawInterpolation), m_cameraCuts(sources.cameraCuts),
       m_particleInterpolation(sources.particleInterpolation),
       m_seaInterpolation(sources.seaInterpolation),
       m_materialInterpolation(sources.materialInterpolation), m_stageWarp(sources.stageWarp),
@@ -653,6 +654,9 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
     }
     if (request.path() == "/controllers") {
         return lucent::http::Response::json(200, "OK", controllersJson());
+    }
+    if (request.path() == "/camera-cuts") {
+        return lucent::http::Response::json(200, "OK", m_cameraCuts.json());
     }
     if (request.path() == "/controller-choice") {
         return lucent::http::Response::json(200, "OK", m_controllerChoice.json());

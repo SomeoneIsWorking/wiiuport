@@ -13,6 +13,7 @@
 #include "wiiuport/frame/VertexChanges.h"
 #include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/input/InputDriver.h"
+#include "wiiuport/title/CameraCuts.h"
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/EnvironmentInterpolation.h"
 #include "wiiuport/title/LogicGate.h"
@@ -72,6 +73,7 @@ class ControlChannel {
         const guest::CallerCensus& callers;
         title::WindWakerPaint& paint;
         title::DrawInterpolation& drawInterpolation;
+        const title::CameraCuts& cameraCuts;
         const title::ParticleInterpolation& particleInterpolation;
         const title::SeaInterpolation& seaInterpolation;
         const title::MaterialInterpolation& materialInterpolation;
@@ -201,6 +203,7 @@ class ControlChannel {
     const guest::CallerCensus& m_callers;
     title::WindWakerPaint& m_paint;
     title::DrawInterpolation& m_drawInterpolation;
+    const title::CameraCuts& m_cameraCuts;
     const title::ParticleInterpolation& m_particleInterpolation;
     const title::SeaInterpolation& m_seaInterpolation;
     const title::MaterialInterpolation& m_materialInterpolation;

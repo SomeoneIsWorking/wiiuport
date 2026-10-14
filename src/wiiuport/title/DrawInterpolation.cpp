@@ -80,7 +80,8 @@ void DrawInterpolation::Entry::OnCall(std::span<const uint32_t, 32> gpr,
 DrawInterpolation::DrawInterpolation(Seams seams)
     : m_register(seams.registerProbe), m_readWords(std::move(seams.readWords)),
       m_writeWords(std::move(seams.writeWords)), m_gated(std::move(seams.gated)),
-      m_midPaint(std::move(seams.midPaint)), m_drawPhase(std::move(seams.drawPhase)) {
+      m_startsShot(std::move(seams.startsShot)), m_midPaint(std::move(seams.midPaint)),
+      m_drawPhase(std::move(seams.drawPhase)) {
 }
 
 void DrawInterpolation::install() {
@@ -117,19 +118,24 @@ void DrawInterpolation::onCameraDraw(uint32_t camera) {
         m_unreadable++;
         return;
     }
-    if (blendCamera(camera, words)) {
+    if (blendCamera(camera, words, m_startsShot(camera))) {
         m_cameraBlends++;
     }
 }
 
 bool DrawInterpolation::blendCamera(uint32_t camera,
-                                    const std::array<uint32_t, kCameraWords>& words) {
+                                    const std::array<uint32_t, kCameraWords>& words,
+                                    bool startsShot) {
     Seen<kCameraWords>& seen = m_cameras[camera];
     bool continues = seen.tick != 0 && seen.tick + 1 == m_tick;
     std::array<uint32_t, kCameraWords> previous = seen.words;
     seen = {.tick = m_tick, .words = words};
     if (!continues) {
         m_cameraFirstSeen++;
+        return false;
+    }
+    if (startsShot) {
+        m_cameraCuts++;
         return false;
     }
     std::array<uint32_t, kCameraWords> blended = words;
@@ -436,6 +442,7 @@ std::string DrawInterpolation::json() const {
     body.number("ticks", m_ticks);
     body.number("cameraBlends", m_cameraBlends);
     body.number("cameraFirstSeen", m_cameraFirstSeen);
+    body.number("cameraCuts", m_cameraCuts);
     body.number("actorDraws", m_actorDraws);
     body.number("actorBlends", m_actorBlends);
     body.number("actorsNotExecuted", m_actorsNotExecuted);

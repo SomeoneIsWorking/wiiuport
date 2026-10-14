@@ -11,6 +11,7 @@ void runControlTests();
 void runPaintTests();
 void runLogicGateTests();
 void runProControllerChoiceTests();
+void runCameraCutsTests();
 void runDrawInterpolationTests();
 void runParticleInterpolationTests();
 void runSeaInterpolationTests();

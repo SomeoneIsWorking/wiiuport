@@ -63,6 +63,8 @@ add_library(wiiuport STATIC
   title/LogicGate.h
   title/ProControllerChoice.cpp
   title/ProControllerChoice.h
+  title/CameraCuts.cpp
+  title/CameraCuts.h
   title/DrawInterpolation.cpp
   title/DrawInterpolation.h
   title/EnvironmentInterpolation.cpp

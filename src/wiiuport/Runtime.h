@@ -12,6 +12,7 @@
 #include "wiiuport/frame/RecordingSnapshot.h"
 #include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/input/InputDriver.h"
+#include "wiiuport/title/CameraCuts.h"
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/EnvironmentInterpolation.h"
 #include "wiiuport/title/LogicGate.h"
@@ -131,6 +132,8 @@ class Runtime {
          .writeWords = &GuestPatching::WriteDataWords}};
     title::SeaInterpolation m_seaInterpolation{
         {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
+    title::CameraCuts m_cameraCuts{
+        {.registerProbe = &GuestCallProbes::Register, .readWords = &GuestPatching::ReadWords}};
     title::DrawInterpolation m_drawInterpolation{
         {.registerProbe = &GuestCallProbes::Register,
          .readWords = &GuestPatching::ReadWords,
@@ -138,6 +141,10 @@ class Runtime {
          .gated =
              [this] {
                  return m_logic.enabled();
+             },
+         .startsShot =
+             [this](uint32_t camera) {
+                 return m_cameraCuts.startsShot(camera);
              },
          .midPaint = {&m_particleInterpolation, &m_environmentInterpolation},
          .drawPhase = {&m_seaInterpolation, &m_materialInterpolation}}};
@@ -154,6 +161,7 @@ class Runtime {
         .callers = m_callers,
         .paint = m_paint,
         .drawInterpolation = m_drawInterpolation,
+        .cameraCuts = m_cameraCuts,
         .particleInterpolation = m_particleInterpolation,
         .seaInterpolation = m_seaInterpolation,
         .materialInterpolation = m_materialInterpolation,
