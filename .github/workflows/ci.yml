@@ -45,7 +45,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             $(uv run --frozen python tools/build_runtime.py --apt-packages) \
-            libtool
+            libtool libclang-dev
 
       # An accelerator only. The job must remain correct with an empty cache,
       # so nothing here is allowed to be a build input the cold path lacks.
@@ -78,6 +78,13 @@ jobs:
       # build is blocked. It is not a substitute for ST-BUILD: a binary built on
       # another distribution is evidence about the title, not about this
       # machine's toolchain.
+      # The shared ownership gate's tool, pinned like any other input.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: SomeoneIsWorking/re-harness
+          ref: 1f41ddc372e0003b7a011650a184bdd07f546de5
+          path: build/re-harness
+
       - name: Run every gate
         run: uv run --frozen --group dev python tools/verify.py
 
