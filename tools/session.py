@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from types import FrameType
 
-from wiiuport.gameplay import INTERVAL_SECONDS, PRESSES, press_into_world
+from wiiuport.gameplay import PRESSES, press_into_world
 from wiiuport.headless import TITLE_OUTPUT_SIZE, HeadlessSession
 from wiiuport.paths import find_layout
 
@@ -54,7 +54,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--boot", type=int, default=90, help="seconds to wait for the channel")
     parser.add_argument("--presses", type=int, default=PRESSES)
-    parser.add_argument("--interval", type=float, default=INTERVAL_SECONDS)
     parser.add_argument(
         "--size",
         type=_size,
@@ -99,15 +98,15 @@ def main(argv: list[str] | None = None) -> int:
                     print("refused: the channel never answered while booting.", file=sys.stderr)
                     return 1
                 if not args.front_end:
-                    made = press_into_world(
+                    reached = press_into_world(
                         args.port,
                         presses=args.presses,
-                        interval=args.interval,
                         still_running=lambda: running.poll() is None,
                     )
-                    if made < args.presses:
-                        print(f"refused: the runtime exited after {made} presses.", file=sys.stderr)
+                    if reached is None:
+                        print("refused: the title never left its front end.", file=sys.stderr)
                         return 1
+                    print(f"in play on {reached}", flush=True)
                 print(
                     f"ready: http://127.0.0.1:{args.port}/ (stop this tool by its pid)", flush=True
                 )

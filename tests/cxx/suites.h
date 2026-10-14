@@ -20,6 +20,7 @@ void runMaterialInterpolationTests();
 void runStageWarpTests();
 void runItemGrantTests();
 void runQuestLogNamesTests();
+void runPadRosterTests();
 void runContentTests();
 void runXboxGlyphsTests();
 void runSixtyHertzTests();

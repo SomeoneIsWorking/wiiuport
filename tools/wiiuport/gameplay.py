@@ -1,46 +1,46 @@
-"""Press from the title's front end into the world, the one way every driven
-run gets there.
+"""Press A through the title's front end until the stage it plays is no longer a front-end one.
 
-Alternating A and Plus covers a logo that takes either, a file select that
-takes A, and a start prompt that takes Plus. The alternation can end on the
-Plus that opens the pause screen, where the camera holds still, so B backs out
-of it last: in the field B only swings the sword.
+The stage name is read rather than waited on: the front end takes a varying number of presses, and a
+press is only made once the title has run a second of its logic since the last.
 """
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 
-from .drive import press, release
+from .control import request_bytes, wait_game_frames
+from .drive import press
 
-PRESSES = 12
-INTERVAL_SECONDS = 8
-SETTLE_SECONDS = 3
+# dComIfG_play_c's start stage name, at play + 0x5134.
+START_STAGE = 0x1046F0B0 + 0x5134
+# Title screen, its sea backdrop, name entry and the ending's sea.
+FRONT_END = frozenset({"", "sea_T", "Name", "ENDumi"})
+PRESSES = 60
+FRAMES_PER_PRESS = 60
+
+
+def current_stage(port: int) -> str:
+    raw = request_bytes("GET", f"/memory?address={START_STAGE:#x}&size=8", port, 5)
+    return raw.split(b"\0")[0].decode("latin-1")
 
 
 def press_into_world(
     port: int,
     *,
     presses: int = PRESSES,
-    interval: float = INTERVAL_SECONDS,
     still_running: Callable[[], bool] = lambda: True,
-    after_press: Callable[[int], None] = lambda _index: None,
-    sleep: Callable[[float], None] = time.sleep,
-) -> int:
-    """Presses through the front end and backs out of a pause screen.
-
-    Returns the presses made: fewer than asked when the runtime exited, which
-    the caller must treat as not having reached the world."""
-    made = 0
-    for index in range(presses):
+    read_stage: Callable[[int], str] = current_stage,
+    wait_frames: Callable[[int, int], None] = lambda frames, port: wait_game_frames(
+        frames, port=port
+    ),
+) -> str | None:
+    """The stage reached, or None when the runtime exited or the presses ran out first."""
+    for _ in range(presses):
         if not still_running():
-            return made
-        press("a" if index % 2 == 0 else "plus", port=port)
-        made += 1
-        sleep(interval)
-        after_press(index)
-    release(port=port)
-    press("b", port=port)
-    sleep(SETTLE_SECONDS)
-    return made
+            return None
+        press("a", port=port)
+        wait_frames(FRAMES_PER_PRESS, port)
+        stage = read_stage(port)
+        if stage not in FRONT_END:
+            return stage
+    return None
