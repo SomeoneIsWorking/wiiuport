@@ -162,7 +162,7 @@ SETTINGS_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
     <gp_download>false</gp_download>
     <play_boot_sound>false</play_boot_sound>
     <disable_screensaver>false</disable_screensaver>
-    <console_language>1</console_language>
+    <console_language>{console_language}</console_language>
     <Graphic>
         <api>1</api>
         <VSync>0</VSync>
@@ -210,6 +210,9 @@ class HeadlessSession:
     logflag: int = 0
     """Which runtime log types to enable, from `log_flags`. Zero keeps a run
     quiet; a capture run switches on exactly what it intends to read."""
+
+    console_language: int = 1
+    """Cemu's `CafeConsoleLanguage`: 1 English, 2 French, 5 Spanish."""
 
     display_server: Display = Display.GPU
     output_size: tuple[int, int] = TITLE_OUTPUT_SIZE
@@ -269,7 +272,7 @@ class HeadlessSession:
         (self.config_home / "Cemu").mkdir(exist_ok=True)
         (self.data_home / "Cemu").mkdir(exist_ok=True)
         (self.config_home / "Cemu" / "settings.xml").write_text(
-            SETTINGS_TEMPLATE.format(logflag=self.logflag)
+            SETTINGS_TEMPLATE.format(logflag=self.logflag, console_language=self.console_language)
         )
         self._write_gamepad_profile()
         if keys_source is not None:
