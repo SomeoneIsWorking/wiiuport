@@ -38,8 +38,11 @@ class ItemGrant {
         uint8_t amount;
     };
 
-    // item_func_rope (0x0254e3a8) and item_func_bomb_bag (0x0254e888).
-    static constexpr std::array<Item, 2> kItemTable{{
+    // The item-get table's telescope (0x0254e088), item_func_camera (0x0254e318), item_func_rope
+    // (0x0254e3a8) and item_func_bomb_bag (0x0254e888).
+    static constexpr std::array<Item, 4> kItemTable{{
+        {.name = "telescope", .slot = 0, .number = 0x20, .count = 0, .maximum = 0, .amount = 0},
+        {.name = "picto_box", .slot = 8, .number = 0x23, .count = 0, .maximum = 0, .amount = 0},
         {.name = "grappling_hook",
          .slot = 3,
          .number = 0x25,

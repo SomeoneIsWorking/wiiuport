@@ -86,6 +86,25 @@ void theGrapplingHookTakesItsSlot() {
     check::equal(guest.byte(0x29), 3, "on X");
 }
 
+void theTelescopeAndPictoBoxTakeTheirSlots() {
+    Guest guest = freshFile();
+    ItemGrant grant = guest.grant();
+    std::string refusal;
+    check::isTrue(
+        grant.grant(check::present(ItemGrant::parse("item=telescope&button=y", refusal), "parsed"),
+                    refusal),
+        "the telescope is given");
+    check::equal(guest.byte(0x5c), 0x20, "in slot 0");
+    check::equal(guest.byte(0x71), 1, "got");
+    check::isTrue(
+        grant.grant(check::present(ItemGrant::parse("item=picto_box&button=z", refusal), "parsed"),
+                    refusal),
+        "the picto box is given");
+    check::equal(guest.byte(0x64), 0x23, "in slot 8");
+    check::equal(guest.byte(0x71 + 8), 1, "got");
+    check::equal(guest.byte(0x2b), 8, "on Z");
+}
+
 void unknownItemsAndButtonsAreRefused() {
     std::string refusal;
     check::isTrue(!ItemGrant::parse("item=master_sword&button=x", refusal), "an item not listed");
@@ -104,5 +123,6 @@ void unknownItemsAndButtonsAreRefused() {
 void wiiuport::tests::runItemGrantTests() {
     theBombBagIsGivenAsItsItemGetFunctionGivesIt();
     theGrapplingHookTakesItsSlot();
+    theTelescopeAndPictoBoxTakeTheirSlots();
     unknownItemsAndButtonsAreRefused();
 }
