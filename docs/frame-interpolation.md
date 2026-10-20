@@ -593,6 +593,22 @@ midpoint for the gated draw phase and puts the sway back after it, so the skippe
 it once a tick with the full tick's movement. Measured (`scratch/drawphase/pauses.py`, Hyrule, hook
 on X): 128 blends over 129 rope draws, every write restored, presents changed `0.023, 0.021, 0.020`.
 
+**Cloth.** `dCloth_packet_c` (flags `TrFlag`/`SieFlag`, banners, the KoRL's sail) keeps its points,
+normals and back normals in two buffers each (`+0xb0`, `+0xb8`, `+0xc0`; grid `+0x98` by `+0x9c`;
+current buffer u8 `+0x1c0`, TWW's layout `0x88` later). `cloth_move` (`0x0251d4ec`) steps the other
+buffer from the current and flips the index once a tick; `cloth_draw` (`0x0251e194`) copies the
+current ones into the frame's vertex buffer in the draw phase (`0x0251d864`, packet in r3), and the
+paint draws that copy. `title/ClothInterpolation` probes the copy: in the tick's own draw phase it
+records each packet's current points and normals; in the gated one it writes the midpoint of the last
+tick's and this one's into the current buffers before the copy and puts them back when the draw
+phase ends. Cloths that share buffers are blended once. The packet's matrix (`+0x170`) is not
+blended, so a cloth on a moving actor (the sail) still follows its actor's tick pose.
+
+**Measured** (Link idle facing the flag in sea room 43, `hands.py --warp sea:43:0 --stick=0.0:0.0
+--lead 30 --bursts 2`): 325 blends over 652 copies, 0 unblendable, unreadable or failed writes, every
+write restored; pixels changed around the flag between presents, before `600, 61, 469, 18`, after
+`323, 280, 195, 187` and `467, 423, 467, 425`.
+
 **Sea waves and sky clouds.** The weather effects move them in execute (`dKyeff_c::execute`'s
 `wave_move`, `dKyeff2_c::execute`'s `vrkumo_move`) and the paint draws them from two packets the
 environment (`g_env_light` `0x10475a68`, TWW's layout `0x80` later) holds: waves at `*(env+0xaa0)`,

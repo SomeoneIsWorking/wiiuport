@@ -14,6 +14,7 @@
 #include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/title/CameraCuts.h"
+#include "wiiuport/title/ClothInterpolation.h"
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/EnvironmentInterpolation.h"
 #include "wiiuport/title/FadeInterpolation.h"
@@ -81,6 +82,7 @@ class ControlChannel {
         const title::FadeInterpolation& fadeInterpolation;
         const title::SeaInterpolation& seaInterpolation;
         const title::RopeInterpolation& ropeInterpolation;
+        const title::ClothInterpolation& clothInterpolation;
         const title::MaterialInterpolation& materialInterpolation;
         title::StageWarp& stageWarp;
         title::ItemGrant& itemGrant;
@@ -214,6 +216,7 @@ class ControlChannel {
     const title::FadeInterpolation& m_fadeInterpolation;
     const title::SeaInterpolation& m_seaInterpolation;
     const title::RopeInterpolation& m_ropeInterpolation;
+    const title::ClothInterpolation& m_clothInterpolation;
     const title::MaterialInterpolation& m_materialInterpolation;
     title::StageWarp& m_stageWarp;
     title::ItemGrant& m_itemGrant;
