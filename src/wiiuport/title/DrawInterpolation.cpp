@@ -342,14 +342,13 @@ bool DrawInterpolation::blendModel(uint32_t model, const ModelPose& pose) {
         }
         auto from = affineAt(std::span(previous.joints).subspan(joint, kMatrixWords));
         auto to = affineAt(std::span(pose.joints).subspan(joint, kMatrixWords));
-        if (!from || !to) {
-            m_unblendable++;
-            return false;
-        }
-        interp::Affine local = interp::midpoint(*previousInverse * *from, *inverse * *to);
-        if (!writeAffine(placed * local, std::span(blended).subspan(joint, kMatrixWords))) {
-            m_unblendable++;
-            return false;
+        std::span<uint32_t> out = std::span(blended).subspan(joint, kMatrixWords);
+        // A joint the model never calculates (the hands' world root) holds no matrix: drawn as is.
+        if (!from || !to ||
+            !writeAffine(placed * interp::midpoint(*previousInverse * *from, *inverse * *to),
+                         out)) {
+            std::copy_n(held.begin(), kMatrixWords, out.begin());
+            m_jointsKept++;
         }
     }
     for (size_t joint = 0; joint < pose.joints.size(); joint += kMatrixWords) {
@@ -452,6 +451,7 @@ std::string DrawInterpolation::json() const {
     body.number("modelBasesFromDraw", m_modelBasesFromDraw);
     body.number("jointsCopied", m_jointsCopied);
     body.number("unblendable", m_unblendable);
+    body.number("jointsKept", m_jointsKept);
     body.number("unreadable", m_unreadable);
     body.number("writeFailures", m_writeFailures);
     body.number("restored", m_restored);

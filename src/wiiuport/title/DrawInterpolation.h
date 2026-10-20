@@ -238,6 +238,7 @@ class DrawInterpolation {
     uint64_t m_modelBasesFromDraw = 0;
     uint64_t m_jointsCopied = 0;
     uint64_t m_unblendable = 0;
+    uint64_t m_jointsKept = 0;
     uint64_t m_unreadable = 0;
     uint64_t m_writeFailures = 0;
     uint64_t m_restored = 0;
