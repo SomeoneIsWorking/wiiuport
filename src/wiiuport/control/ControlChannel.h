@@ -16,6 +16,7 @@
 #include "wiiuport/title/CameraCuts.h"
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/EnvironmentInterpolation.h"
+#include "wiiuport/title/FadeInterpolation.h"
 #include "wiiuport/title/ItemGrant.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/MaterialInterpolation.h"
@@ -77,6 +78,7 @@ class ControlChannel {
         title::DrawInterpolation& drawInterpolation;
         const title::CameraCuts& cameraCuts;
         const title::ParticleInterpolation& particleInterpolation;
+        const title::FadeInterpolation& fadeInterpolation;
         const title::SeaInterpolation& seaInterpolation;
         const title::RopeInterpolation& ropeInterpolation;
         const title::MaterialInterpolation& materialInterpolation;
@@ -209,6 +211,7 @@ class ControlChannel {
     title::DrawInterpolation& m_drawInterpolation;
     const title::CameraCuts& m_cameraCuts;
     const title::ParticleInterpolation& m_particleInterpolation;
+    const title::FadeInterpolation& m_fadeInterpolation;
     const title::SeaInterpolation& m_seaInterpolation;
     const title::RopeInterpolation& m_ropeInterpolation;
     const title::MaterialInterpolation& m_materialInterpolation;

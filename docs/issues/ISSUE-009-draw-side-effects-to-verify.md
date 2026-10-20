@@ -49,6 +49,12 @@ a change:
   segments and holds the sway to once a tick (`docs/frame-interpolation.md`). Reproduced in Hyrule
   with the hook on X: `x@90,x@10,x@10` throws it (`scratch/drawphase/pauses.py --burst 5`).
 
+- **Shared timer (2026-10-20), not reproduced.** TIMER's method table (`0x101EE73C`) has an empty
+  execute (`0x025c5d1c`, `li r3,1`) and a draw (`0x025c5d18`) that branches to the timer's update
+  `0x025c5a8c`, which decrements the countdown `+0x10C`: every draw phase steps it, so under the gate
+  a mini-game timer would run at twice its speed. Needs a timed mini-game to reproduce; the test save
+  reaches none.
+
 ## Where the rest are
 
 Stage archives (`content/Common/Stage/*.szs`, Yaz0 SARC, the `.dzr`/`.dzs` inside the `.bfres`)
