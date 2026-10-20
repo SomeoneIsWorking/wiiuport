@@ -610,6 +610,18 @@ blends over 202 ticks, 9 respawned, 2 wrapped, 0 unblendable, unreadable or fail
 write restored; whole-frame pixels changed between presents, off `7920, 11, 9116, 0`, on `6364,
 4278, 7388, 5266`.
 
+**Snow and ash.** `dKyr_snow_move` (and in Adanmae `dKyr_kazanbai_move`, the forest's floating
+motes) moves the snow packet at `*(env+0xa50)`: `SNOW_EFF[250]` from `+0x9c`, stride `0x38` (`mStatus`
+s8 `+0`, `mPos +4`, `mBasePos +0x10`, `mScale +0x2c`, `mTimer` s16 `+0x34`), as many as the s16
+`mEffCount` at `+0x3760`. The in-between paint sets each flake's position and scale to the midpoint of
+its last two ticks', skipping one whose status or base changed or whose timer went up (spawned,
+landed or put back near the camera all restart it).
+
+**Measured** (Link idle at Adanmae's tunnel, `hands.py --warp Adanmae:0:0 --stick=0.0:0.0 --lead 30
+--bursts 2`): 62,350 snow blends, 1,927 respawned, 0 unblendable or failed writes; whole-frame
+pixels changed between presents, before `11520, 737, 12914, 538`, after `15488, 9993, 14126, 8692`
+(the rest is the held fireflies). The spore packet (`env+0xa78`) is empty there.
+
 **Material animation.** HD's `J3DFrameCtrl` has no vtable and is reordered: rate f32 `+0`, frame
 f32 `+4`, start s16 `+8`, end s16 `+0xa`, loop s16 `+0xc`, attribute u8 `+0xe` (2 loops from end back
 to loop), state u8 `+0xf`; `init` `0x027f2bc0`, `update` `0x027f2fc4`, `checkPass` `0x027f2bf8`.

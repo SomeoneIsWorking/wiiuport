@@ -10,12 +10,12 @@
 
 namespace wiiuport::title {
 
-// Wind Waker HD's sea waves and sky clouds in the in-between paint.
+// Wind Waker HD's sea waves, sky clouds and snow in the in-between paint.
 //
-// The weather effects move them in execute (`wave_move`, `vrkumo_move`) and the paint draws them
-// from two packets the environment holds. When the in-between paint opens, each one that continues
-// from the last tick is set to the midpoint of its last two ticks; the tick's own values are back
-// when it closes.
+// The weather effects move them in execute (`wave_move`, `vrkumo_move`, `snow_move` and
+// `kazanbai_move`) and the paint draws them from packets the environment holds. When the in-between
+// paint opens, each one that continues from the last tick is set to the midpoint of its last two
+// ticks; the tick's own values are back when it closes.
 class EnvironmentInterpolation final : public DrawInterpolation::MidPaintListener {
   public:
     // g_env_light (dScnKy_env_light_c), TWW's layout 0x80 later.
@@ -23,6 +23,7 @@ class EnvironmentInterpolation final : public DrawInterpolation::MidPaintListene
     static constexpr uint32_t kWaveSpawnRadius = 0x9e0;
     // mWaveCount, s16 in the high half.
     static constexpr uint32_t kWaveCount = 0x9f8;
+    static constexpr uint32_t kSnowPacket = 0xa50;
     static constexpr uint32_t kCloudPacket = 0xa94;
     static constexpr uint32_t kWavePacket = 0xaa0;
 
@@ -47,6 +48,18 @@ class EnvironmentInterpolation final : public DrawInterpolation::MidPaintListene
     static constexpr size_t kCloudAlpha = 8;
     // vrkumo_move wraps a cloud past this distance from the centre.
     static constexpr float kCloudWrapRadius = 15000.0f;
+
+    // dKankyo_snow_Packet: SNOW_EFF mEff[250] at +0x9c, then mEffCount (s16, high half).
+    static constexpr uint32_t kSnow = 0x9c;
+    static constexpr uint32_t kSnowWords = 0x38 / 4;
+    static constexpr uint32_t kMaxSnow = 250;
+    static constexpr uint32_t kSnowCount = kSnow + (kMaxSnow * 0x38) + 0x14;
+    // SNOW_EFF, in words: mStatus (s8, high byte), mPos, mBasePos, mScale, mTimer (s16, high half).
+    static constexpr size_t kSnowStatus = 0;
+    static constexpr size_t kSnowPos = 1;
+    static constexpr size_t kSnowBase = 4;
+    static constexpr size_t kSnowScale = 11;
+    static constexpr size_t kSnowTimer = 13;
 
     struct Seams {
         DrawInterpolation::ReadWords readWords;
@@ -82,6 +95,7 @@ class EnvironmentInterpolation final : public DrawInterpolation::MidPaintListene
 
     void blendWaves(Waves waves);
     void blendClouds(uint32_t packet);
+    void blendSnow(uint32_t packet);
     // Writes the entries that changed, keeping the tick's own to put back.
     void write(uint32_t address, const std::vector<uint32_t>& blended,
                const std::vector<uint32_t>& original);
@@ -93,12 +107,15 @@ class EnvironmentInterpolation final : public DrawInterpolation::MidPaintListene
     uint64_t m_tick = 0;
     Seen m_waves;
     Seen m_clouds;
+    Seen m_snow;
     std::vector<Restore> m_restores;
 
     uint64_t m_waveBlends = 0;
     uint64_t m_wavesRespawned = 0;
     uint64_t m_cloudBlends = 0;
     uint64_t m_cloudsWrapped = 0;
+    uint64_t m_snowBlends = 0;
+    uint64_t m_snowRespawned = 0;
     uint64_t m_unblendable = 0;
     uint64_t m_unreadable = 0;
     uint64_t m_writeFailures = 0;

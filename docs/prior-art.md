@@ -40,7 +40,7 @@ Candidates read at `f10b5662`, not yet checked against our binary:
 - Aim reticle `0x023D813C`/`0x020CBB70` around `mDoLib_projectViewport 0x025F1018`; Z-target arrow
   `dAttDraw_c::draw 0x024EC1C8` (position in r4).
 - Plant sway slots (grass `0x0254C6C4`, tree `0x025C9948`, flower `0x02548370`, bushes `0x025D0994`).
-- Weather packets beyond waves and clouds (rain, snow, ash, spores, fog, poison fog, stars).
+- Weather packets beyond waves, clouds and snow (rain, spores, fog, poison fog, stars).
 - `dKyr_drawStar 0x02574144` reads the camera at paint time; audio camera `0x025E1B44` keeps
   pointers to what `camera_draw` passes; audio frame callback `0x020315CC`.
 - New particles drawn back along their first step (velocity `+0x34`, emitter `0x104B5730`).
