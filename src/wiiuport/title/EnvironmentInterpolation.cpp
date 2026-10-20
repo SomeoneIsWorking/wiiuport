@@ -20,6 +20,10 @@ uint32_t statusOf(uint32_t word) {
     return word >> 24;
 }
 
+int16_t highHalf(uint32_t word) {
+    return static_cast<int16_t>(word >> 16);
+}
+
 // The midpoint of `count` floats from two entries, written into `out`; false when one is not a
 // number.
 bool blendFloats(std::span<const uint32_t> from, std::span<const uint32_t> to,
@@ -60,16 +64,18 @@ void EnvironmentInterpolation::onMidPaintBegin(uint64_t tick) {
     m_tick = tick;
     uint32_t wavePacket = 0;
     uint32_t cloudPacket = 0;
+    uint32_t snowPacket = 0;
     uint32_t countWord = 0;
     uint32_t radiusWord = 0;
     if (!m_readWords(kEnvLight + kWavePacket, &wavePacket, 1) ||
         !m_readWords(kEnvLight + kCloudPacket, &cloudPacket, 1) ||
+        !m_readWords(kEnvLight + kSnowPacket, &snowPacket, 1) ||
         !m_readWords(kEnvLight + kWaveCount, &countWord, 1) ||
         !m_readWords(kEnvLight + kWaveSpawnRadius, &radiusWord, 1)) {
         m_unreadable++;
         return;
     }
-    auto count = static_cast<int16_t>(countWord >> 16);
+    int16_t count = highHalf(countWord);
     if (wavePacket != 0 && count > 0) {
         blendWaves({.packet = wavePacket,
                     .count = std::min<uint32_t>(static_cast<uint32_t>(count), kMaxWaves),
@@ -77,6 +83,9 @@ void EnvironmentInterpolation::onMidPaintBegin(uint64_t tick) {
     }
     if (cloudPacket != 0) {
         blendClouds(cloudPacket);
+    }
+    if (snowPacket != 0) {
+        blendSnow(snowPacket);
     }
 }
 
@@ -155,6 +164,55 @@ void EnvironmentInterpolation::blendClouds(uint32_t packet) {
     write(packet + kClouds, blended, words);
 }
 
+void EnvironmentInterpolation::blendSnow(uint32_t packet) {
+    uint32_t countWord = 0;
+    if (!m_readWords(packet + kSnowCount, &countWord, 1)) {
+        m_unreadable++;
+        return;
+    }
+    int16_t count = highHalf(countWord);
+    if (count <= 0) {
+        return;
+    }
+    uint32_t flakes = std::min<uint32_t>(static_cast<uint32_t>(count), kMaxSnow);
+    std::vector<uint32_t> words(size_t{flakes} * kSnowWords);
+    if (!m_readWords(packet + kSnow, words.data(), static_cast<uint32_t>(words.size()))) {
+        m_unreadable++;
+        return;
+    }
+    Seen previous = std::exchange(m_snow, {.tick = m_tick, .packet = packet, .words = words});
+    if (previous.tick + 1 != m_tick || previous.packet != packet) {
+        return;
+    }
+    std::vector<uint32_t> blended = words;
+    for (size_t flake = 0; flake < flakes && (flake + 1) * kSnowWords <= previous.words.size();
+         ++flake) {
+        std::span<const uint32_t> from =
+            std::span(previous.words).subspan(flake * kSnowWords, kSnowWords);
+        std::span<const uint32_t> to = std::span(words).subspan(flake * kSnowWords, kSnowWords);
+        std::span<uint32_t> out = std::span(blended).subspan(flake * kSnowWords, kSnowWords);
+        // Spawned, landed or put back near the camera: the move restarts its timer.
+        bool sameBase = std::equal(from.begin() + kSnowBase, from.begin() + kSnowBase + 3,
+                                   to.begin() + kSnowBase);
+        if (statusOf(from[kSnowStatus]) == 0 ||
+            statusOf(from[kSnowStatus]) != statusOf(to[kSnowStatus]) || !sameBase ||
+            highHalf(to[kSnowTimer]) > highHalf(from[kSnowTimer])) {
+            m_snowRespawned++;
+            continue;
+        }
+        if (!blendFloats(from.subspan(kSnowPos, 3), to.subspan(kSnowPos, 3),
+                         out.subspan(kSnowPos, 3)) ||
+            !blendFloats(from.subspan(kSnowScale, 1), to.subspan(kSnowScale, 1),
+                         out.subspan(kSnowScale, 1))) {
+            std::copy(to.begin(), to.end(), out.begin());
+            m_unblendable++;
+            continue;
+        }
+        m_snowBlends++;
+    }
+    write(packet + kSnow, blended, words);
+}
+
 void EnvironmentInterpolation::write(uint32_t address, const std::vector<uint32_t>& blended,
                                      const std::vector<uint32_t>& original) {
     if (blended == original) {
@@ -187,6 +245,8 @@ std::string EnvironmentInterpolation::json() const {
     body.number("wavesRespawned", m_wavesRespawned);
     body.number("cloudBlends", m_cloudBlends);
     body.number("cloudsWrapped", m_cloudsWrapped);
+    body.number("snowBlends", m_snowBlends);
+    body.number("snowRespawned", m_snowRespawned);
     body.number("unblendable", m_unblendable);
     body.number("unreadable", m_unreadable);
     body.number("writeFailures", m_writeFailures);
