@@ -35,7 +35,8 @@ const char* const kRoutes =
     "GET /counters, GET /capture, "
     "GET /controllers, GET /controller-choice, GET /setup, "
     "GET /recordings, GET /draws, GET /memory, GET /callers, "
-    "GET /interpolation, GET /camera-cuts, GET /particles, GET /sea, GET /rope, GET /fade, "
+    "GET /interpolation, GET /camera-cuts, GET /particles, GET /sea, GET /rope, GET /cloth, GET "
+    "/fade, "
     "GET /materials, GET "
     "/environment, "
     "GET /paint, GET /logic, GET /gate, GET /pacing, "
@@ -147,6 +148,7 @@ ControlChannel::ControlChannel(const Sources& sources)
       m_particleInterpolation(sources.particleInterpolation),
       m_fadeInterpolation(sources.fadeInterpolation), m_seaInterpolation(sources.seaInterpolation),
       m_ropeInterpolation(sources.ropeInterpolation),
+      m_clothInterpolation(sources.clothInterpolation),
       m_materialInterpolation(sources.materialInterpolation), m_stageWarp(sources.stageWarp),
       m_itemGrant(sources.itemGrant), m_environmentInterpolation(sources.environmentInterpolation),
       m_logic(sources.logic), m_controllerChoice(sources.controllerChoice),
@@ -715,6 +717,9 @@ lucent::http::Response ControlChannel::dispatch(const lucent::http::Request& req
     }
     if (request.path() == "/rope") {
         return lucent::http::Response::json(200, "OK", m_ropeInterpolation.json());
+    }
+    if (request.path() == "/cloth") {
+        return lucent::http::Response::json(200, "OK", m_clothInterpolation.json());
     }
     if (request.path() == "/materials") {
         return lucent::http::Response::json(200, "OK", m_materialInterpolation.json());

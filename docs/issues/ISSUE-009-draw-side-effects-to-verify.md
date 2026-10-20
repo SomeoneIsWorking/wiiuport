@@ -14,7 +14,7 @@ a change:
 | HD light-count clear | `0x0273841c` | point lights doubled |
 | Draw methods with state | `d_a_bgn`, `d_a_ff`, `d_a_himo2` (rope settles per computation), `d_a_obj_ajav` (flash counted in `0x02313e28`, timer `+0x56`) | double-speed animation |
 | Material animation outside an actor's draw | key animator `0x027df40c` | stepping at 30 |
-| Cloth | KoRL sail upload `0x021625dc`, `dCloth 0x0251d864` | stepping at 30 |
+| Cloth | KoRL sail upload `0x021625dc`, `dCloth 0x0251d864` | stepping at 30 (fixed for dCloth, below) |
 
 ## Checked
 
@@ -48,6 +48,12 @@ a change:
   covered; its sway also eased twice a tick. `title/RopeInterpolation` blends the hand, hook and
   segments and holds the sway to once a tick (`docs/frame-interpolation.md`). Reproduced in Hyrule
   with the hook on X: `x@90,x@10,x@10` throws it (`scratch/drawphase/pauses.py --burst 5`).
+
+- **Cloth (2026-10-20), fixed.** The flag in sea room 43 (`TrFlag`) moved on every other present:
+  dCloth steps its points once a tick and the draw phase copies them into the vertex buffer, so both
+  paints of a tick drew the same shape. `title/ClothInterpolation` blends the points and normals for
+  the gated draw phase (`docs/frame-interpolation.md`). The KoRL sail's own upload (`0x021625dc`) is
+  not reproduced: the test save has no sail.
 
 - **Shared timer (2026-10-20), not reproduced.** TIMER's method table (`0x101EE73C`) has an empty
   execute (`0x025c5d1c`, `li r3,1`) and a draw (`0x025c5d18`) that branches to the timer's update

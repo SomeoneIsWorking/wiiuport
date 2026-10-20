@@ -76,6 +76,8 @@ add_library(wiiuport STATIC
   glyphs/VectorCanvas.h
   glyphs/XboxGlyphArt.cpp
   glyphs/XboxGlyphArt.h
+  title/ClothInterpolation.cpp
+  title/ClothInterpolation.h
   title/FadeInterpolation.cpp
   title/FadeInterpolation.h
   title/ItemGrant.cpp

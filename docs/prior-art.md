@@ -23,7 +23,8 @@ What we take, each checked against the binary before use:
   `cM_rndFX` (`0x02019788`/`0x020198d8`/`0x02019918`), sound starts (`0x0201eba0`,
   `0x025e1988`..`0x025e1aa4`), the HD light-count clear `0x0273841c`.
 - The key animator `0x027df40c` as the one place every material animation evaluates.
-- The KoRL sail packet upload `0x021625dc` and `dCloth 0x0251d864` as the cloth sites.
+- The KoRL sail packet upload `0x021625dc` and `dCloth 0x0251d864` as the cloth sites (`0x0251d864`
+  checked: the draw phase's vertex copy, packet in r3).
 
 What we do not take: its camera and model cut detection is distance thresholds (800 units, 45°,
 fovy 20), which a fast follow camera can cross and a short cut need not.
@@ -34,8 +35,7 @@ Candidates read at `f10b5662`, not yet checked against our binary:
 - Shared timer `dTimer_c::_execute 0x025C5A8C` is in TIMER's draw slot: counts down twice a tick
   (`countdown.cpp`).
 - Every 3D line (`mDoExt_3DlineMat1` uploads `0x025EC62C`, `0x025ED1BC`; count `+0x17C`, lines
-  `+0x184`), cloth uploads per kind, `dCloth` buffers `[2]` at `+0xB0/+0xB8/+0xC0` (big-endian;
-  their issue #36).
+  `+0x184`), cloth uploads per kind (`dCloth` buffers `[2]` at `+0xB0/+0xB8/+0xC0` checked).
 - Torch light easing `0x025615B8` (`tevstr+0x84..0x8C`); random seeds `0x101FF9D4` (3 words).
 - Aim reticle `0x023D813C`/`0x020CBB70` around `mDoLib_projectViewport 0x025F1018`; Z-target arrow
   `dAttDraw_c::draw 0x024EC1C8` (position in r4).
@@ -68,7 +68,6 @@ Candidates read at `2f562805`, not yet checked against our binary:
   `0x02176B6C`, Lwood sway `0x021B6C94`, Jabun lamp `0x0224864C`/`0x0224868C`).
 - Draw methods advancing state: Morth `0x021A6F64` (`+0x576`), FAN `0x02131FF8` (`+0x634`), Helmaroc
   tail `0x020660E0` (`+0x40A`), palette blend timer `0x0255817C`.
-- `dCloth` move `0x0251D4EC` flips `+0x1C0`, so the previous tick's points are the other buffer.
 - HUD layout animation (`AnimTransform` frame `+0xC`, step `0x02872DFC`), fades (`0x027ECED4`,
   `calcFade 0x025F06A8`), sun time `0x10475A68+0x1020`, lava `0x02524CA0`, particle texture scroll
   truncated at `0x02832708`/`0x0283091C`, shoreline foam btk `0x0207A05C`.

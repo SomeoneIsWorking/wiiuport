@@ -13,6 +13,7 @@
 #include "wiiuport/guest/CallerCensus.h"
 #include "wiiuport/input/InputDriver.h"
 #include "wiiuport/title/CameraCuts.h"
+#include "wiiuport/title/ClothInterpolation.h"
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/EnvironmentInterpolation.h"
 #include "wiiuport/title/FadeInterpolation.h"
@@ -139,6 +140,9 @@ class Runtime {
          .writeWords = &GuestPatching::WriteDataWords}};
     title::RopeInterpolation m_ropeInterpolation{
         {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
+    title::ClothInterpolation m_clothInterpolation{{.registerProbe = &GuestCallProbes::Register,
+                                                    .readWords = &GuestPatching::ReadWords,
+                                                    .writeWords = &GuestPatching::WriteDataWords}};
     title::SeaInterpolation m_seaInterpolation{
         {.readWords = &GuestPatching::ReadWords, .writeWords = &GuestPatching::WriteDataWords}};
     title::CameraCuts m_cameraCuts{
@@ -156,7 +160,8 @@ class Runtime {
                  return m_cameraCuts.startsShot(camera);
              },
          .midPaint = {&m_particleInterpolation, &m_environmentInterpolation, &m_fadeInterpolation},
-         .drawPhase = {&m_seaInterpolation, &m_ropeInterpolation, &m_materialInterpolation}}};
+         .drawPhase = {&m_seaInterpolation, &m_ropeInterpolation, &m_clothInterpolation,
+                       &m_materialInterpolation}}};
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
     frame::PresentPacing m_scanOut{&frame::PresentPacing::Clock::now};
@@ -175,6 +180,7 @@ class Runtime {
         .fadeInterpolation = m_fadeInterpolation,
         .seaInterpolation = m_seaInterpolation,
         .ropeInterpolation = m_ropeInterpolation,
+        .clothInterpolation = m_clothInterpolation,
         .materialInterpolation = m_materialInterpolation,
         .stageWarp = m_stageWarp,
         .itemGrant = m_itemGrant,

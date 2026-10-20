@@ -45,6 +45,7 @@ void Runtime::installHooks() {
     m_cameraCuts.install();
     m_particleInterpolation.install();
     m_fadeInterpolation.install();
+    m_clothInterpolation.install();
     m_materialInterpolation.install();
     m_paint.setPaintListener([this] {
         m_sixty.onPaint();

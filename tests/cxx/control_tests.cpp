@@ -88,6 +88,8 @@ struct Fixture {
         {.registerProbe = &noRegistration, .readWords = &noReadWords, .writeWords = nullptr}};
     wiiuport::title::RopeInterpolation ropeInterpolation{
         {.readWords = &noReadWords, .writeWords = nullptr}};
+    wiiuport::title::ClothInterpolation clothInterpolation{
+        {.registerProbe = &noRegistration, .readWords = &noReadWords, .writeWords = nullptr}};
     wiiuport::title::SeaInterpolation seaInterpolation{
         {.readWords = &noReadWords, .writeWords = nullptr}};
     wiiuport::title::DrawInterpolation drawInterpolation{{.registerProbe = &noRegistration,
@@ -124,6 +126,7 @@ struct Fixture {
         .fadeInterpolation = fadeInterpolation,
         .seaInterpolation = seaInterpolation,
         .ropeInterpolation = ropeInterpolation,
+        .clothInterpolation = clothInterpolation,
         .materialInterpolation = materialInterpolation,
         .stageWarp = stageWarp,
         .itemGrant = itemGrant,
@@ -464,6 +467,7 @@ void everyReportIsOneJsonDocument() {
                                                           {"GET", "/sea"},
                                                           {"GET", "/fade"},
                                                           {"GET", "/rope"},
+                                                          {"GET", "/cloth"},
                                                           {"GET", "/materials"},
                                                           {"GET", "/environment"},
                                                           {"GET", "/pacing"},
