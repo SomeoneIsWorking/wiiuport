@@ -523,7 +523,9 @@ A model can take another model's joint by copy before its own view pass: Link's 
 the in-between paint they already hold the body's blend. Each joint blended in a draw phase is kept
 as `held -> blended`; a later model holding exactly a `held` matrix is drawn at that blend, not
 blended again (`jointsCopied`). Before this the hands were blended twice and trailed the arms
-(ISSUE-008).
+(ISSUE-008). A joint whose words are not a matrix is drawn as it is (`jointsKept`) and the rest of
+its model still blends: the hands model never calculates its world root, which holds whatever the
+heap left there, and abandoning the model for it left the hands at the tick's own pose.
 
 **Measured** (`scratch/drawphase/idle.py`, Link idle, camera still, 5 consecutive presents per arm,
 pixels changed in the centre box): off `5233, 133, 4870, 83`, on `2832, 3116, 2701, 2373`. Walk
