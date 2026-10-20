@@ -570,6 +570,18 @@ corner and every height to the midpoint of the last two ticks', unless the corne
 gated ticks, every hold restored. The grid blend is covered by `tests/cxx/sea_interpolation_tests.cpp`
 only: the test save's sea is culled where Link stands, so it has not yet been seen live.
 
+**The screen fade.** A warp's fade is HD's fade manager (`*(0x101F86B4)`), whose fader at `+0x440`
+(status `+0`: 0 opaque, 1 clear, 2 fading in, 3 fading out; length u16 `+4`, frame u16 `+6`, colour
+RGBA8 `+8`) is stepped by `0x027eced4` from `0x02728a74`, in the frame logic after the draw half, so
+once a tick. The manager registers its draw (`0x02728c54`) with the render pass (`0x027288c0`), which
+copies the fader's colour at paint time; a clear fader is skipped whatever its alpha byte holds (255
+before a fade-out). So both paints of a tick showed one alpha: mean brightness through a warp's
+fade-out came in pairs, `428.5, 428.5, 419.2, 419.2, 410.4` (`scratch/drawphase/fade.py`).
+`title/FadeInterpolation` probes the draw: the paint drawing the tick as it is records the alpha it
+shows (0 when clear), and the paint after a gated draw phase is drawn at the midpoint of that and
+now, put back when the paint ends. Measured: out `428.9, 424.3, 419.5, 415.7, 410.8`, in `99.1,
+110.7, 120.0, 128.4, 136.5`, and no dark paint where the fade starts.
+
 **The grappling rope.** `daHimo2_c` (process 446, profile `0x101b6e7c`) places the rope in execute
 (`0x0216e194`): hand `+0x408`, hook `+0x414`, rope end `+0x3d0`, and 98 segments from `+0x450`, stride
 `0x24`, position at `+0x10`, live from the index at `+0x3e8`. Its draw (`0x0216ca5c`) builds the line

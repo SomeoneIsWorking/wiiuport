@@ -76,6 +76,8 @@ struct Fixture {
     wiiuport::frame::FrameCapture capture{&refuseCapture};
     wiiuport::frame::FrameShapeLog shapeLog;
     wiiuport::guest::CallerCensus callers{&noRegistration, &noGuestBytes};
+    wiiuport::title::FadeInterpolation fadeInterpolation{
+        {.registerProbe = &noRegistration, .readWords = &noReadWords, .writeWords = nullptr}};
     wiiuport::title::ParticleInterpolation particleInterpolation{
         {.registerProbe = &noRegistration, .readWords = &noReadWords, .writeWords = nullptr}};
     wiiuport::title::EnvironmentInterpolation environmentInterpolation{
@@ -119,6 +121,7 @@ struct Fixture {
         .drawInterpolation = drawInterpolation,
         .cameraCuts = cameraCuts,
         .particleInterpolation = particleInterpolation,
+        .fadeInterpolation = fadeInterpolation,
         .seaInterpolation = seaInterpolation,
         .ropeInterpolation = ropeInterpolation,
         .materialInterpolation = materialInterpolation,
@@ -459,6 +462,7 @@ void everyReportIsOneJsonDocument() {
                                                           {"GET", "/interpolation"},
                                                           {"GET", "/particles"},
                                                           {"GET", "/sea"},
+                                                          {"GET", "/fade"},
                                                           {"GET", "/rope"},
                                                           {"GET", "/materials"},
                                                           {"GET", "/environment"},

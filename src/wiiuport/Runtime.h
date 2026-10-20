@@ -15,6 +15,7 @@
 #include "wiiuport/title/CameraCuts.h"
 #include "wiiuport/title/DrawInterpolation.h"
 #include "wiiuport/title/EnvironmentInterpolation.h"
+#include "wiiuport/title/FadeInterpolation.h"
 #include "wiiuport/title/ItemGrant.h"
 #include "wiiuport/title/LogicGate.h"
 #include "wiiuport/title/MaterialInterpolation.h"
@@ -119,6 +120,9 @@ class Runtime {
                                    [this] {
                                        return m_logic.enable();
                                    }}};
+    title::FadeInterpolation m_fadeInterpolation{{.registerProbe = &GuestCallProbes::Register,
+                                                  .readWords = &GuestPatching::ReadWords,
+                                                  .writeWords = &GuestPatching::WriteDataWords}};
     title::ParticleInterpolation m_particleInterpolation{
         {.registerProbe = &GuestCallProbes::Register,
          .readWords = &GuestPatching::ReadWords,
@@ -151,7 +155,7 @@ class Runtime {
              [this](uint32_t camera) {
                  return m_cameraCuts.startsShot(camera);
              },
-         .midPaint = {&m_particleInterpolation, &m_environmentInterpolation},
+         .midPaint = {&m_particleInterpolation, &m_environmentInterpolation, &m_fadeInterpolation},
          .drawPhase = {&m_seaInterpolation, &m_ropeInterpolation, &m_materialInterpolation}}};
     frame::RecordingSnapshot m_snapshot;
     frame::PresentPacing m_pacing{&frame::PresentPacing::Clock::now};
@@ -168,6 +172,7 @@ class Runtime {
         .drawInterpolation = m_drawInterpolation,
         .cameraCuts = m_cameraCuts,
         .particleInterpolation = m_particleInterpolation,
+        .fadeInterpolation = m_fadeInterpolation,
         .seaInterpolation = m_seaInterpolation,
         .ropeInterpolation = m_ropeInterpolation,
         .materialInterpolation = m_materialInterpolation,
