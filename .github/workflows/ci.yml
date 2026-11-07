@@ -82,7 +82,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: SomeoneIsWorking/re-harness
-          ref: 1f41ddc372e0003b7a011650a184bdd07f546de5
+          ref: ff9ebfad9b9a7713b4156302d56ea639e7cce916
           path: build/re-harness
 
       - name: Run every gate
