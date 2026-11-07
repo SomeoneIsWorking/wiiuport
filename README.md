@@ -18,3 +18,5 @@ The upstream fork is pinned as the `external/cemu` submodule. This repository co
 no game files, keys, or anything derived from them, and never will.
 
 First consumer: [`setsail`](../setsail) — The Legend of Zelda: The Wind Waker HD.
+
+Built with AI assistance (Claude and other LLMs).
