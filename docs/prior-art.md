@@ -46,6 +46,35 @@ Candidates read at `f10b5662`, not yet checked against our binary:
 - New particles drawn back along their first step (velocity `+0x34`, emitter `0x104B5730`).
 - Model UBO update `0x027F5018` runs on a job thread while the main thread draws (their issue #68).
 
+Read again at `19e1fcc9` (v0.5.1, 2026-11-06), not yet checked against our binary. Their v0.5.0 claims
+interpolated play matches 30 fps logic; "True 60" is retired and an image-generated 60 is experimental.
+- Leaks into the next step, closed as one class (`179a73ed`): every actor drawn on a hold pass is saved
+  before its draw (`fopAc_Draw 0x025D4654`, size from profile `+0x10`) and put back after the paint,
+  skipping `+0..+0xF8` (process and draw tags, `6bb4bf1f`, `c6fd5083`); `J3DModel::calc 0x027F4D5C`
+  in a kept draw saves the joint world matrices (model `+0x2C`, jnt `+0x10`/`+0x2C`). The one-shot
+  `NODRAW` request is re-applied after the save (`1e466d52`).
+- Draw-slot logic skipped on hold passes: Game Over state machine `0x025499A0` (`d7d1a071`),
+  `ResLoadTask::calc 0x0260C74C` (`3d2a018f`); a draw-time `cM_rnd` returns the next value without
+  advancing the seeds (`1ccd83a1`).
+- Camera: shake added after the blend (store `0x024F8430`, body `cam+0x248`, shakes `+0x56C`/`+0x578`),
+  HD zoom addCalc once a step (`+0x730`/`+0x734`, `6bfa85cc`); letterbox `CalcTrimSize 0x024FF8A0`
+  (`+0x5FC`/`+0x600`, `8cabf84f`); play window `0x10474B7C` and blended camera words restored before
+  logic (`f9e1bf7d`); culling frustum from the blended fovy (clipper `0x1048CFF0`, `55efb4f1`). Cuts
+  are still distance thresholds (800), no `dCamera_c::Reset` hook.
+- Sky drawn from the drawn eye: `dKyr_drawSun 0x0256F1C4`, `dKyr_drawLenzflare 0x02570210`, stars
+  `0x02574144`, sea spray `dKyr_drawSibuki 0x02571B1C` (`f3dd8ed8`, `db103725`).
+- Draws that advance state: Puppet Ganon (`daBgn_Draw 0x0207B2CC`, parts `+0x4D0` stride `0x3F0`) and
+  Jabun's cave (`draw_flashing_normal 0x02313E0C`, parts `+0x9AC` stride `0x90`) drawn from the logic
+  pass's bytes; `McaMorf::play 0x025E535C`/`0x025E65FC` a no-op on hold passes; firefly is `nh`
+  `0x021E1338 +0x834` (`55efb4f1`, `2c39539b`, `d4660fa7`).
+- Material and scroll: vrbox2 SRTs (speed `+0x3C8`), magma `0x0258CA60`, eye texmtx
+  `daPy_matAnm_c::calc 0x02413E80`, ship hull `+0x6B8` (`daShip_c::draw 0x0247255C`), fallen-tree
+  alpha `dTree_packet_c::update 0x025CA6EC`, plant hit slots (grass `+0x18F0C`, tree `+0x2A9C`,
+  flower `+0x35BC`), fades (`calcFade 0x025F06A8`, GC fade `0x0252F5A0`, fader `*0x101F86B4`).
+- Lines and trails: `mDoExt_3DlineMat0` `0x025EA548`/`0x025EAF58`, sword blur `0x024142F0`, boomerang
+  `0x020CDF78`, hookshot `daHookshot_shape_draw 0x021768B0` (count `+0xD504`), `dChain` `0x0251AE90`.
+- Shadows: cascade splits `updateShadowSurface 0x027987BC`, `uploadShadowEnvironment 0x027FB678`.
+
 ## flossbud/WWHDRecomp
 
 MPL-2.0, no game data. Read at `0f4161c3`. "True 60": every vsync runs the game frame with ~450
